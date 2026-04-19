@@ -9,6 +9,7 @@ use crate::models::GameState;
 use crate::tools;
 
 pub mod executor;
+pub mod prompt;
 
 const MAX_TOOL_ITERATIONS: usize = 10;
 
