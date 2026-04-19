@@ -151,6 +151,7 @@ impl LlmClient {
             "model": self.model,
             "messages": build_messages(system, messages),
             "stream": false,
+            "think": false,
             "options": {
                 "temperature": 0.85,
                 "top_p": 0.95,
