@@ -1,0 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0b0c12;
+  --surf: #11121a;
+  --elev: #171825;
+  --bord: #23243a;
+  --gold: #c8962a;
+  --goldl: #e8c46a;
+  --text: #ece2ca;
+  --dim: #6e7492;
+  --red: #9b2535;
+  --grn: #2a7a50;
+  --amber: #b07820;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Lora', Georgia, serif;
+}
+
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--bord); border-radius: 2px; }
