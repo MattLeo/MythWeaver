@@ -1,2 +1,17 @@
+# Rust
 chronicles/backend/target/
 chronicles/backend/Cargo.lock
+
+# SQLite database
+chronicles/backend/data/
+
+# Environment
+chronicles/backend/.env
+
+# Node
+chronicles/frontend/node_modules/
+chronicles/frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
