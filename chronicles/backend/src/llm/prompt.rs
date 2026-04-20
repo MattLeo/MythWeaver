@@ -1,10 +1,9 @@
-use crate::models::{Player, CampaignTime, GameState};
+use crate::models::{Player, CampaignTime};
 
 pub fn build_system_prompt(
     player: &Player,
     time: Option<&CampaignTime>,
     session_summaries: &[String],
-    game_state: &GameState,
 ) -> String {
     let time_str = time.map(|t| {
         format!("Current time: {} of Day {}, {} season.", t.time_of_day, t.current_day, t.season)
@@ -22,11 +21,7 @@ pub fn build_system_prompt(
         )
     };
 
-    let state_guidance = game_state_guidance(game_state);
-
-    format!(r#"/no_think
-
-You are the Dungeon Master for MythWeaver, a collaborative D&D 5th Edition adventure.
+    format!(r#"You are the Dungeon Master for MythWeaver, a collaborative D&D 5th Edition adventure.
 
 PLAYER CHARACTER:
 - Name: {name} | Race: {race} | Class: {class} Lv.{level} | Background: {background}
@@ -95,32 +90,5 @@ TOOL USAGE
             .unwrap_or_default(),
         time = time_str,
         summaries = summaries_str,
-        state = format!("{:?}", game_state).to_uppercase(),
-        state_guidance = state_guidance,
     )
 }
-
-/*
-fn game_state_guidance(state: &GameState) -> &'static str {
-    match state {
-        GameState::Exploration => {
-            "Focus on atmosphere, discovery, and world-building. Check for random events when the player moves or time passes. Use move_player when the player changes locations."
-        }
-        GameState::Combat => {
-            "Describe combat vividly. Use request_roll for attack rolls and saving throws. Apply damage with apply_damage. Award XP after combat with award_experience. Track ability uses."
-        }
-        GameState::Dialogue => {
-            "Voice NPCs distinctly. Honor their disposition and personality. Update NPC disposition if the player's actions would affect the relationship."
-        }
-        GameState::Rest => {
-            "Describe the rest environment. Use the rest tool to refresh abilities. Advance time appropriately."
-        }
-        GameState::Leveling => {
-            "Narrate the character's growth. Call level_up to apply mechanical changes. If ASI is available, present the choice to the player before calling apply_asi."
-        }
-        GameState::Shopping => {
-            "Describe available wares. Create items the merchant would reasonably carry. Handle gold transactions with update_gold."
-        }
-    }
-}
-    */

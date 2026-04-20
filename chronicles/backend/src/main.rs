@@ -21,10 +21,8 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Load .env
     dotenvy::dotenv().ok();
 
-    // Init logging
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "mythweaver=debug,tower_http=info".into()),
@@ -34,47 +32,42 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting MythWeaver backend...");
 
-    // Config
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite:./data/mythweaver.db".to_string());
 
-    let ollama_url = std::env::var("OLLAMA_URL")
-        .unwrap_or_else(|_| "http://localhost:11434".to_string());
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .expect("ANTHROPIC_API_KEY must be set");
 
-    let ollama_model = std::env::var("OLLAMA_MODEL")
-        .unwrap_or_else(|_| "lukey03/qwen3.5-9b-abliterated".to_string());
+    let model = std::env::var("ANTHROPIC_MODEL")
+        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
 
     let port = std::env::var("PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse::<u16>()
         .unwrap_or(3001);
 
-    // Database
     tracing::info!("Connecting to database: {}", database_url);
     let pool = db::connect(&database_url).await?;
     db::run_migrations(&pool).await?;
 
-    // LLM client
-    tracing::info!("Connecting to Ollama: {} (model: {})", ollama_url, ollama_model);
-    let llm = LlmClient::new(ollama_url, ollama_model);
+    tracing::info!("Using Anthropic model: {}", model);
+    let llm = LlmClient::new(api_key, model);
 
     let app_state = Arc::new(AppState { pool, llm });
 
-    // CORS
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Routes
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/campaigns", post(api::create_campaign))
         .route("/api/campaigns/:id", get(api::get_campaign_state))
+        .route("/api/campaigns/:id/player-state", get(api::get_player_state))
         .route("/api/campaigns/:id/session", post(api::start_session))
         .route("/api/campaigns/:campaign_id/sessions/:session_id/end", post(api::end_session))
         .route("/api/message", post(api::send_message))
-        .route("/api/campaigns/:id/player-state", get(api::get_player_state))
         .layer(cors)
         .with_state(app_state);
 

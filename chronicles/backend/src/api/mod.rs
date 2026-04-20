@@ -6,8 +6,8 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::db::{campaign, player, world, time};
-use crate::llm::{LlmClient, ChatMessage, prompt};
+use crate::db::{campaign, player, world, items, companions, time};
+use crate::llm::{ChatMessage, prompt};
 use crate::models::*;
 use crate::AppState;
 
@@ -77,15 +77,15 @@ pub async fn get_campaign_state(
     }
 }
 
-pub async fn get_player_stats(
+pub async fn get_player_state(
     State(state): State<Arc<AppState>>,
     Path(campaign_id): Path<String>,
 ) -> impl IntoResponse {
-    let pool = $state.pool;
+    let pool = &state.pool;
 
-    let p = match player::get_player_by_id(pool, &campaign_id).await {
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
         Ok(Some(p)) => p,
-        _ => return (StatusCode::NOT_FOUND Json(json!({"error": "Player not found"}))),
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
     };
 
     let abilities = world::get_abilities(pool, &p.id, "player").await.unwrap_or_default();
@@ -194,7 +194,7 @@ pub async fn send_message(
         .map(GameState::from_str)
         .unwrap_or(GameState::Exploration);
 
-    let system = prompt::build_system_prompt(&p, camp_time.as_ref(), &summaries, &game_state);
+    let system = prompt::build_system_prompt(&p, camp_time.as_ref(), &summaries);
 
     // Build message history from this session
     let history = campaign::get_session_messages(pool, session_id).await
@@ -260,14 +260,14 @@ pub async fn send_message(
         })));
     }
 
-    // Save assistant response
-    let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &result.narrative, None).await;
-
-    // Exctract state tag from narrative
+    // Extract state tag from narrative
     let state_regex = regex::Regex::new(r"\[STATE:(\w+)\]").unwrap();
     let new_state = state_regex.captures(&result.narrative)
         .map(|c| c[1].to_string());
-    let clean_narrative = state_regex.replace(&result.narrative, "").trim().to_string();
+    let clean_narrative = state_regex.replace_all(&result.narrative, "").trim().to_string();
+
+    // Save clean narrative to DB
+    let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &clean_narrative, None).await;
 
     // Return narrative response
     (StatusCode::OK, Json(json!({

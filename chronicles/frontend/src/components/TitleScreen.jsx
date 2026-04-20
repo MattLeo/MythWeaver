@@ -38,7 +38,7 @@ export default function TitleScreen({ onStart }) {
           Your choices shape the world. Your story is your own.
         </p>
         <button className="btn-gold" onClick={onStart}>Begin Your Legend</button>
-        <p className="sig">Created by Matt Taylor · Powered by Ollama · D&D 5e</p>
+        <p className="sig">Created by Matt Taylor · Powered by Anthropic · D&D 5e</p>
       </div>
     </>
   )
