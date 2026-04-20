@@ -42,10 +42,10 @@ export default function App() {
       setSession(result.session)
       setPhase(PHASE.GAME)
 
-      // Fetch initial player state
       await refreshPlayerState(result.campaign.id)
 
-      // Start the adventure with an opening message
+      setLoading(true)
+
       await sendToBackend(
         result.campaign.id,
         result.session.id,
