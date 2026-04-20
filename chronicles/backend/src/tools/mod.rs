@@ -23,6 +23,7 @@ fn exploration_tools() -> Vec<Value> {
     tools.extend(time_tools());
     tools.extend(event_tools());
     tools.extend(session_tools());
+    tools.extend(request_roll_tool());
     tools
 }
 
@@ -44,6 +45,7 @@ fn dialogue_tools() -> Vec<Value> {
     tools.extend(world_mutation_tools());
     tools.extend(companion_query_tools());
     tools.extend(session_tools());
+    tools.extend(request_roll_tool());
     tools
 }
 
@@ -361,19 +363,7 @@ fn item_tools() -> Vec<Value> {
 
 fn mechanical_tools() -> Vec<Value> {
     vec![
-        tool("request_roll",
-            "Ask the player to roll dice. The frontend will animate the roll and automatically return the result.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "die": { "type": "string", "enum": ["d4", "d6", "d8", "d10", "d12", "d20"] },
-                    "skill": { "type": "string", "description": "e.g. 'Stealth', 'Perception', 'Constitution saving throw'" },
-                    "dc": { "type": "integer", "description": "Difficulty class for the check" },
-                    "reason": { "type": "string", "description": "Brief narrative reason for the roll" }
-                },
-                "required": ["die", "skill", "dc", "reason"]
-            })
-        ),
+        request_roll_tool(),
         tool("apply_damage",
             "Apply damage to the player. Handles temp HP first, then current HP.",
             json!({
@@ -672,6 +662,22 @@ fn session_tools() -> Vec<Value> {
             })
         ),
     ]
+}
+
+fn request_roll_tool() -> Value {
+    tool("request_roll",
+        "Ask the player to roll dice. The frontend will animate the roll and automatically return the result.",
+        json!({
+            "type": "object",
+            "properties": {
+                "die": { "type": "string", "enum": ["d4", "d6", "d8", "d10", "d12", "d20"] },
+                "skill": { "type": "string", "description": "e.g. 'Stealth', 'Perception', 'Constitution saving throw'" },
+                "dc": { "type": "integer", "description": "Difficulty class for the check" },
+                "reason": { "type": "string", "description": "Brief narrative reason for the roll" }
+            },
+            "required": ["die", "skill", "dc", "reason"]
+        })
+    )
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────

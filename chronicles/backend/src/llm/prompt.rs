@@ -67,6 +67,7 @@ TOOL USAGE
 - Use query_player_state at the start of any complex scene to orient yourself.
 - Chain tools efficiently — gather information first, then act, then narrate.
 - Never mention tool calls or database operations in your narrative.
+- Always call create_location before move_player. Use the id returned by create_location, not an invented string.
 "#,
         name = player.name,
         race = player.race,

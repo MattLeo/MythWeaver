@@ -177,10 +177,19 @@ pub async fn execute_tool(
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
             let loc_id = args["location_id"].as_str().unwrap_or("");
-            player::update_player_location(pool, &p.id, loc_id).await?;
+            
+            // Verify location exists first
             let loc = world::get_location(pool, loc_id).await?;
-            Ok(json!({"message": "Player moved", "new_location": loc}))
-        }
+            if loc.is_none() {
+                return Ok(json!({
+                    "error": "Location not found. You must call create_location first, then use the returned ID to move the player.",
+                    "location_id": loc_id
+                }));
+            }
+    
+    player::update_player_location(pool, &p.id, loc_id).await?;
+    Ok(json!({"message": "Player moved", "new_location": loc}))
+}
 
         "update_gold" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
