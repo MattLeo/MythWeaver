@@ -23,7 +23,7 @@ fn exploration_tools() -> Vec<Value> {
     tools.extend(time_tools());
     tools.extend(event_tools());
     tools.extend(session_tools());
-    tools.extend(request_roll_tool());
+    tools.push(request_roll_tool());
     tools
 }
 
@@ -45,7 +45,7 @@ fn dialogue_tools() -> Vec<Value> {
     tools.extend(world_mutation_tools());
     tools.extend(companion_query_tools());
     tools.extend(session_tools());
-    tools.extend(request_roll_tool());
+    tools.push(request_roll_tool());
     tools
 }
 
