@@ -74,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/campaigns/:id/session", post(api::start_session))
         .route("/api/campaigns/:campaign_id/sessions/:session_id/end", post(api::end_session))
         .route("/api/message", post(api::send_message))
+        .route("/api/campaigns/:id/player-state", get(api::get_player_state))
         .layer(cors)
         .with_state(app_state);
 

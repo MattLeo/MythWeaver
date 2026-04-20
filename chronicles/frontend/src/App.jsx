@@ -64,8 +64,11 @@ export default function App() {
 
   const refreshPlayerState = async (campaignId) => {
     try {
-      const state = await api.getCampaignState(campaignId || campaign?.id)
+      const state = await api.getPlayerState(campaignId || campaign?.id)
       if (state.player) setPlayer(state.player)
+      if (state.abilities) setAbilities(state.abilities)
+      if (state.items) setItems(state.items)
+      if (state.companions) setCompanions(state.companions)
       if (state.time) setCampaignTime(state.time)
     } catch (e) {
       console.error('Failed to refresh player state:', e)
@@ -107,6 +110,11 @@ export default function App() {
           tools_used: result.tools_used || [],
           id: Date.now()
         }])
+
+      // Setting new game state based on received narrative  
+      if (result.new_state) {
+        setGameState(result.new_state)
+      }
 
         // Refresh player state after each DM response (HP, items, etc. may have changed)
         await refreshPlayerState(campaignId)

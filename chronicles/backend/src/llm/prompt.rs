@@ -36,8 +36,14 @@ PLAYER CHARACTER:
 
 {time}{summaries}
 
-CURRENT GAME STATE: {state}
-{state_guidance}
+GAME STATE
+- At the end of every response, always include a state tag on its own line: [STATE:exploration], [STATE:combat], [STATE:dialogue], [STATE:rest], [STATE:leveling], or [STATE:shopping]
+- Use combat when an enemy is actively hostile and fighting has begun
+- Use dialogue when in conversation with an NPC
+- Use rest when the player is taking a short or long rest
+- Use leveling when the player has just gained a level
+- Use shopping when buying or selling items
+- Use exploration for everything else
 
 WORLD-BUILDING
 - The world is a blank canvas built collaboratively with the player.
@@ -94,6 +100,7 @@ TOOL USAGE
     )
 }
 
+/*
 fn game_state_guidance(state: &GameState) -> &'static str {
     match state {
         GameState::Exploration => {
@@ -116,3 +123,4 @@ fn game_state_guidance(state: &GameState) -> &'static str {
         }
     }
 }
+    */

@@ -77,6 +77,31 @@ pub async fn get_campaign_state(
     }
 }
 
+pub async fn get_player_stats(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = $state.pool;
+
+    let p = match player::get_player_by_id(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND Json(json!({"error": "Player not found"}))),
+    };
+
+    let abilities = world::get_abilities(pool, &p.id, "player").await.unwrap_or_default();
+    let all_items = items::get_player_items(pool, &p.id).await.unwrap_or_default();
+    let active_companions = companions::get_active_companions(pool, &campaign_id).await.unwrap_or_default();
+    let camp_time = time::get_campaign_time(pool, &campaign_id).await.ok().flatten();
+
+    (StatusCode::OK, Json(json!({
+        "player": p,
+        "abilities": abilities,
+        "items": all_items,
+        "companions": active_companions,
+        "time": camp_time
+    })))
+}
+
 // ─── Session ──────────────────────────────────────────────────────────────────
 
 pub async fn start_session(
@@ -238,10 +263,17 @@ pub async fn send_message(
     // Save assistant response
     let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &result.narrative, None).await;
 
+    // Exctract state tag from narrative
+    let state_regex = regex::Regex::new(r"\[STATE:(\w+)\]").unwrap();
+    let new_state = state_regex.captures(&result.narrative)
+        .map(|c| c[1].to_string());
+    let clean_narrative = state_regex.replace(&result.narrative, "").trim().to_string();
+
     // Return narrative response
     (StatusCode::OK, Json(json!({
         "type": "narrative",
-        "content": result.narrative,
+        "content": clean_narrative,
+        "new_state": new_state,
         "tools_used": result.tool_calls_made.iter().map(|t| &t.tool_name).collect::<Vec<_>>()
     })))
 }

@@ -47,3 +47,13 @@ export async function sendMessage({ campaignId, sessionId, content, gameState, r
   if (!res.ok) throw new Error(`Failed to send message`)
   return res.json()
 }
+
+const refreshPlayerState = async (campaignId) => {
+  try {
+    const state = await api.getCampaignState(campaignId || campaign?.id)
+    if (state.player) setPlayer(state.player)
+    if (state.time) setCampaignTime(state.time)
+  } catch (e) {
+    console.error('Failed to refresh player state:', e)
+  }
+}
