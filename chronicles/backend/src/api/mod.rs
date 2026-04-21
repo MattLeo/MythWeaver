@@ -226,14 +226,16 @@ pub async fn send_message(
                     .unwrap_or_else(|_| "Your attack misses.".to_string());
                 let (narrative, _) = strip_state_tag(&raw);
                 let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &narrative, None).await;
-                let combat_turns = resolve_combat_turns(pool, campaign_id, &state.llm, &system).await;
+                let (combat_turns, player_downed) = resolve_combat_turns(pool, campaign_id, &state.llm, &system).await;
                 for t in &combat_turns {
                     let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", t, None).await;
                 }
                 return (StatusCode::OK, Json(json!({
                     "type": "narrative",
                     "content": narrative,
-                    "combat_turns": combat_turns
+                    "combat_turns": combat_turns,
+                    "player_downed": player_downed,
+                    "new_state": if player_downed { "combat" } else { "" }
                 })));
             }
 
@@ -258,14 +260,16 @@ pub async fn send_message(
                     })));
                 }
 
-                let combat_turns = resolve_combat_turns(pool, campaign_id, &state.llm, &system).await;
+                let (combat_turns, player_downed) = resolve_combat_turns(pool, campaign_id, &state.llm, &system).await;
                 for t in &combat_turns {
                     let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", t, None).await;
                 }
                 return (StatusCode::OK, Json(json!({
                     "type": "narrative",
                     "content": narrative,
-                    "combat_turns": combat_turns
+                    "combat_turns": combat_turns,
+                    "player_downed": player_downed,
+                    "new_state": if player_downed { "combat" } else { "" }
                 })));
             }
         }
@@ -322,7 +326,6 @@ pub async fn send_message(
         }
     };
 
-    // If declare_attack was called, send attack roll request
     if result.tool_calls_made.iter().any(|t| t.tool_name == "declare_attack") {
         if let Ok(Some(_)) = crate::db::combat::get_active_encounter(pool, campaign_id).await {
             let (clean_narrative, _) = strip_state_tag(&result.narrative);
@@ -343,10 +346,12 @@ pub async fn send_message(
         }
     }
 
-    // If start_combat was called, resolve any initial non-player turns
     let mut combat_turns: Vec<String> = vec![];
+    let mut player_downed = false;
     if result.tool_calls_made.iter().any(|t| t.tool_name == "start_combat") {
-        combat_turns = resolve_combat_turns(pool, campaign_id, &state.llm, &system).await;
+        let (turns, downed) = resolve_combat_turns(pool, campaign_id, &state.llm, &system).await;
+        combat_turns = turns;
+        player_downed = downed;
         for t in &combat_turns {
             let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", t, None).await;
         }
@@ -367,6 +372,7 @@ pub async fn send_message(
         "content": clean_narrative,
         "new_state": new_state,
         "combat_turns": combat_turns,
+        "player_downed": player_downed,
         "tools_used": result.tool_calls_made.iter().map(|t| &t.tool_name).collect::<Vec<_>>()
     })))
 }
@@ -378,8 +384,9 @@ async fn resolve_combat_turns(
     campaign_id: &str,
     llm: &crate::llm::LlmClient,
     system: &str,
-) -> Vec<String> {
+) -> (Vec<String>, bool) {
     let mut narratives = vec![];
+    let mut player_downed = false;
 
     loop {
         let enc = match crate::db::combat::get_active_encounter(pool, campaign_id).await.ok().flatten() {
@@ -414,6 +421,7 @@ async fn resolve_combat_turns(
                 narratives.push(narration);
 
                 if result["player_downed"].as_bool().unwrap_or(false) {
+                    player_downed = true;
                     break;
                 }
             }
@@ -452,7 +460,7 @@ async fn resolve_combat_turns(
         }
     }
 
-    narratives
+    (narratives, player_downed)
 }
 
 async fn check_random_event(
@@ -478,7 +486,6 @@ async fn seed_starting_equipment(
     player_id: &str,
     class: &str,
 ) {
-    // Each entry: (name, description, item_type, damage_die, damage_type, weapon_range, base_ac, armor_type, slot)
     type ItemDef<'a> = (&'a str, &'a str, &'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>, Option<i64>, Option<&'a str>, &'a str);
 
     let equipment: Vec<ItemDef> = match class {
@@ -551,7 +558,6 @@ async fn seed_starting_equipment(
         }
     }
 
-    // Recalculate AC after equipping all starting gear
     if let Err(e) = items::recalculate_ac(pool, player_id).await {
         tracing::warn!("Failed to recalculate AC after seeding equipment: {}", e);
     }

@@ -179,10 +179,24 @@ impl LlmClient {
     ) -> Result<AnthropicResponse> {
         let anthropic_messages = build_anthropic_messages(messages);
 
+        let rules_block = "You are a Dungeon Master. ABSOLUTE RULES: Never ask clarifying questions. Never list options. Never break character. When the player acts, act — call start_combat immediately if they attack, call request_roll if uncertain outcome. React, never ask.";
+
+        let system_blocks = json!([
+            {
+                "type": "text",
+                "text": rules_block,
+                "cache_control": {"type": "ephemeral"}
+            },
+            {
+                "type": "text",
+                "text": system
+            }
+        ]);
+
         let mut payload = json!({
             "model": self.model,
             "max_tokens": 1024,
-            "system": system,
+            "system": system_blocks,
             "messages": anthropic_messages,
         });
 
@@ -194,6 +208,7 @@ impl LlmClient {
             .post(ANTHROPIC_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("anthropic-beta", "prompt-caching-2024-07-31")
             .header("content-type", "application/json")
             .json(&payload)
             .send()

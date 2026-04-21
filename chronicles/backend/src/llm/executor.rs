@@ -104,7 +104,6 @@ pub async fn execute_tool(
                 args["notes"].as_str(),
             ).await?;
 
-            // Connect to another location if specified
             if let Some(connect_id) = args["connected_to"].as_str() {
                 world::connect_locations(
                     pool,
@@ -177,8 +176,7 @@ pub async fn execute_tool(
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
             let loc_id = args["location_id"].as_str().unwrap_or("");
-            
-            // Verify location exists first
+
             let loc = world::get_location(pool, loc_id).await?;
             if loc.is_none() {
                 return Ok(json!({
@@ -186,10 +184,10 @@ pub async fn execute_tool(
                     "location_id": loc_id
                 }));
             }
-    
-    player::update_player_location(pool, &p.id, loc_id).await?;
-    Ok(json!({"message": "Player moved", "new_location": loc}))
-}
+
+            player::update_player_location(pool, &p.id, loc_id).await?;
+            Ok(json!({"message": "Player moved", "new_location": loc}))
+        }
 
         "update_gold" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
@@ -252,7 +250,6 @@ pub async fn execute_tool(
             let item = items::get_item(pool, item_id).await?
                 .ok_or_else(|| anyhow::anyhow!("Item not found"))?;
 
-            // Handle consumable effects
             if item.item_type == "consumable" {
                 let effects = items::get_item_effects(pool, item_id).await?;
                 let mut result = json!({"item_used": item.name});
@@ -292,7 +289,6 @@ pub async fn execute_tool(
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
             let amount = args["amount"].as_i64().unwrap_or(0);
 
-            // Temp HP absorbs first
             let (damage_to_hp, new_temp) = if p.temp_hp > 0 {
                 let absorbed = amount.min(p.temp_hp);
                 (amount - absorbed, p.temp_hp - absorbed)
@@ -348,33 +344,31 @@ pub async fn execute_tool(
             let companion_id = args["companion_id"].as_str().unwrap_or("");
             let amount = args["amount"].as_i64().unwrap_or(0);
             let (new_hp, is_dead) = companions::apply_companion_damage(pool, companion_id, amount).await?;
-            Ok(json!({"new_hp": new_hp, "is_dead": is_dead}))
+            Ok(json!({
+                "new_hp": new_hp,
+                "is_dead": is_dead,
+                "companion_id": companion_id
+            }))
         }
 
         "apply_companion_healing" => {
             let companion_id = args["companion_id"].as_str().unwrap_or("");
             let amount = args["amount"].as_i64().unwrap_or(0);
             let new_hp = companions::apply_companion_healing(pool, companion_id, amount).await?;
-            Ok(json!({"new_hp": new_hp}))
+            Ok(json!({"new_hp": new_hp, "companion_id": companion_id}))
+        }
+
+        "move_companion" => {
+            let companion_id = args["companion_id"].as_str().unwrap_or("");
+            let loc_id = args["location_id"].as_str().unwrap_or("");
+            companions::update_companion(pool, companion_id, &json!({"location_id": loc_id})).await?;
+            Ok(json!({"message": "Companion moved"}))
         }
 
         "use_companion_ability" => {
             let ability_id = args["ability_id"].as_str().unwrap_or("");
             let remaining = world::use_ability(pool, ability_id, 1).await?;
             Ok(json!({"remaining_uses": remaining}))
-        }
-
-        "move_companion" => {
-            let companion_id = args["companion_id"].as_str().unwrap_or("");
-            let location_id = args["location_id"].as_str().unwrap_or("");
-            sqlx::query(
-                "UPDATE companions SET current_location_id = ?, updated_at = datetime('now') WHERE id = ?"
-            )
-            .bind(location_id)
-            .bind(companion_id)
-            .execute(pool)
-            .await?;
-            Ok(json!({"message": "Companion moved"}))
         }
 
         // ── Progression ───────────────────────────────────────────────────────
@@ -410,7 +404,6 @@ pub async fn execute_tool(
             let stat1 = args["stat1"].as_str().unwrap_or("");
             let stat2 = args["stat2"].as_str();
             player::apply_asi(pool, &p.id, stat1, stat2).await?;
-            // Recalculate AC in case CON or DEX changed
             items::recalculate_ac(pool, &p.id).await?;
             Ok(json!({"message": "ASI applied", "stat1": stat1, "stat2": stat2}))
         }
@@ -435,18 +428,16 @@ pub async fn execute_tool(
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
             let rest_type = args["rest_type"].as_str().unwrap_or("short");
 
-            // Refresh player abilities
             world::refresh_abilities(pool, &p.id, "player", rest_type).await?;
 
-            // Refresh active companion abilities
             let active = companions::get_active_companions(pool, campaign_id).await?;
             for companion in &active {
                 world::refresh_abilities(pool, &companion.id, "companion", rest_type).await?;
             }
 
-            // Long rest: restore HP and advance time to morning
             if rest_type == "long" {
                 player::update_player_hp(pool, &p.id, p.max_hp).await?;
+                player::update_death_saves(pool, &p.id, 0, 0, true, false).await?;
                 time::advance_time(pool, campaign_id, 8, "long rest").await?;
                 Ok(json!({
                     "message": "Long rest complete",
@@ -462,39 +453,6 @@ pub async fn execute_tool(
                 }))
             }
         }
-        // ── Combat ────────────────────────────────────────────────────────────
-
-        "start_combat" => {
-            if let Ok(Some(_)) = crate::db::combat::get_active_encounter(pool, campaign_id).await {
-                return Ok(json!({"error": "Combat already active. Use declare_attack to attack."}));
-            }
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let enemies = match args["enemies"].as_array() {
-                Some(arr) => arr.clone(),
-                None => serde_json::from_str::<Vec<Value>>(
-                    args["enemies"].as_str().unwrap_or("[]")
-                ).unwrap_or_default(),
-            };
-            if enemies.is_empty() {
-                return Ok(json!({"error": "No enemies provided to start_combat"}));
-            }
-            crate::db::combat::start_combat(pool, campaign_id, &p, enemies).await
-        }
-
-        "declare_attack" => {
-            let target_name = args["target_name"].as_str().unwrap_or("");
-            crate::db::combat::declare_attack_target(pool, campaign_id, target_name).await
-        }
-
-        "add_companion_to_combat" => {
-            let companion_id = args["companion_id"].as_str().unwrap_or("");
-            crate::db::combat::add_companion_to_combat(pool, campaign_id, companion_id).await
-        }
-
-        "add_ally_to_combat" => {
-            crate::db::combat::add_ally_to_combat(pool, campaign_id, args).await
-        }
 
         // ── Death ─────────────────────────────────────────────────────────────
         "roll_death_save" => {
@@ -505,7 +463,6 @@ pub async fn execute_tool(
             let nat_20 = args["natural_20"].as_bool().unwrap_or(false);
 
             if nat_20 {
-                // Natural 20: regain 1 HP
                 player::update_player_hp(pool, &p.id, 1).await?;
                 player::update_death_saves(pool, &p.id, 0, 0, true, false).await?;
                 return Ok(json!({"result": "Natural 20! Player regains 1 HP and stabilizes"}));
@@ -585,7 +542,6 @@ pub async fn execute_tool(
         }
 
         "add_session_note" => {
-            // Session notes are stored as world facts with category "session_note"
             let note = args["note"].as_str().unwrap_or("");
             world::add_world_fact(
                 pool,
@@ -596,6 +552,71 @@ pub async fn execute_tool(
                 None,
             ).await?;
             Ok(json!({"message": "Session note saved"}))
+        }
+
+        // ── Combat ────────────────────────────────────────────────────────────
+        "start_combat" => {
+            if let Ok(Some(_)) = crate::db::combat::get_active_encounter(pool, campaign_id).await {
+                return Ok(json!({"error": "Combat already active. Use declare_attack to attack."}));
+            }
+            let p = player::get_player_by_campaign(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
+
+            let raw_enemies = match args["enemies"].as_array() {
+                Some(arr) => arr.clone(),
+                None => serde_json::from_str::<Vec<Value>>(
+                    args["enemies"].as_str().unwrap_or("[]")
+                ).unwrap_or_default(),
+            };
+
+            let enemies: Vec<Value> = raw_enemies.iter().map(|e| {
+                let damage_str = e["damage"].as_str()
+                    .or(e["enemy_damage_die"].as_str())
+                    .unwrap_or("d6");
+                let damage_die = if let Some(pos) = damage_str.find('d') {
+                    let die_part = &damage_str[pos..];
+                    let end = die_part.find('+').or(die_part.find('-')).unwrap_or(die_part.len());
+                    format!("d{}", &die_part[1..end].trim())
+                } else {
+                    "d6".to_string()
+                };
+                let damage_bonus = if damage_str.contains('+') {
+                    damage_str.split('+').nth(1)
+                        .and_then(|s| s.trim().parse::<i64>().ok())
+                        .unwrap_or(0)
+                } else { 0 };
+
+                json!({
+                    "enemy_name": e["name"].as_str().or(e["enemy_name"].as_str()).unwrap_or("Enemy"),
+                    "enemy_description": e["description"].as_str().or(e["enemy_description"].as_str()),
+                    "enemy_hp": e["hp"].as_i64().or(e["enemy_hp"].as_i64()).unwrap_or(10),
+                    "enemy_ac": e["ac"].as_i64().or(e["enemy_ac"].as_i64()).unwrap_or(12),
+                    "enemy_damage_die": damage_die,
+                    "enemy_damage_bonus": e["damage_bonus"].as_i64().unwrap_or(damage_bonus),
+                    "enemy_damage_type": e["damage_type"].as_str().or(e["enemy_damage_type"].as_str()).unwrap_or("slashing"),
+                    "enemy_attack_bonus": e["attack_bonus"].as_i64().or(e["enemy_attack_bonus"].as_i64()).unwrap_or(0)
+                })
+            }).collect();
+
+            if enemies.is_empty() {
+                return Ok(json!({"error": "No enemies provided to start_combat"}));
+            }
+
+            crate::db::combat::start_combat(pool, campaign_id, &p, enemies).await
+        }
+
+        "declare_attack" => {
+            let target_name = args["target_name"].as_str().unwrap_or("");
+            crate::db::combat::declare_attack_target(pool, campaign_id, target_name).await
+        }
+
+        "add_companion_to_combat" => {
+            let companion_id = args["companion_id"].as_str().unwrap_or("");
+            crate::db::combat::add_companion_to_combat(pool, campaign_id, companion_id).await
+        }
+
+        "add_ally_to_combat" => {
+            crate::db::combat::add_ally_to_combat(pool, campaign_id, args).await
         }
 
         _ => {
