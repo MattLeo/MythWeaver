@@ -462,6 +462,39 @@ pub async fn execute_tool(
                 }))
             }
         }
+        // ── Combat ────────────────────────────────────────────────────────────
+
+        "start_combat" => {
+            if let Ok(Some(_)) = crate::db::combat::get_active_encounter(pool, campaign_id).await {
+                return Ok(json!({"error": "Combat already active. Use declare_attack to attack."}));
+            }
+            let p = player::get_player_by_campaign(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
+            let enemies = match args["enemies"].as_array() {
+                Some(arr) => arr.clone(),
+                None => serde_json::from_str::<Vec<Value>>(
+                    args["enemies"].as_str().unwrap_or("[]")
+                ).unwrap_or_default(),
+            };
+            if enemies.is_empty() {
+                return Ok(json!({"error": "No enemies provided to start_combat"}));
+            }
+            crate::db::combat::start_combat(pool, campaign_id, &p, enemies).await
+        }
+
+        "declare_attack" => {
+            let target_name = args["target_name"].as_str().unwrap_or("");
+            crate::db::combat::declare_attack_target(pool, campaign_id, target_name).await
+        }
+
+        "add_companion_to_combat" => {
+            let companion_id = args["companion_id"].as_str().unwrap_or("");
+            crate::db::combat::add_companion_to_combat(pool, campaign_id, companion_id).await
+        }
+
+        "add_ally_to_combat" => {
+            crate::db::combat::add_ally_to_combat(pool, campaign_id, args).await
+        }
 
         // ── Death ─────────────────────────────────────────────────────────────
         "roll_death_save" => {

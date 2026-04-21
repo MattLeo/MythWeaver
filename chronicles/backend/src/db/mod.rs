@@ -7,6 +7,7 @@ pub mod player;
 pub mod world;
 pub mod items;
 pub mod companions;
+pub mod combat;
 pub mod session;
 pub mod time;
 pub mod events;

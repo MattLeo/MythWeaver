@@ -28,14 +28,71 @@ fn exploration_tools() -> Vec<Value> {
 }
 
 fn combat_tools() -> Vec<Value> {
-    let mut tools = vec![];
-    tools.extend(world_query_tools());
-    tools.extend(mechanical_tools());
-    tools.extend(companion_combat_tools());
-    tools.extend(ability_tools());
-    tools.extend(death_tools());
-    tools.extend(session_tools());
-    tools
+    vec![
+        tool("start_combat",
+            "Initiate a combat encounter. Call this the instant any hostile encounter begins, before writing any narrative. Provide all enemy stats.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "enemies": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "enemy_name": { "type": "string" },
+                                "enemy_description": { "type": "string" },
+                                "enemy_hp": { "type": "integer" },
+                                "enemy_ac": { "type": "integer" },
+                                "enemy_damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
+                                "enemy_damage_bonus": { "type": "integer" },
+                                "enemy_damage_type": { "type": "string" },
+                                "enemy_attack_bonus": { "type": "integer" }
+                            },
+                            "required": ["enemy_name","enemy_hp","enemy_ac","enemy_damage_die","enemy_damage_type"]
+                        }
+                    }
+                },
+                "required": ["enemies"]
+            })
+        ),
+        tool("declare_attack",
+            "Declare the player is attacking a specific target. The backend will request the attack roll from the player and handle all combat resolution.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "target_name": { "type": "string" }
+                },
+                "required": ["target_name"]
+            })
+        ),
+        tool("add_companion_to_combat",
+            "Add an existing companion to the encounter. Backend rolls their initiative.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "companion_id": { "type": "string" }
+                },
+                "required": ["companion_id"]
+            })
+        ),
+        tool("add_ally_to_combat",
+            "Add a temporary NPC ally to the encounter.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "description": { "type": "string" },
+                    "hp": { "type": "integer" },
+                    "ac": { "type": "integer" },
+                    "attack_bonus": { "type": "integer" },
+                    "damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
+                    "damage_bonus": { "type": "integer" },
+                    "damage_type": { "type": "string" }
+                },
+                "required": ["name","hp","ac","damage_die","damage_type"]
+            })
+        ),
+    ]
 }
 
 fn dialogue_tools() -> Vec<Value> {

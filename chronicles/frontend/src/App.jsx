@@ -88,48 +88,59 @@ export default function App() {
 
   const sendToBackend = async (campaignId, sessionId, content, gs, rollResult, currentPlayer) => {
     try {
-      const result = await api.sendMessage({
-        campaignId,
-        sessionId,
-        content,
-        gameState: gs,
-        rollResult
-      })
+        const result = await api.sendMessage({
+            campaignId, sessionId, content, gameState: gs, rollResult
+        })
 
-      if (result.type === 'roll_request') {
-        // DM wants a dice roll — show the overlay
-        setPendingRoll(result.roll)
-        setLoading(false)
-        return
-      }
+        if (result.type === 'roll_request') {
+            if (result.opening_narrative && result.opening_narrative.trim()) {
+                setMessages(m => [...m, {
+                    role: 'dm',
+                    content: result.opening_narrative,
+                    tools_used: [],
+                    id: Date.now()
+                }])
+            }
+            setPendingRoll(result.roll)
+            setLoading(false)
+            return
+        }
 
-      if (result.type === 'narrative') {
-        setMessages(m => [...m, {
-          role: 'dm',
-          content: result.content,
-          tools_used: result.tools_used || [],
-          id: Date.now()
-        }])
+        if (result.type === 'narrative') {
+            if (result.content && result.content.trim()) {
+                setMessages(m => [...m, {
+                    role: 'dm',
+                    content: result.content,
+                    tools_used: result.tools_used || [],
+                    id: Date.now()
+                }])
+            }
 
-      // Setting new game state based on received narrative  
-      if (result.new_state) {
-        setGameState(result.new_state)
-      }
+            if (result.combat_turns && result.combat_turns.length > 0) {
+                for (let i = 0; i < result.combat_turns.length; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 2500))
+                    setMessages(m => [...m, {
+                        role: 'dm',
+                        content: result.combat_turns[i],
+                        tools_used: [],
+                        id: Date.now() + i + 1
+                    }])
+                }
+            }
 
-        // Refresh player state after each DM response (HP, items, etc. may have changed)
-        await refreshPlayerState(campaignId)
-      }
+            if (result.new_state) setGameState(result.new_state)
+            await refreshPlayerState(campaignId)
+        }
     } catch (e) {
-      setMessages(m => [...m, {
-        role: 'dm',
-        content: 'The ancient magics waver… (Connection error — is the backend running?)',
-        tools_used: [],
-        id: Date.now()
-      }])
+        setMessages(m => [...m, {
+            role: 'dm',
+            content: 'The ancient magics waver… (Connection error — is the backend running?)',
+            tools_used: [],
+            id: Date.now()
+        }])
     }
-
     setLoading(false)
-  }
+  } 
 
   // ── Dice roll completion ────────────────────────────────────────────────────
 

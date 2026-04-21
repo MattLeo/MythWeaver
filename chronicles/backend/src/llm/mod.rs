@@ -80,7 +80,6 @@ impl LlmClient {
                 }
             }
 
-            // No tool calls — clean narrative response
             if stop_reason == "end_turn" || tool_uses.is_empty() {
                 return Ok(AgentResult {
                     narrative: narrative_text,
@@ -89,7 +88,6 @@ impl LlmClient {
                 });
             }
 
-            // Add assistant message with full content blocks to history
             current_messages.push(ChatMessage {
                 role: "assistant".to_string(),
                 content: Some(narrative_text.clone()),
@@ -97,7 +95,6 @@ impl LlmClient {
                 tool_results: None,
             });
 
-            // Check for request_roll before executing anything
             for tu in &tool_uses {
                 if tu.name == "request_roll" {
                     roll_request = Some(RollRequest {
@@ -109,14 +106,13 @@ impl LlmClient {
                     });
 
                     return Ok(AgentResult {
-                        narrative: String::new(),
+                        narrative: narrative_text,
                         tool_calls_made,
                         roll_request,
                     });
                 }
             }
 
-            // Execute all tool calls and collect results
             let mut tool_result_blocks: Vec<Value> = vec![];
 
             for tu in &tool_uses {
@@ -150,7 +146,6 @@ impl LlmClient {
                 }));
             }
 
-            // Add tool results as a user message
             current_messages.push(ChatMessage {
                 role: "user".to_string(),
                 content: None,
@@ -160,6 +155,20 @@ impl LlmClient {
         }
 
         Err(anyhow::anyhow!("Agent loop exceeded maximum iterations"))
+    }
+
+    pub async fn narrate_combat_result(&self, system: &str, result: &Value) -> Result<String> {
+        let prompt = format!(
+            "Combat result: {}. Write exactly 1-2 sentences of vivid combat narrative describing this outcome. Use ONLY the names and details provided in the combat result above. Do not invent or add any characters, enemies, or details not present in the result. No markdown. No lists.",
+            serde_json::to_string(result).unwrap_or_default()
+        );
+        let messages = vec![ChatMessage::user(&prompt)];
+        let response = self.chat_completion(system, &messages, &[]).await?;
+        let content = response.content.iter()
+            .find(|b| b.block_type == "text")
+            .and_then(|b| b.text.clone())
+            .unwrap_or_else(|| "The attack lands.".to_string());
+        Ok(content)
     }
 
     async fn chat_completion(

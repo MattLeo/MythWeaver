@@ -16,6 +16,12 @@ export async function getCampaignState(campaignId) {
   return res.json()
 }
 
+export async function getPlayerState(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/player-state`)
+  if (!res.ok) throw new Error(`Failed to get player state`)
+  return res.json()
+}
+
 export async function startSession(campaignId) {
   const res = await fetch(`${BASE}/campaigns/${campaignId}/session`, {
     method: 'POST'
@@ -46,14 +52,4 @@ export async function sendMessage({ campaignId, sessionId, content, gameState, r
   })
   if (!res.ok) throw new Error(`Failed to send message`)
   return res.json()
-}
-
-const refreshPlayerState = async (campaignId) => {
-  try {
-    const state = await api.getCampaignState(campaignId || campaign?.id)
-    if (state.player) setPlayer(state.player)
-    if (state.time) setCampaignTime(state.time)
-  } catch (e) {
-    console.error('Failed to refresh player state:', e)
-  }
 }
