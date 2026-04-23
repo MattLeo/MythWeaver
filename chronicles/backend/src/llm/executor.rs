@@ -387,6 +387,15 @@ pub async fn execute_tool(
                 return Ok(json!({"error": "Already at maximum level"}));
             }
             let result = player::level_up_player(pool, &p.id, &p).await?;
+
+            // Seed new abilities granted at this level
+            seed_level_up_abilities(pool, campaign_id, &p.id, &p.class, result.new_level).await;
+
+            // Update spell slot abilities for casters
+            if let Some(ref slots) = result.spell_slots {
+                update_spell_slots(pool, campaign_id, &p.id, &p.class, slots).await;
+            }
+
             Ok(json!(result))
         }
 
@@ -620,6 +629,186 @@ pub async fn execute_tool(
         _ => {
             tracing::warn!("Unknown tool called: {}", tool_name);
             Ok(json!({"error": format!("Unknown tool: {}", tool_name)}))
+        }
+    }
+}
+
+// ─── Level up ability seeding ─────────────────────────────────────────────────
+
+async fn seed_level_up_abilities(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    class: &str,
+    new_level: i64,
+) {
+    let new_abilities: Vec<(&str, &str, i64, &str)> = match (class, new_level) {
+        ("Barbarian", 2) => vec![
+            ("Reckless Attack", "Attack with advantage on all attacks this turn. Attackers also have advantage against you until your next turn.", 1, "per_turn"),
+            ("Danger Sense", "Advantage on DEX saving throws against effects you can see.", 1, "manual"),
+        ],
+        ("Barbarian", 3) => vec![
+            ("Primal Path", "You have chosen your Primal Path, shaping your rage.", 1, "manual"),
+        ],
+        ("Barbarian", 5) => vec![
+            ("Extra Attack", "Attack twice when you take the Attack action.", 1, "manual"),
+            ("Fast Movement", "Speed increases by 10 ft while not wearing heavy armor.", 1, "manual"),
+        ],
+        ("Fighter", 2) => vec![
+            ("Action Surge", "Take one additional action on your turn. Recharges on short rest.", 1, "short_rest"),
+        ],
+        ("Fighter", 3) => vec![
+            ("Martial Archetype", "You have chosen your Martial Archetype.", 1, "manual"),
+        ],
+        ("Fighter", 5) => vec![
+            ("Extra Attack", "Attack twice when you take the Attack action.", 1, "manual"),
+        ],
+        ("Rogue", 2) => vec![
+            ("Cunning Action", "Use bonus action to Dash, Disengage, or Hide.", 1, "per_turn"),
+        ],
+        ("Rogue", 3) => vec![
+            ("Roguish Archetype", "You have chosen your Roguish Archetype.", 1, "manual"),
+        ],
+        ("Rogue", 5) => vec![
+            ("Uncanny Dodge", "Use your reaction to halve an attack's damage when you can see the attacker.", 1, "per_turn"),
+        ],
+        ("Rogue", 7) => vec![
+            ("Evasion", "Take no damage on successful DEX saves, half on failed.", 1, "manual"),
+        ],
+        ("Wizard", 2) | ("Sorcerer", 2) => vec![
+            ("Arcane Tradition", "You have chosen your Arcane Tradition.", 1, "manual"),
+        ],
+        ("Cleric", 2) => vec![
+            ("Channel Divinity", "Channel divine energy. Recharges on short rest.", 1, "short_rest"),
+        ],
+        ("Paladin", 2) => vec![
+            ("Divine Smite", "Expend a spell slot on a hit to deal extra radiant damage.", 1, "per_turn"),
+            ("Fighting Style", "You have chosen a Fighting Style.", 1, "manual"),
+        ],
+        ("Paladin", 3) => vec![
+            ("Sacred Oath", "You have sworn your Sacred Oath.", 1, "manual"),
+        ],
+        ("Ranger", 2) => vec![
+            ("Fighting Style", "You have chosen a Fighting Style.", 1, "manual"),
+            ("Spellcasting", "You can cast ranger spells.", 1, "manual"),
+        ],
+        ("Ranger", 3) => vec![
+            ("Ranger Archetype", "You have chosen your Ranger Archetype.", 1, "manual"),
+            ("Primeval Awareness", "Expend a spell slot to sense certain creature types within 1 mile.", 1, "long_rest"),
+        ],
+        ("Monk", 2) => vec![
+            ("Flurry of Blows", "Spend 1 ki to make two unarmed strikes as a bonus action.", 1, "per_turn"),
+            ("Patient Defense", "Spend 1 ki to take the Dodge action as a bonus action.", 1, "per_turn"),
+            ("Step of the Wind", "Spend 1 ki to Dash or Disengage as a bonus action.", 1, "per_turn"),
+            ("Unarmored Movement", "Speed increases by 10 ft while not wearing armor or a shield.", 1, "manual"),
+        ],
+        ("Monk", 3) => vec![
+            ("Deflect Missiles", "Use reaction to deflect or catch ranged weapon attacks.", 1, "per_turn"),
+            ("Monastic Tradition", "You have chosen your Monastic Tradition.", 1, "manual"),
+        ],
+        ("Bard", 3) => vec![
+            ("Bard College", "You have joined a Bard College.", 1, "manual"),
+            ("Expertise", "Double proficiency bonus on two chosen skills.", 1, "manual"),
+        ],
+        ("Warlock", 2) => vec![
+            ("Eldritch Invocations", "You have learned Eldritch Invocations.", 1, "manual"),
+        ],
+        ("Warlock", 3) => vec![
+            ("Pact Boon", "You have chosen your Pact Boon.", 1, "manual"),
+        ],
+        _ => vec![],
+    };
+
+    for (name, desc, uses, refresh) in new_abilities {
+        // Only add if the player doesn't already have this ability
+        let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+        if existing.iter().any(|a| a.name == name) {
+            continue;
+        }
+        let _ = world::create_ability(pool, campaign_id, "player", player_id, name, Some(desc), uses, refresh).await;
+    }
+
+    // Update Ki points for Monk
+    if class == "Monk" && new_level >= 2 {
+        let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+        if let Some(ki) = existing.iter().find(|a| a.name == "Ki") {
+            let _ = sqlx::query(
+                "UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?"
+            )
+            .bind(new_level)
+            .bind(new_level)
+            .bind(&ki.id)
+            .execute(pool)
+            .await;
+        }
+    }
+
+    // Update Bardic Inspiration for Bard (scales with CHA mod)
+    if class == "Bard" && new_level >= 2 {
+        let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+        if let Some(bi) = existing.iter().find(|a| a.name == "Bardic Inspiration") {
+            if let Ok(Some(p)) = player::get_player_by_campaign(pool, campaign_id).await {
+                let cha_mod = Player::modifier(p.cha).max(1);
+                let _ = sqlx::query(
+                    "UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?"
+                )
+                .bind(cha_mod)
+                .bind(cha_mod)
+                .bind(&bi.id)
+                .execute(pool)
+                .await;
+            }
+        }
+    }
+}
+
+async fn update_spell_slots(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    class: &str,
+    slots: &crate::models::SpellSlots,
+) {
+    let slot_defs = [
+        ("Spell Slots (1st)", slots.level_1),
+        ("Spell Slots (2nd)", slots.level_2),
+        ("Spell Slots (3rd)", slots.level_3),
+        ("Spell Slots (4th)", slots.level_4),
+        ("Spell Slots (5th)", slots.level_5),
+    ];
+
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+
+    for (name, count) in &slot_defs {
+        let Some(max) = count else { continue };
+        if let Some(ability) = existing.iter().find(|a| &a.name == name) {
+            let _ = sqlx::query(
+                "UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?"
+            )
+            .bind(max)
+            .bind(max)
+            .bind(&ability.id)
+            .execute(pool)
+            .await;
+        } else {
+            let _ = world::create_ability(
+                pool, campaign_id, "player", player_id,
+                name, None, *max, "long_rest"
+            ).await;
+        }
+    }
+
+    // Warlock slots recover on short rest
+    if class == "Warlock" {
+        if let Some(ability) = existing.iter().find(|a| a.name == "Spell Slots") {
+            let _ = sqlx::query(
+                "UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?"
+            )
+            .bind(slots.level_1.unwrap_or(1))
+            .bind(slots.level_1.unwrap_or(1))
+            .bind(&ability.id)
+            .execute(pool)
+            .await;
         }
     }
 }
