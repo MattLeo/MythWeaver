@@ -23,6 +23,7 @@ fn exploration_tools() -> Vec<Value> {
     tools.extend(time_tools());
     tools.extend(event_tools());
     tools.extend(session_tools());
+    tools.extend(progression_tools());
     tools.push(request_roll_tool());
     tools
 }

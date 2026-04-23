@@ -1,5 +1,11 @@
 const BASE = '/api'
 
+export async function listCampaigns() {
+  const res = await fetch(`${BASE}/campaigns`)
+  if (!res.ok) throw new Error(`Failed to list campaigns`)
+  return res.json()
+}
+
 export async function createCampaign(data) {
   const res = await fetch(`${BASE}/campaigns`, {
     method: 'POST',
@@ -19,6 +25,12 @@ export async function getCampaignState(campaignId) {
 export async function getPlayerState(campaignId) {
   const res = await fetch(`${BASE}/campaigns/${campaignId}/player-state`)
   if (!res.ok) throw new Error(`Failed to get player state`)
+  return res.json()
+}
+
+export async function getSessionMessages(campaignId, sessionId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/sessions/${sessionId}/messages`)
+  if (!res.ok) throw new Error(`Failed to get session messages`)
   return res.json()
 }
 

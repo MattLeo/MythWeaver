@@ -35,6 +35,14 @@ pub async fn get_campaign(pool: &SqlitePool, id: &str) -> Result<Option<Campaign
     Ok(campaign)
 }
 
+pub async fn list_campaigns(pool: &SqlitePool) -> Result<Vec<Campaign>> {
+    Ok(sqlx::query_as::<_, Campaign>(
+        "SELECT * FROM campaigns ORDER BY updated_at DESC"
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
 // ─── Session ──────────────────────────────────────────────────────────────────
 
 pub async fn create_session(pool: &SqlitePool, campaign_id: &str) -> Result<Session> {

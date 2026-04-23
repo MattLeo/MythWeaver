@@ -107,6 +107,29 @@ pub async fn get_player_state(
     })))
 }
 
+pub async fn list_campaigns(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    match campaign::list_campaigns(pool).await {
+        Ok(campaigns) => {
+            let mut result = vec![];
+            for c in campaigns {
+                let p = player::get_player_by_campaign(pool, &c.id).await.ok().flatten();
+                let session = campaign::get_active_session(pool, &c.id).await.ok().flatten();
+                result.push(json!({
+                    "campaign": c,
+                    "player": p,
+                    "has_active_session": session.is_some(),
+                    "session": session
+                }));
+            }
+            (StatusCode::OK, Json(json!({"campaigns": result})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
 // ─── Session ──────────────────────────────────────────────────────────────────
 
 pub async fn start_session(
@@ -166,6 +189,16 @@ pub async fn end_session(
 
     match campaign::end_session(pool, &session_id).await {
         Ok(_) => (StatusCode::OK, Json(json!({"message": "Session ended and summarized"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+pub async fn get_session_messages(
+    State(state): State<Arc<AppState>>,
+    Path((_campaign_id, session_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    match campaign::get_session_messages(&state.pool, &session_id).await {
+        Ok(msgs) => (StatusCode::OK, Json(json!({"messages": msgs}))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }

@@ -77,7 +77,7 @@ MANDATORY DICE ROLLS
 
 ITEMS & ECONOMY
 - Whenever the player finds, buys, steals, or is given any item, ALWAYS call create_item followed by give_item. Do not just narrate it.
-- Whenever the player spends, earns, loses, or is rewarded gold, ALWAYS call update_gold. Do not just narrate it.
+- Whenever the player spends, earns, loses, or is rewarded currency, ALWAYS call update_gold. Do not just narrate it.
 - Always call query_item to know what items a player currently has in their possession before narrating it.
 - When a merchant or NPC has items for sale, call create_item first to define the item, then let the player decide to buy before calling give_item and update_gold.
 - Never describe an item as being in the player's possession without calling give_item first.

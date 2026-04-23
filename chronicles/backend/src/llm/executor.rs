@@ -5,7 +5,12 @@ use sqlx::SqlitePool;
 use crate::db::{campaign, player, world, items, companions, time};
 use crate::models::Player;
 
-/// Route a tool call to the appropriate database operation
+fn parse_i64(v: &Value) -> i64 {
+    v.as_i64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(0)
+}
+
 pub async fn execute_tool(
     pool: &SqlitePool,
     campaign_id: &str,
@@ -76,7 +81,6 @@ pub async fn execute_tool(
                 None
             };
             let campaign_time = time::get_campaign_time(pool, campaign_id).await?;
-
             Ok(json!({
                 "player": p,
                 "abilities": abilities,
@@ -176,15 +180,13 @@ pub async fn execute_tool(
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
             let loc_id = args["location_id"].as_str().unwrap_or("");
-
             let loc = world::get_location(pool, loc_id).await?;
             if loc.is_none() {
                 return Ok(json!({
-                    "error": "Location not found. You must call create_location first, then use the returned ID to move the player.",
+                    "error": "Location not found. You must call create_location first, then use the returned ID.",
                     "location_id": loc_id
                 }));
             }
-
             player::update_player_location(pool, &p.id, loc_id).await?;
             Ok(json!({"message": "Player moved", "new_location": loc}))
         }
@@ -192,7 +194,7 @@ pub async fn execute_tool(
         "update_gold" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let amount = args["amount"].as_i64().unwrap_or(0);
+            let amount = parse_i64(&args["amount"]);
             let new_gold = (p.gold + amount).max(0);
             player::update_player_gold(pool, &p.id, new_gold).await?;
             Ok(json!({
@@ -219,7 +221,7 @@ pub async fn execute_tool(
 
         "remove_item" => {
             let item_id = args["item_id"].as_str().unwrap_or("");
-            let qty = args["quantity"].as_i64().unwrap_or(1);
+            let qty = parse_i64(&args["quantity"]).max(1);
             items::remove_item(pool, item_id, qty).await?;
             Ok(json!({"message": "Item removed"}))
         }
@@ -253,7 +255,6 @@ pub async fn execute_tool(
             if item.item_type == "consumable" {
                 let effects = items::get_item_effects(pool, item_id).await?;
                 let mut result = json!({"item_used": item.name});
-
                 for effect in &effects {
                     match effect.effect_type.as_str() {
                         "healing" => {
@@ -266,7 +267,6 @@ pub async fn execute_tool(
                         _ => {}
                     }
                 }
-
                 items::remove_item(pool, item_id, 1).await?;
                 Ok(result)
             } else {
@@ -287,25 +287,21 @@ pub async fn execute_tool(
         "apply_damage" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let amount = args["amount"].as_i64().unwrap_or(0);
-
+            let amount = parse_i64(&args["amount"]);
             let (damage_to_hp, new_temp) = if p.temp_hp > 0 {
                 let absorbed = amount.min(p.temp_hp);
                 (amount - absorbed, p.temp_hp - absorbed)
             } else {
                 (amount, 0)
             };
-
             let new_hp = (p.current_hp - damage_to_hp).max(0);
             player::update_player_hp(pool, &p.id, new_hp).await?;
-
-            let downed = new_hp == 0;
             Ok(json!({
                 "damage_dealt": amount,
                 "temp_hp_remaining": new_temp,
                 "new_hp": new_hp,
                 "max_hp": p.max_hp,
-                "downed": downed,
+                "downed": new_hp == 0,
                 "source": args["source"]
             }))
         }
@@ -313,7 +309,7 @@ pub async fn execute_tool(
         "apply_healing" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let amount = args["amount"].as_i64().unwrap_or(0);
+            let amount = parse_i64(&args["amount"]);
             let new_hp = (p.current_hp + amount).min(p.max_hp);
             player::update_player_hp(pool, &p.id, new_hp).await?;
             Ok(json!({
@@ -342,18 +338,14 @@ pub async fn execute_tool(
 
         "apply_companion_damage" => {
             let companion_id = args["companion_id"].as_str().unwrap_or("");
-            let amount = args["amount"].as_i64().unwrap_or(0);
+            let amount = parse_i64(&args["amount"]);
             let (new_hp, is_dead) = companions::apply_companion_damage(pool, companion_id, amount).await?;
-            Ok(json!({
-                "new_hp": new_hp,
-                "is_dead": is_dead,
-                "companion_id": companion_id
-            }))
+            Ok(json!({"new_hp": new_hp, "is_dead": is_dead, "companion_id": companion_id}))
         }
 
         "apply_companion_healing" => {
             let companion_id = args["companion_id"].as_str().unwrap_or("");
-            let amount = args["amount"].as_i64().unwrap_or(0);
+            let amount = parse_i64(&args["amount"]);
             let new_hp = companions::apply_companion_healing(pool, companion_id, amount).await?;
             Ok(json!({"new_hp": new_hp, "companion_id": companion_id}))
         }
@@ -375,7 +367,7 @@ pub async fn execute_tool(
         "award_experience" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let amount = args["amount"].as_i64().unwrap_or(0);
+            let amount = parse_i64(&args["amount"]);
             let new_xp = p.experience + amount;
             player::update_player_xp(pool, &p.id, new_xp).await?;
             let threshold = Player::xp_threshold(p.level);
@@ -418,7 +410,7 @@ pub async fn execute_tool(
 
         "use_ability" => {
             let ability_id = args["ability_id"].as_str().unwrap_or("");
-            let uses = args["uses"].as_i64().unwrap_or(1);
+            let uses = parse_i64(&args["uses"]).max(1);
             let remaining = world::use_ability(pool, ability_id, uses).await?;
             Ok(json!({"remaining_uses": remaining}))
         }
@@ -490,7 +482,7 @@ pub async fn execute_tool(
         "stabilize_player" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let heal = args["healing_amount"].as_i64().unwrap_or(1);
+            let heal = parse_i64(&args["healing_amount"]).max(1);
             let new_hp = (p.current_hp + heal).min(p.max_hp).max(1);
             player::update_player_hp(pool, &p.id, new_hp).await?;
             player::update_death_saves(pool, &p.id, 0, 0, true, false).await?;
@@ -499,7 +491,7 @@ pub async fn execute_tool(
 
         // ── Time ──────────────────────────────────────────────────────────────
         "advance_time" => {
-            let steps = args["steps"].as_i64().unwrap_or(1);
+            let steps = parse_i64(&args["steps"]).max(1);
             let reason = args["reason"].as_str().unwrap_or("");
             let new_time = time::advance_time(pool, campaign_id, steps, reason).await?;
             Ok(json!(new_time))
@@ -513,7 +505,7 @@ pub async fn execute_tool(
                 args["name"].as_str().unwrap_or("Event Table"),
                 args["location_type"].as_str(),
                 args["trigger_type"].as_str().unwrap_or("manual"),
-                args["trigger_chance"].as_i64().unwrap_or(30),
+                parse_i64(&args["trigger_chance"]).max(1),
             ).await?;
             Ok(json!({"table": table}))
         }
@@ -589,12 +581,18 @@ pub async fn execute_tool(
                 json!({
                     "enemy_name": e["name"].as_str().or(e["enemy_name"].as_str()).unwrap_or("Enemy"),
                     "enemy_description": e["description"].as_str().or(e["enemy_description"].as_str()),
-                    "enemy_hp": e["hp"].as_i64().or(e["enemy_hp"].as_i64()).unwrap_or(10),
-                    "enemy_ac": e["ac"].as_i64().or(e["enemy_ac"].as_i64()).unwrap_or(12),
+                    "enemy_hp": e["hp"].as_i64().or(e["enemy_hp"].as_i64())
+                        .or_else(|| e["hp"].as_str().and_then(|s| s.parse().ok()))
+                        .unwrap_or(10),
+                    "enemy_ac": e["ac"].as_i64().or(e["enemy_ac"].as_i64())
+                        .or_else(|| e["ac"].as_str().and_then(|s| s.parse().ok()))
+                        .unwrap_or(12),
                     "enemy_damage_die": damage_die,
                     "enemy_damage_bonus": e["damage_bonus"].as_i64().unwrap_or(damage_bonus),
                     "enemy_damage_type": e["damage_type"].as_str().or(e["enemy_damage_type"].as_str()).unwrap_or("slashing"),
-                    "enemy_attack_bonus": e["attack_bonus"].as_i64().or(e["enemy_attack_bonus"].as_i64()).unwrap_or(0)
+                    "enemy_attack_bonus": e["attack_bonus"].as_i64().or(e["enemy_attack_bonus"].as_i64())
+                        .or_else(|| e["attack_bonus"].as_str().and_then(|s| s.parse().ok()))
+                        .unwrap_or(0)
                 })
             }).collect();
 
