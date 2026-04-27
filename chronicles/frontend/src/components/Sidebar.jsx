@@ -104,7 +104,9 @@ export default function Sidebar({
           <div className="cn-name">{player.name}</div>
           <div className="cn-sub">
             Level {player.level} {player.race} {player.class}
-            {player.subclass ? ` · ${player.subclass}` : ''}
+          </div>
+          <div className='cn-sub'>
+            {player.subclass ? `${player.subclass}` : ''}
           </div>
           <div className="cn-sub">{player.background}</div>
         </div>
