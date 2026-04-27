@@ -342,6 +342,18 @@ pub struct SuperiorityDice {
     pub created_at: String,
 }
 
+// ─── Action Economy ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionEconomy {
+    pub actions_remaining: i64,
+    pub bonus_actions_remaining: i64,
+    pub reactions_remaining: i64,
+    pub action_surge_available: bool,
+    pub action_surge_used: bool,
+    pub attacks_made_this_action: i64,
+}
+
 // ─── Known Maneuver ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
