@@ -52,7 +52,10 @@ export async function levelUp(campaignId, choices) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(choices)
   })
-  if (!res.ok) throw new Error('Failed to level up')
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to level up (${res.status}): ${body}`)
+  }
   return res.json()
 }
 

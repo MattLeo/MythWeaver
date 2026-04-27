@@ -195,6 +195,7 @@ export default function App() {
       }])
     } catch (e) {
       console.error('Level up failed:', e)
+      console.error('Error details:', e.message, e.stack)
     }
   }
 
