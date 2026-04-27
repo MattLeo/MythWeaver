@@ -6,10 +6,13 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::db::{campaign, player, world, items, companions, time};
+use crate::db::{campaign, player, world, items, companions, time, fighter};
 use crate::llm::{ChatMessage, prompt};
 use crate::models::*;
 use crate::AppState;
+
+const MAX_CONTEXT_MESSAGES: usize = 50;
+const SUMMARIZE_THRESHOLD: usize = 20;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +44,22 @@ pub async fn create_campaign(
 
     seed_class_abilities(pool, &camp.id, &p.id, &p.class).await;
     seed_starting_equipment(pool, &camp.id, &p.id, &p.class).await;
+
+    // Seed class proficiencies
+    if p.class == "Fighter" {
+        if let Err(e) = fighter::seed_fighter_proficiencies(pool, &camp.id, &p.id).await {
+            tracing::warn!("Failed to seed fighter proficiencies: {}", e);
+        }
+        // Seed default weapon masteries (3 at level 1)
+        let default_masteries = [
+            ("longsword", "sap"),
+            ("greatsword", "graze"),
+            ("handaxe", "vex"),
+        ];
+        for (weapon, mastery) in &default_masteries {
+            let _ = fighter::add_weapon_mastery(pool, &camp.id, &p.id, weapon, mastery).await;
+        }
+    }
 
     if let Err(e) = time::init_campaign_time(pool, &camp.id).await {
         tracing::warn!("Failed to init campaign time: {}", e);
@@ -97,13 +116,31 @@ pub async fn get_player_state(
     let all_items = items::get_player_items(pool, &p.id).await.unwrap_or_default();
     let active_companions = companions::get_active_companions(pool, &campaign_id).await.unwrap_or_default();
     let camp_time = time::get_campaign_time(pool, &campaign_id).await.ok().flatten();
+    let proficiencies = fighter::get_proficiencies(pool, &p.id).await.unwrap_or_default();
+    let weapon_masteries = fighter::get_weapon_masteries(pool, &p.id).await.unwrap_or_default();
+    let known_maneuvers = if p.subclass.as_deref() == Some("Battle Master") {
+        fighter::get_known_maneuvers(pool, &p.id).await.unwrap_or_default()
+    } else {
+        vec![]
+    };
+    let superiority_dice = if p.subclass.as_deref() == Some("Battle Master") {
+        fighter::get_superiority_dice(pool, &p.id, "Battle Master").await.unwrap_or(None)
+    } else if p.subclass.as_deref() == Some("Psi Warrior") {
+        fighter::get_superiority_dice(pool, &p.id, "Psi Warrior").await.unwrap_or(None)
+    } else {
+        None
+    };
 
     (StatusCode::OK, Json(json!({
         "player": p,
         "abilities": abilities,
         "items": all_items,
         "companions": active_companions,
-        "time": camp_time
+        "time": camp_time,
+        "proficiencies": proficiencies,
+        "weapon_masteries": weapon_masteries,
+        "known_maneuvers": known_maneuvers,
+        "superiority_dice": superiority_dice,
     })))
 }
 
@@ -243,6 +280,7 @@ pub async fn send_message(
 
                 if attack_result["needs_damage_roll"].as_bool().unwrap_or(false) {
                     let damage_die = attack_result["damage_die"].as_str().unwrap_or("d6");
+                    let is_crit = attack_result["is_crit"].as_bool().unwrap_or(false);
                     return (StatusCode::OK, Json(json!({
                         "type": "roll_request",
                         "roll": {
@@ -250,8 +288,14 @@ pub async fn send_message(
                             "die": damage_die,
                             "skill": "Damage",
                             "dc": 0,
-                            "reason": format!("You hit! Roll {} damage.", damage_die)
-                        }
+                            "reason": if is_crit {
+                                format!("Critical Hit! Roll {} damage twice and add together.", damage_die)
+                            } else {
+                                format!("You hit! Roll {} damage.", damage_die)
+                            }
+                        },
+                        "is_crit": is_crit,
+                        "weapon_mastery": attack_result["weapon_mastery"],
                     })));
                 }
 
@@ -282,6 +326,18 @@ pub async fn send_message(
                 let (narrative, _) = strip_state_tag(&raw);
                 let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &narrative, None).await;
 
+                // Check if player can attack again (Extra Attack)
+                if damage_result["can_attack_again"].as_bool().unwrap_or(false) {
+                    return (StatusCode::OK, Json(json!({
+                        "type": "narrative",
+                        "content": narrative,
+                        "combat_turns": [],
+                        "can_attack_again": true,
+                        "attacks_made": damage_result["attacks_made"],
+                        "max_attacks": damage_result["max_attacks"],
+                    })));
+                }
+
                 if damage_result["all_enemies_defeated"].as_bool().unwrap_or(false) {
                     let _ = crate::db::combat::end_combat(pool, campaign_id, "victory", 100).await;
                     return (StatusCode::OK, Json(json!({
@@ -308,17 +364,68 @@ pub async fn send_message(
         }
     }
 
-    // ── Normal agentic loop ───────────────────────────────────────────────────
-    let history = campaign::get_session_messages(pool, session_id).await
+    // ── Build message history with sliding window ─────────────────────────────
+    let all_history = campaign::get_session_messages(pool, session_id).await
         .unwrap_or_default();
 
-    let mut messages: Vec<ChatMessage> = history.iter()
-        .filter_map(|m| {
-            match m.role.as_str() {
-                "user" => Some(ChatMessage::user(&m.content)),
-                "assistant" => Some(ChatMessage::assistant(&m.content)),
-                _ => None,
+    if all_history.len() > MAX_CONTEXT_MESSAGES {
+        let overflow_end = all_history.len() - MAX_CONTEXT_MESSAGES;
+        if overflow_end % SUMMARIZE_THRESHOLD == 0 {
+            let overflow: Vec<Message> = all_history[..overflow_end]
+                .iter()
+                .filter(|m| m.role == "user" || m.role == "assistant")
+                .cloned()
+                .collect();
+
+            if !overflow.is_empty() {
+                let conversation = overflow.iter()
+                    .map(|m| format!("[{}]: {}", m.role.to_uppercase(), m.content))
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+
+                let capped = conversation[..conversation.len().min(6000)].to_string();
+                let pool_clone = pool.clone();
+                let campaign_id_clone = campaign_id.clone();
+                let session_id_clone = session_id.clone();
+                let llm_clone = state.llm.clone();
+
+                tokio::spawn(async move {
+                    let summary_prompt = format!(
+                        "Summarize these D&D exchanges in 3-4 sentences, preserving all key events, decisions, NPC interactions, and outcomes:\n\n{}",
+                        capped
+                    );
+                    let msgs = vec![ChatMessage::user(&summary_prompt)];
+                    if let Ok(result) = llm_clone.run_agentic_loop(
+                        &pool_clone,
+                        &campaign_id_clone,
+                        "You are a concise D&D session summarizer.",
+                        msgs,
+                        &GameState::Exploration,
+                    ).await {
+                        let _ = campaign::save_session_summary(
+                            &pool_clone,
+                            &campaign_id_clone,
+                            &session_id_clone,
+                            &result.narrative,
+                        ).await;
+                        tracing::info!("Mid-session summary saved ({} messages summarized)", overflow.len());
+                    }
+                });
             }
+        }
+    }
+
+    let history_slice = if all_history.len() > MAX_CONTEXT_MESSAGES {
+        &all_history[all_history.len() - MAX_CONTEXT_MESSAGES..]
+    } else {
+        &all_history[..]
+    };
+
+    let mut messages: Vec<ChatMessage> = history_slice.iter()
+        .filter_map(|m| match m.role.as_str() {
+            "user"      => Some(ChatMessage::user(&m.content)),
+            "assistant" => Some(ChatMessage::assistant(&m.content)),
+            _ => None,
         })
         .collect();
 
@@ -519,48 +626,49 @@ async fn seed_starting_equipment(
     player_id: &str,
     class: &str,
 ) {
-    type ItemDef<'a> = (&'a str, &'a str, &'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>, Option<i64>, Option<&'a str>, &'a str);
+    // (name, description, item_type, damage_die, damage_type, weapon_range, weapon_type, base_ac, armor_type, slot)
+    type ItemDef<'a> = (&'a str, &'a str, &'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>, Option<&'a str>, Option<i64>, Option<&'a str>, &'a str);
 
     let equipment: Vec<ItemDef> = match class {
         "Fighter" | "Paladin" => vec![
-            ("Longsword", "A versatile sword with a long blade.", "weapon", Some("d8"), Some("slashing"), Some("melee"), None, None, "main_hand"),
-            ("Chain Mail", "Heavy armor made of interlocking metal rings.", "armor", None, None, None, Some(16), Some("heavy"), "armor"),
+            ("Longsword", "A versatile sword with a long blade.", "weapon", Some("d8"), Some("slashing"), Some("melee"), Some("longsword"), None, None, "main_hand"),
+            ("Chain Mail", "Heavy armor made of interlocking metal rings.", "armor", None, None, None, None, Some(16), Some("heavy"), "armor"),
         ],
         "Barbarian" => vec![
-            ("Greataxe", "A massive two-handed axe.", "weapon", Some("d12"), Some("slashing"), Some("melee"), None, None, "main_hand"),
+            ("Greataxe", "A massive two-handed axe.", "weapon", Some("d12"), Some("slashing"), Some("melee"), Some("greataxe"), None, None, "main_hand"),
         ],
         "Ranger" => vec![
-            ("Longsword", "A versatile sword with a long blade.", "weapon", Some("d8"), Some("slashing"), Some("melee"), None, None, "main_hand"),
-            ("Leather Armor", "Light armor made of cured leather.", "armor", None, None, None, Some(11), Some("light"), "armor"),
+            ("Longsword", "A versatile sword with a long blade.", "weapon", Some("d8"), Some("slashing"), Some("melee"), Some("longsword"), None, None, "main_hand"),
+            ("Leather Armor", "Light armor made of cured leather.", "armor", None, None, None, None, Some(11), Some("light"), "armor"),
         ],
         "Rogue" => vec![
-            ("Shortsword", "A light, quick blade ideal for close quarters.", "weapon", Some("d6"), Some("piercing"), Some("melee"), None, None, "main_hand"),
-            ("Leather Armor", "Light armor made of cured leather.", "armor", None, None, None, Some(11), Some("light"), "armor"),
+            ("Shortsword", "A light, quick blade.", "weapon", Some("d6"), Some("piercing"), Some("melee"), Some("shortsword"), None, None, "main_hand"),
+            ("Leather Armor", "Light armor made of cured leather.", "armor", None, None, None, None, Some(11), Some("light"), "armor"),
         ],
         "Cleric" => vec![
-            ("Mace", "A heavy bludgeoning weapon with a flanged head.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), None, None, "main_hand"),
-            ("Scale Mail", "Armor made of overlapping metal scales.", "armor", None, None, None, Some(14), Some("medium"), "armor"),
+            ("Mace", "A heavy bludgeoning weapon.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), Some("mace"), None, None, "main_hand"),
+            ("Scale Mail", "Armor made of overlapping metal scales.", "armor", None, None, None, None, Some(14), Some("medium"), "armor"),
         ],
         "Bard" => vec![
-            ("Rapier", "A slender thrusting sword favored by duelists.", "weapon", Some("d8"), Some("piercing"), Some("melee"), None, None, "main_hand"),
-            ("Leather Armor", "Light armor made of cured leather.", "armor", None, None, None, Some(11), Some("light"), "armor"),
+            ("Rapier", "A slender thrusting sword.", "weapon", Some("d8"), Some("piercing"), Some("melee"), Some("rapier"), None, None, "main_hand"),
+            ("Leather Armor", "Light armor made of cured leather.", "armor", None, None, None, None, Some(11), Some("light"), "armor"),
         ],
         "Warlock" | "Druid" => vec![
-            ("Quarterstaff", "A sturdy wooden staff used as a weapon.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), None, None, "main_hand"),
-            ("Leather Armor", "Light armor made of cured leather.", "armor", None, None, None, Some(11), Some("light"), "armor"),
+            ("Quarterstaff", "A sturdy wooden staff.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), Some("quarterstaff"), None, None, "main_hand"),
+            ("Leather Armor", "Light armor made of cured leather.", "armor", None, None, None, None, Some(11), Some("light"), "armor"),
         ],
         "Wizard" | "Sorcerer" => vec![
-            ("Quarterstaff", "A sturdy wooden staff used as a weapon.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), None, None, "main_hand"),
+            ("Quarterstaff", "A sturdy wooden staff.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), Some("quarterstaff"), None, None, "main_hand"),
         ],
         "Monk" => vec![
-            ("Quarterstaff", "A sturdy wooden staff used as a weapon.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), None, None, "main_hand"),
+            ("Quarterstaff", "A sturdy wooden staff.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), Some("quarterstaff"), None, None, "main_hand"),
         ],
         _ => vec![
-            ("Dagger", "A simple short blade.", "weapon", Some("d4"), Some("piercing"), Some("melee"), None, None, "main_hand"),
+            ("Dagger", "A simple short blade.", "weapon", Some("d4"), Some("piercing"), Some("melee"), Some("dagger"), None, None, "main_hand"),
         ],
     };
 
-    for (name, desc, item_type, damage_die, damage_type, weapon_range, base_ac, armor_type, slot) in equipment {
+    for (name, desc, item_type, damage_die, damage_type, weapon_range, weapon_type, base_ac, armor_type, slot) in equipment {
         let item_data = json!({
             "name": name,
             "description": desc,
@@ -568,6 +676,7 @@ async fn seed_starting_equipment(
             "damage_die": damage_die,
             "damage_type": damage_type,
             "weapon_range": weapon_range,
+            "weapon_type": weapon_type,
             "base_ac": base_ac,
             "armor_type": armor_type,
             "rarity": "common"
@@ -575,17 +684,11 @@ async fn seed_starting_equipment(
 
         let item = match items::create_item(pool, campaign_id, &item_data).await {
             Ok(i) => i,
-            Err(e) => {
-                tracing::warn!("Failed to create starting item {}: {}", name, e);
-                continue;
-            }
+            Err(e) => { tracing::warn!("Failed to create starting item {}: {}", name, e); continue; }
         };
-
         if let Err(e) = items::give_item(pool, &item.id, "player", player_id).await {
-            tracing::warn!("Failed to give starting item {}: {}", name, e);
-            continue;
+            tracing::warn!("Failed to give starting item {}: {}", name, e); continue;
         }
-
         if let Err(e) = items::equip_item(pool, &item.id, slot, player_id).await {
             tracing::warn!("Failed to equip starting item {}: {}", name, e);
         }
@@ -599,11 +702,14 @@ async fn seed_starting_equipment(
 async fn seed_class_abilities(pool: &sqlx::SqlitePool, campaign_id: &str, player_id: &str, class: &str) {
     let abilities: Vec<(&str, Option<&str>, i64, &str)> = match class {
         "Barbarian" => vec![
-            ("Rage", Some("Enter a rage as a bonus action. Advantage on STR checks/saves, bonus damage, resistance to physical damage. Lasts 1 minute."), 2, "long_rest"),
+            ("Rage", Some("Enter a rage as a bonus action. Advantage on STR checks/saves, +2 damage, resistance to physical damage. Lasts 1 minute."), 2, "long_rest"),
             ("Unarmored Defense", Some("AC = 10 + DEX mod + CON mod when not wearing armor."), 1, "manual"),
         ],
         "Fighter" => vec![
-            ("Second Wind", Some("Regain 1d10 + Fighter level HP as a bonus action."), 1, "short_rest"),
+            // Second Wind starts at 2 uses, scales to 3 at level 4, 4 at level 10
+            ("Second Wind", Some("Bonus action: regain 1d10 + Fighter level HP. Also usable for Tactical Mind (level 2+) to add 1d10 to a failed ability check."), 2, "short_rest"),
+            // Action Surge added at level 2 — seeded here so it appears in abilities
+            // but starts at 0 uses since it's gained at level 2
         ],
         "Rogue" => vec![
             ("Sneak Attack", Some("Deal extra 1d6 damage when you have advantage or an ally is adjacent to target."), 1, "per_turn"),
@@ -639,27 +745,14 @@ async fn seed_class_abilities(pool: &sqlx::SqlitePool, campaign_id: &str, player
     };
 
     for (name, desc, uses, refresh) in abilities {
-        let _ = world::create_ability(
-            pool,
-            campaign_id,
-            "player",
-            player_id,
-            name,
-            desc,
-            uses,
-            refresh,
-        ).await;
+        let _ = world::create_ability(pool, campaign_id, "player", player_id, name, desc, uses, refresh).await;
     }
 
-    let hit_die = crate::models::hit_die_for_class(class);
+    let hit_die = hit_die_for_class(class);
     let _ = world::create_ability(
-        pool,
-        campaign_id,
-        "player",
-        player_id,
+        pool, campaign_id, "player", player_id,
         "Hit Dice",
         Some(&format!("Spend during short rest to recover HP. Roll d{} + CON mod per die spent.", hit_die)),
-        1,
-        "long_rest",
+        1, "long_rest",
     ).await;
 }
