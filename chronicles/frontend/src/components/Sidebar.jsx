@@ -1,11 +1,8 @@
-import { useState } from 'react'
 import { STYLES } from '../styles.js'
+import { xpProgress, xpToNextLevel, formatModifier } from '../constants.js'
 
 const STAT_LABELS = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA']
 const STAT_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha']
-
-const mod = (v) => Math.floor((v - 10) / 2)
-const fmt = (v) => { const m = mod(v); return (m >= 0 ? '+' : '') + m }
 
 const SIDEBAR_STYLES = `
 ${STYLES}
@@ -94,12 +91,8 @@ export default function Sidebar({
   const equipped = items?.filter(i => i.is_equipped) || []
   const inventory = items?.filter(i => !i.is_equipped) || []
 
-  const xpThresholds = [0,300,900,2700,6500,14000,23000,34000,48000,64000,85000,100000,120000,140000,165000,195000,225000,265000,305000,355000]
-  const currentThreshold = xpThresholds[player.level - 1] || 0
-  const nextThreshold = xpThresholds[player.level] ?? xpThresholds[xpThresholds.length - 1]
-  const xpProgress = nextThreshold > currentThreshold
-    ? ((player.experience - currentThreshold) / (nextThreshold - currentThreshold)) * 100
-    : 100
+  const nextThreshold = xpToNextLevel(player.level)
+  const xpPct = xpProgress(player.experience, player.level)
 
   return (
     <>
@@ -131,7 +124,9 @@ export default function Sidebar({
           </div>
           <div className="hp-txt" style={{ color: hpCol }}>
             {player.current_hp} / {player.max_hp}
-            {player.temp_hp > 0 && <span style={{ color: 'var(--goldl)' }}> (+{player.temp_hp} temp)</span>}
+            {player.temp_hp > 0 && (
+              <span style={{ color: 'var(--goldl)' }}> (+{player.temp_hp} temp)</span>
+            )}
           </div>
 
           {player.current_hp === 0 && !player.is_dead && (
@@ -165,7 +160,7 @@ export default function Sidebar({
         <div className="sec">
           <div className="sec-title">Experience</div>
           <div className="xp-bar">
-            <div className="xp-fill" style={{ width: `${Math.min(100, xpProgress)}%` }} />
+            <div className="xp-fill" style={{ width: `${Math.min(100, xpPct)}%` }} />
           </div>
           <div className="xp-txt">
             {player.experience.toLocaleString()} XP · Next: {nextThreshold.toLocaleString()}
@@ -184,7 +179,7 @@ export default function Sidebar({
             <div key={key} className="stat-r">
               <span className="sr-l">{STAT_LABELS[i]}</span>
               <span className="sr-v">{player[key]}</span>
-              <span className="sr-m">{fmt(player[key])}</span>
+              <span className="sr-m">{formatModifier(player[key])}</span>
             </div>
           ))}
         </div>
@@ -247,7 +242,11 @@ export default function Sidebar({
 
         {/* New adventure */}
         <div style={{ marginTop: 'auto', paddingTop: '.75rem' }}>
-          <button className="btn-ghost" style={{ width: '100%', fontSize: '.72rem' }} onClick={onNewAdventure}>
+          <button
+            className="btn-ghost"
+            style={{ width: '100%', fontSize: '.72rem' }}
+            onClick={onNewAdventure}
+          >
             ✦ New Adventure
           </button>
         </div>

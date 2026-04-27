@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { STYLES } from '../styles.js'
-import { ALL_MANEUVERS } from '../constants.js'
+import {
+  FIGHTER_SUBCLASSES, ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
+  FIGHTER_ASI_LEVELS, getFighterFeatures
+} from '../constants.js'
 
 const MODAL_STYLES = `
 ${STYLES}
@@ -146,36 +149,6 @@ ${STYLES}
 
 const mod = v => Math.floor((v - 10) / 2)
 const fmt = v => { const m = mod(v); return (m >= 0 ? '+' : '') + m }
-
-const FIGHTER_SUBCLASSES = [
-  {
-    name: 'Champion',
-    desc: 'Focused on physical excellence. Expanded critical hit range, Remarkable Athlete, and exceptional resilience.'
-  },
-  {
-    name: 'Battle Master',
-    desc: 'Master of combat maneuvers. Superiority Dice fuel powerful tactical techniques in every fight.'
-  },
-  {
-    name: 'Psi Warrior',
-    desc: 'Augments martial might with psionic power. Telekinetic strikes, protective fields, and mental force.'
-  },
-  {
-    name: 'Eldritch Knight',
-    desc: 'Combines martial skill with arcane magic. Wizard spells and War Bond enhance combat capabilities. (Coming soon)'
-  },
-]
-
-const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' }
-const STAT_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha']
-
-const MANEUVERS = [
-  'Ambush', 'Bait and Switch', "Commander's Strike", 'Commanding Presence',
-  'Disarming Attack', 'Distracting Strike', 'Evasive Footwork', 'Feinting Attack',
-  'Goading Attack', 'Lunging Attack', 'Maneuvering Attack', 'Menacing Attack',
-  'Parry', 'Precision Attack', 'Pushing Attack', 'Rally',
-  'Riposte', 'Sweeping Attack', 'Tactical Assessment', 'Trip Attack',
-]
 
 function maneuversToGainAtLevel(level) {
   // Returns how many NEW maneuvers to pick at this level
