@@ -185,6 +185,8 @@ export default function App() {
       if (result.known_maneuvers) setKnownManeuvers(result.known_maneuvers)
       if (result.time) setCampaignTime(result.time)
 
+      await refreshPlayerState(campaign.id)
+
       setMessages(m => [...m, {
         role: 'dm',
         content: `You have reached level ${result.player?.level}. Your capabilities grow — the path ahead demands ever greater strength.`,
