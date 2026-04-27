@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 // ─── Campaign ─────────────────────────────────────────────────────────────────
@@ -51,6 +50,7 @@ pub struct Player {
     pub name: String,
     pub race: String,
     pub class: String,
+    pub subclass: Option<String>,
     pub background: String,
     pub level: i64,
     pub experience: i64,
@@ -66,6 +66,10 @@ pub struct Player {
     pub cha: i64,
     pub proficiency_bonus: i64,
     pub gold: i64,
+    pub crit_range_min: i64,
+    pub extra_attacks: i64,
+    pub indomitable_uses: i64,
+    pub indomitable_max: i64,
     pub current_location_id: Option<String>,
     pub backstory: Option<String>,
     pub death_save_successes: i64,
@@ -83,15 +87,15 @@ impl Player {
 
     pub fn xp_threshold(level: i64) -> i64 {
         match level {
-            1 => 300,
-            2 => 900,
-            3 => 2700,
-            4 => 6500,
-            5 => 14000,
-            6 => 23000,
-            7 => 34000,
-            8 => 48000,
-            9 => 64000,
+            1  => 300,
+            2  => 900,
+            3  => 2700,
+            4  => 6500,
+            5  => 14000,
+            6  => 23000,
+            7  => 34000,
+            8  => 48000,
+            9  => 64000,
             10 => 85000,
             11 => 100000,
             12 => 120000,
@@ -102,14 +106,14 @@ impl Player {
             17 => 265000,
             18 => 305000,
             19 => 355000,
-            _ => i64::MAX,
+            _  => i64::MAX,
         }
     }
 
     pub fn proficiency_for_level(level: i64) -> i64 {
         match level {
-            1..=4 => 2,
-            5..=8 => 3,
+            1..=4  => 2,
+            5..=8  => 3,
             9..=12 => 4,
             13..=16 => 5,
             _ => 6,
@@ -117,7 +121,20 @@ impl Player {
     }
 
     pub fn is_asi_level(level: i64) -> bool {
-        matches!(level, 4 | 8 | 12 | 16 | 19)
+        // 2024 PHB Fighter ASI levels
+        matches!(level, 4 | 6 | 8 | 12 | 14 | 16)
+    }
+
+    pub fn spellcasting_modifier(&self) -> i64 {
+        match self.subclass.as_deref() {
+            Some("Eldritch Knight") | Some("Psi Warrior") => Player::modifier(self.int),
+            _ => 0,
+        }
+    }
+
+    pub fn maneuver_save_dc(&self) -> i64 {
+        let best_mod = Player::modifier(self.str).max(Player::modifier(self.dex));
+        8 + self.proficiency_bonus + best_mod
     }
 }
 
@@ -130,8 +147,14 @@ pub struct LevelUpResult {
     pub new_max_hp: i64,
     pub new_proficiency_bonus: i64,
     pub asi_available: bool,
+    pub subclass_choice_required: bool,
     pub new_features: Vec<String>,
     pub spell_slots: Option<SpellSlots>,
+    pub second_wind_uses: i64,
+    pub weapon_mastery_count: i64,
+    pub extra_attacks: i64,
+    pub indomitable_max: i64,
+    pub action_surge_uses: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +185,114 @@ pub fn hp_gained_on_level(class: &str, con_modifier: i64) -> i64 {
     (hit_die / 2 + 1) + con_modifier
 }
 
+// ─── Fighter progression tables ───────────────────────────────────────────────
+
+pub fn fighter_second_wind_uses(level: i64) -> i64 {
+    match level {
+        1..=3  => 2,
+        4..=9  => 3,
+        10..=19 => 4,
+        _ => 4,
+    }
+}
+
+pub fn fighter_weapon_mastery_count(level: i64) -> i64 {
+    match level {
+        1..=3  => 3,
+        4..=15 => 4,
+        16..=19 => 5,
+        _ => 6,
+    }
+}
+
+pub fn fighter_extra_attacks(level: i64) -> i64 {
+    match level {
+        1..=4  => 1,
+        5..=10 => 2,
+        11..=19 => 3,
+        _ => 4,
+    }
+}
+
+pub fn fighter_action_surge_uses(level: i64) -> i64 {
+    match level {
+        2..=16 => 1,
+        17..=20 => 2,
+        _ => 0,
+    }
+}
+
+pub fn fighter_indomitable_max(level: i64) -> i64 {
+    match level {
+        9..=12  => 1,
+        13..=16 => 2,
+        17..=20 => 3,
+        _ => 0,
+    }
+}
+
+// ─── Battle Master maneuvers ──────────────────────────────────────────────────
+
+pub const ALL_MANEUVERS: &[&str] = &[
+    "Ambush",
+    "Bait and Switch",
+    "Commander's Strike",
+    "Commanding Presence",
+    "Disarming Attack",
+    "Distracting Strike",
+    "Evasive Footwork",
+    "Feinting Attack",
+    "Goading Attack",
+    "Lunging Attack",
+    "Maneuvering Attack",
+    "Menacing Attack",
+    "Parry",
+    "Precision Attack",
+    "Pushing Attack",
+    "Rally",
+    "Riposte",
+    "Sweeping Attack",
+    "Tactical Assessment",
+    "Trip Attack",
+];
+
+pub fn battle_master_maneuver_count(level: i64) -> i64 {
+    match level {
+        3..=6  => 3,
+        7..=9  => 5,
+        10..=14 => 7,
+        15..=20 => 9,
+        _ => 0,
+    }
+}
+
+pub fn battle_master_superiority_dice(level: i64) -> (i64, i64) {
+    // returns (count, die_size)
+    match level {
+        3..=6  => (4, 8),
+        7..=9  => (5, 8),
+        10..=14 => (5, 10),
+        15..=17 => (6, 10),
+        18..=20 => (6, 12),
+        _ => (0, 8),
+    }
+}
+
+// ─── Psi Warrior energy dice ──────────────────────────────────────────────────
+
+pub fn psi_warrior_energy_dice(level: i64) -> (i64, i64) {
+    // returns (count, die_size)
+    match level {
+        3..=4  => (4, 6),
+        5..=8  => (6, 8),
+        9..=10 => (8, 8),
+        11..=12 => (8, 10),
+        13..=16 => (10, 10),
+        17..=20 => (12, 12),
+        _ => (0, 6),
+    }
+}
+
 // ─── Ability ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -175,6 +306,76 @@ pub struct Ability {
     pub current_uses: i64,
     pub max_uses: i64,
     pub refresh_type: String,
+    pub created_at: String,
+}
+
+// ─── Active Effect ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ActiveEffect {
+    pub id: String,
+    pub campaign_id: String,
+    pub target_type: String,
+    pub target_id: String,
+    pub name: String,
+    pub effect_type: String,
+    pub value: Option<i64>,
+    pub damage_type: Option<String>,
+    pub duration_type: String,
+    pub duration_value: Option<i64>,
+    pub source: Option<String>,
+    pub created_at: String,
+}
+
+// ─── Superiority Dice ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SuperiorityDice {
+    pub id: String,
+    pub campaign_id: String,
+    pub player_id: String,
+    pub pool_name: String,
+    pub die_size: i64,
+    pub current_dice: i64,
+    pub max_dice: i64,
+    pub refresh_type: String,
+    pub created_at: String,
+}
+
+// ─── Known Maneuver ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct KnownManeuver {
+    pub id: String,
+    pub campaign_id: String,
+    pub player_id: String,
+    pub maneuver_name: String,
+    pub created_at: String,
+}
+
+// ─── Weapon Mastery ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WeaponMastery {
+    pub id: String,
+    pub campaign_id: String,
+    pub player_id: String,
+    pub weapon_type: String,
+    pub mastery_property: String,
+    pub created_at: String,
+}
+
+// ─── Proficiency ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Proficiency {
+    pub id: String,
+    pub campaign_id: String,
+    pub player_id: String,
+    pub proficiency_type: String,
+    pub name: String,
+    pub expertise: bool,
+    pub source: Option<String>,
     pub created_at: String,
 }
 
@@ -255,6 +456,7 @@ pub struct Item {
     pub damage_die: Option<String>,
     pub damage_type: Option<String>,
     pub weapon_range: Option<String>,
+    pub weapon_type: Option<String>,
     pub base_ac: Option<i64>,
     pub armor_type: Option<String>,
     pub stealth_disadvantage: bool,
@@ -313,15 +515,15 @@ pub struct CampaignTime {
 impl CampaignTime {
     pub fn advance_time_of_day(&self) -> String {
         match self.time_of_day.as_str() {
-            "dawn" => "morning".to_string(),
-            "morning" => "midday".to_string(),
-            "midday" => "afternoon".to_string(),
+            "dawn"      => "morning".to_string(),
+            "morning"   => "midday".to_string(),
+            "midday"    => "afternoon".to_string(),
             "afternoon" => "dusk".to_string(),
-            "dusk" => "evening".to_string(),
-            "evening" => "night".to_string(),
-            "night" => "deep_night".to_string(),
+            "dusk"      => "evening".to_string(),
+            "evening"   => "night".to_string(),
+            "night"     => "deep_night".to_string(),
             "deep_night" => "dawn".to_string(),
-            _ => "morning".to_string(),
+            _           => "morning".to_string(),
         }
     }
 }
@@ -371,12 +573,12 @@ pub enum GameState {
 impl GameState {
     pub fn from_str(s: &str) -> Self {
         match s {
-            "combat" => GameState::Combat,
-            "dialogue" => GameState::Dialogue,
-            "rest" => GameState::Rest,
-            "leveling" => GameState::Leveling,
-            "shopping" => GameState::Shopping,
-            _ => GameState::Exploration,
+            "combat"      => GameState::Combat,
+            "dialogue"    => GameState::Dialogue,
+            "rest"        => GameState::Rest,
+            "leveling"    => GameState::Leveling,
+            "shopping"    => GameState::Shopping,
+            _             => GameState::Exploration,
         }
     }
 }

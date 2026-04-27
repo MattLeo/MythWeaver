@@ -37,42 +37,67 @@ CREATE TABLE IF NOT EXISTS messages (
     campaign_id TEXT NOT NULL REFERENCES campaigns(id),
     role        TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'tool')),
     content     TEXT NOT NULL,
-    tool_calls  TEXT,  -- JSON array of tool calls if any
+    tool_calls  TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ─── Player ──────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS players (
-    id                  TEXT PRIMARY KEY,
-    campaign_id         TEXT NOT NULL REFERENCES campaigns(id),
-    name                TEXT NOT NULL,
-    race                TEXT NOT NULL,
-    class               TEXT NOT NULL,
-    background          TEXT NOT NULL,
-    level               INTEGER NOT NULL DEFAULT 1,
-    experience          INTEGER NOT NULL DEFAULT 0,
-    current_hp          INTEGER NOT NULL DEFAULT 10,
-    max_hp              INTEGER NOT NULL DEFAULT 10,
-    temp_hp             INTEGER NOT NULL DEFAULT 0,
-    armor_class         INTEGER NOT NULL DEFAULT 10,
-    str                 INTEGER NOT NULL DEFAULT 10,
-    dex                 INTEGER NOT NULL DEFAULT 10,
-    con                 INTEGER NOT NULL DEFAULT 10,
-    int                 INTEGER NOT NULL DEFAULT 10,
-    wis                 INTEGER NOT NULL DEFAULT 10,
-    cha                 INTEGER NOT NULL DEFAULT 10,
-    proficiency_bonus   INTEGER NOT NULL DEFAULT 2,
-    gold                INTEGER NOT NULL DEFAULT 0,
-    current_location_id TEXT REFERENCES locations(id),
-    backstory           TEXT,
+    id                   TEXT PRIMARY KEY,
+    campaign_id          TEXT NOT NULL REFERENCES campaigns(id),
+    name                 TEXT NOT NULL,
+    race                 TEXT NOT NULL,
+    class                TEXT NOT NULL,
+    subclass             TEXT,
+    background           TEXT NOT NULL,
+    level                INTEGER NOT NULL DEFAULT 1,
+    experience           INTEGER NOT NULL DEFAULT 0,
+    current_hp           INTEGER NOT NULL DEFAULT 10,
+    max_hp               INTEGER NOT NULL DEFAULT 10,
+    temp_hp              INTEGER NOT NULL DEFAULT 0,
+    armor_class          INTEGER NOT NULL DEFAULT 10,
+    str                  INTEGER NOT NULL DEFAULT 10,
+    dex                  INTEGER NOT NULL DEFAULT 10,
+    con                  INTEGER NOT NULL DEFAULT 10,
+    int                  INTEGER NOT NULL DEFAULT 10,
+    wis                  INTEGER NOT NULL DEFAULT 10,
+    cha                  INTEGER NOT NULL DEFAULT 10,
+    proficiency_bonus    INTEGER NOT NULL DEFAULT 2,
+    gold                 INTEGER NOT NULL DEFAULT 0,
+    -- Combat modifiers
+    crit_range_min       INTEGER NOT NULL DEFAULT 20,   -- Champion: 19, then 18
+    extra_attacks        INTEGER NOT NULL DEFAULT 1,    -- Fighter 5: 2, 11: 3, 20: 4
+    -- Indomitable
+    indomitable_uses     INTEGER NOT NULL DEFAULT 0,
+    indomitable_max      INTEGER NOT NULL DEFAULT 0,
+    -- Current location
+    current_location_id  TEXT REFERENCES locations(id),
+    backstory            TEXT,
     -- Death saves
     death_save_successes INTEGER NOT NULL DEFAULT 0,
     death_save_failures  INTEGER NOT NULL DEFAULT 0,
-    is_stable           INTEGER NOT NULL DEFAULT 1,
-    is_dead             INTEGER NOT NULL DEFAULT 0,
-    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+    is_stable            INTEGER NOT NULL DEFAULT 1,
+    is_dead              INTEGER NOT NULL DEFAULT 0,
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ─── Proficiencies ───────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS proficiencies (
+    id               TEXT PRIMARY KEY,
+    campaign_id      TEXT NOT NULL REFERENCES campaigns(id),
+    player_id        TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    proficiency_type TEXT NOT NULL
+                     CHECK(proficiency_type IN (
+                         'weapon', 'armor', 'tool',
+                         'skill', 'saving_throw', 'language'
+                     )),
+    name             TEXT NOT NULL,   -- "longsword", "stealth", "constitution"
+    expertise        INTEGER NOT NULL DEFAULT 0,
+    source           TEXT,            -- "class", "background", "feat", "racial"
+    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ─── Abilities ───────────────────────────────────────────────────────────────
@@ -90,6 +115,89 @@ CREATE TABLE IF NOT EXISTS abilities (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ─── Active Effects ──────────────────────────────────────────────────────────
+-- Temporary modifiers applied during combat or for a duration
+
+CREATE TABLE IF NOT EXISTS active_effects (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    target_type     TEXT NOT NULL CHECK(target_type IN ('player', 'companion', 'enemy')),
+    target_id       TEXT NOT NULL,
+    name            TEXT NOT NULL,   -- "Rage", "Bless", "Bait and Switch AC"
+    effect_type     TEXT NOT NULL
+                    CHECK(effect_type IN (
+                        'damage_bonus',      -- flat bonus to damage rolls
+                        'attack_bonus',      -- flat bonus to attack rolls
+                        'ac_bonus',          -- flat bonus to AC
+                        'damage_resistance', -- halve damage of specified type
+                        'advantage_attack',  -- advantage on attack rolls
+                        'advantage_save',    -- advantage on saving throws
+                        'disadvantage_attack',
+                        'disadvantage_save',
+                        'temp_hp',           -- temporary hit points
+                        'speed_bonus',
+                        'crit_range',        -- changes crit threshold
+                        'custom'             -- narrative/model-handled
+                    )),
+    value           INTEGER,         -- numeric value where applicable
+    damage_type     TEXT,            -- for resistance: "fire", "all", etc.
+    duration_type   TEXT NOT NULL
+                    CHECK(duration_type IN (
+                        'end_of_turn',
+                        'start_of_next_turn',
+                        'until_hit',
+                        'rounds',
+                        'concentration',
+                        'permanent'
+                    )),
+    duration_value  INTEGER,         -- number of rounds if duration_type = 'rounds'
+    source          TEXT,            -- "Rage", "Bait and Switch", "Bless"
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ─── Superiority Dice ────────────────────────────────────────────────────────
+-- Used by Battle Master and Psi Warrior
+
+CREATE TABLE IF NOT EXISTS superiority_dice (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    pool_name       TEXT NOT NULL,   -- "Battle Master", "Psi Warrior"
+    die_size        INTEGER NOT NULL DEFAULT 8,   -- 6, 8, 10, 12
+    current_dice    INTEGER NOT NULL DEFAULT 4,
+    max_dice        INTEGER NOT NULL DEFAULT 4,
+    refresh_type    TEXT NOT NULL DEFAULT 'short_rest'
+                    CHECK(refresh_type IN ('short_rest', 'long_rest')),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ─── Known Maneuvers ─────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS known_maneuvers (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    maneuver_name   TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(player_id, maneuver_name)
+);
+
+-- ─── Weapon Mastery ──────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS weapon_mastery (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    weapon_type     TEXT NOT NULL,   -- "longsword", "greataxe", "handaxe"
+    mastery_property TEXT NOT NULL
+                    CHECK(mastery_property IN (
+                        'cleave', 'graze', 'nick', 'push',
+                        'sap', 'slow', 'topple', 'vex'
+                    )),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(player_id, weapon_type)
+);
+
 -- ─── World ───────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS locations (
@@ -98,7 +206,7 @@ CREATE TABLE IF NOT EXISTS locations (
     name            TEXT NOT NULL,
     location_type   TEXT NOT NULL DEFAULT 'area',
     description     TEXT NOT NULL,
-    state           TEXT,           -- "burned down", "occupied", "abandoned"
+    state           TEXT,
     is_discovered   INTEGER NOT NULL DEFAULT 0,
     notes           TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -110,7 +218,7 @@ CREATE TABLE IF NOT EXISTS location_connections (
     campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
     from_location   TEXT NOT NULL REFERENCES locations(id),
     to_location     TEXT NOT NULL REFERENCES locations(id),
-    travel_notes    TEXT,           -- "rough road, half a day's travel"
+    travel_notes    TEXT,
     is_hidden       INTEGER NOT NULL DEFAULT 0
 );
 
@@ -135,10 +243,10 @@ CREATE TABLE IF NOT EXISTS npcs (
 CREATE TABLE IF NOT EXISTS world_facts (
     id              TEXT PRIMARY KEY,
     campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
-    category        TEXT,           -- "faction", "history", "quest", "rumor"
+    category        TEXT,
     title           TEXT NOT NULL,
     content         TEXT NOT NULL,
-    tags            TEXT,           -- JSON array of searchable tags
+    tags            TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -161,9 +269,10 @@ CREATE TABLE IF NOT EXISTS items (
                         'ring_1', 'ring_2', 'boots', 'helmet', 'amulet', 'shield'
                     )),
     -- Weapon stats
-    damage_die      TEXT,           -- "1d8", "2d6"
-    damage_type     TEXT,           -- "slashing", "piercing", "bludgeoning"
-    weapon_range    TEXT,           -- "melee", "ranged (80/320)"
+    damage_die      TEXT,
+    damage_type     TEXT,
+    weapon_range    TEXT,
+    weapon_type     TEXT,            -- "longsword", "greataxe" — for mastery lookup
     -- Armor stats
     base_ac         INTEGER,
     armor_type      TEXT CHECK(armor_type IN ('light', 'medium', 'heavy', 'shield', null)),
@@ -184,8 +293,8 @@ CREATE TABLE IF NOT EXISTS item_effects (
                         'advantage_on', 'disadvantage_on', 'damage_die',
                         'resistance_to', 'immunity_to', 'speed_bonus'
                     )),
-    value           INTEGER,        -- numeric bonus where applicable
-    target          TEXT            -- "stealth", "fire", "all_saves", etc.
+    value           INTEGER,
+    target          TEXT
 );
 
 -- ─── Companions ──────────────────────────────────────────────────────────────
@@ -225,6 +334,13 @@ CREATE TABLE IF NOT EXISTS combat_encounters (
     turn_index               INTEGER NOT NULL DEFAULT 0,
     turn_order_json          TEXT,
     pending_attack_target_id TEXT,
+    -- Action economy
+    actions_remaining        INTEGER NOT NULL DEFAULT 1,
+    bonus_actions_remaining  INTEGER NOT NULL DEFAULT 1,
+    reactions_remaining      INTEGER NOT NULL DEFAULT 1,
+    action_surge_available   INTEGER NOT NULL DEFAULT 0,
+    action_surge_used        INTEGER NOT NULL DEFAULT 0,
+    attacks_made_this_action INTEGER NOT NULL DEFAULT 0,
     created_at               TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -244,6 +360,12 @@ CREATE TABLE IF NOT EXISTS combat_enemies (
     initiative      INTEGER NOT NULL DEFAULT 0,
     turn_order      INTEGER NOT NULL DEFAULT 0,
     is_alive        INTEGER NOT NULL DEFAULT 1,
+    -- Conditions
+    is_prone        INTEGER NOT NULL DEFAULT 0,
+    is_frightened   INTEGER NOT NULL DEFAULT 0,
+    is_disarmed     INTEGER NOT NULL DEFAULT 0,
+    -- Studied Attacks tracking
+    player_missed_last_attack INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -290,10 +412,10 @@ CREATE TABLE IF NOT EXISTS event_tables (
     id              TEXT PRIMARY KEY,
     campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
     name            TEXT NOT NULL,
-    location_type   TEXT,           -- null = global
+    location_type   TEXT,
     trigger_type    TEXT NOT NULL
                     CHECK(trigger_type IN ('travel', 'rest', 'time', 'location_enter', 'manual')),
-    trigger_chance  INTEGER NOT NULL DEFAULT 30,  -- percent chance per trigger
+    trigger_chance  INTEGER NOT NULL DEFAULT 30,
     is_active       INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -306,8 +428,8 @@ CREATE TABLE IF NOT EXISTS event_entries (
     event_type      TEXT NOT NULL
                     CHECK(event_type IN ('encounter', 'environmental', 'world', 'discovery', 'personal')),
     title           TEXT NOT NULL,
-    description     TEXT NOT NULL,  -- context injected into DM prompt
-    conditions      TEXT,           -- JSON: {"min_level": 3, "time_of_day": "night"}
+    description     TEXT NOT NULL,
+    conditions      TEXT,
     is_repeatable   INTEGER NOT NULL DEFAULT 1,
     times_triggered INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
@@ -315,15 +437,20 @@ CREATE TABLE IF NOT EXISTS event_entries (
 
 -- ─── Indexes ─────────────────────────────────────────────────────────────────
 
-CREATE INDEX IF NOT EXISTS idx_messages_session    ON messages(session_id);
-CREATE INDEX IF NOT EXISTS idx_messages_campaign   ON messages(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_npcs_location       ON npcs(current_location_id);
-CREATE INDEX IF NOT EXISTS idx_npcs_campaign       ON npcs(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_locations_campaign  ON locations(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_items_owner         ON items(owner_type, owner_id);
-CREATE INDEX IF NOT EXISTS idx_world_facts_campaign ON world_facts(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_companions_campaign ON companions(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_event_entries_table ON event_entries(table_id);
-CREATE INDEX IF NOT EXISTS idx_combat_encounter ON combat_encounters(campaign_id, is_active);
-CREATE INDEX IF NOT EXISTS idx_combat_enemies   ON combat_enemies(encounter_id);
-CREATE INDEX IF NOT EXISTS idx_combat_allies    ON combat_allies(encounter_id);
+CREATE INDEX IF NOT EXISTS idx_messages_session      ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_campaign     ON messages(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_npcs_location         ON npcs(current_location_id);
+CREATE INDEX IF NOT EXISTS idx_npcs_campaign         ON npcs(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_locations_campaign    ON locations(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_items_owner           ON items(owner_type, owner_id);
+CREATE INDEX IF NOT EXISTS idx_world_facts_campaign  ON world_facts(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_companions_campaign   ON companions(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_event_entries_table   ON event_entries(table_id);
+CREATE INDEX IF NOT EXISTS idx_combat_encounter      ON combat_encounters(campaign_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_combat_enemies        ON combat_enemies(encounter_id);
+CREATE INDEX IF NOT EXISTS idx_combat_allies         ON combat_allies(encounter_id);
+CREATE INDEX IF NOT EXISTS idx_proficiencies_player  ON proficiencies(player_id);
+CREATE INDEX IF NOT EXISTS idx_active_effects_target ON active_effects(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_superiority_player    ON superiority_dice(player_id);
+CREATE INDEX IF NOT EXISTS idx_known_maneuvers_player ON known_maneuvers(player_id);
+CREATE INDEX IF NOT EXISTS idx_weapon_mastery_player ON weapon_mastery(player_id);
