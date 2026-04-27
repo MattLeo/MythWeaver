@@ -23,6 +23,7 @@ fn exploration_tools() -> Vec<Value> {
     tools.extend(event_tools());
     tools.extend(session_tools());
     tools.extend(progression_tools());
+    tools.extend(fighter_exploration_tools());
     tools.push(request_roll_tool());
     tools
 }
@@ -61,10 +62,8 @@ fn rest_tools() -> Vec<Value> {
 
 fn leveling_tools() -> Vec<Value> {
     let mut tools = vec![];
-    tools.extend(progression_tools());
-    tools.extend(ability_tools());
     tools.extend(world_query_tools());
-    tools.extend(fighter_leveling_tools());
+    tools.extend(session_tools());
     tools
 }
 
@@ -473,7 +472,7 @@ fn companion_combat_tools() -> Vec<Value> {
 fn progression_tools() -> Vec<Value> {
     vec![
         tool("award_experience",
-            "Award XP to the player.",
+            "Award XP to the player after meaningful combat or roleplay milestones.",
             json!({
                 "type": "object",
                 "properties": {
@@ -481,38 +480,6 @@ fn progression_tools() -> Vec<Value> {
                     "reason": { "type": "string" }
                 },
                 "required": ["amount", "reason"]
-            })
-        ),
-        tool("level_up",
-            "Level up the player. Returns new features, HP gained, and whether subclass or ASI choice is required.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
-        ),
-        tool("set_subclass",
-            "Set the player's subclass. Call at level 3 when subclass_choice_required is true.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "subclass": {
-                        "type": "string",
-                        "enum": ["Champion", "Battle Master", "Psi Warrior", "Eldritch Knight"],
-                        "description": "Fighter subclass choice"
-                    }
-                },
-                "required": ["subclass"]
-            })
-        ),
-        tool("apply_asi",
-            "Apply an Ability Score Improvement. To raise one stat by 2, pass the same stat for both stat1 and stat2, or omit stat2. To raise two different stats by 1 each, pass two different stats.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "stat1": { "type": "string", "enum": ["str","dex","con","int","wis","cha"] },
-                    "stat2": { "type": "string", "enum": ["str","dex","con","int","wis","cha"], "description": "Omit or set same as stat1 for +2 to one stat. Set different from stat1 for +1 to each." }
-                },
-                "required": ["stat1"]
             })
         ),
     ]
@@ -582,7 +549,7 @@ fn death_tools() -> Vec<Value> {
 fn time_tools() -> Vec<Value> {
     vec![
         tool("advance_time",
-            "Advance time for travel or downtime.",
+            "Advance time. Use steps=1 for short rest, steps=8 for long rest, steps=2-4 for travel.",
             json!({
                 "type": "object",
                 "properties": {
@@ -752,7 +719,7 @@ fn fighter_combat_tools() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
-                    "original_roll": { "type": "integer", "description": "The failed saving throw roll" }
+                    "original_roll": { "type": "integer" }
                 },
                 "required": ["original_roll"]
             })
@@ -766,13 +733,13 @@ fn fighter_combat_tools() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
-                    "ability_id": { "type": "string", "description": "The Second Wind ability ID returned by use_tactical_mind" }
+                    "ability_id": { "type": "string" }
                 },
                 "required": ["ability_id"]
             })
         ),
         tool("resolve_maneuver",
-            "Battle Master: Resolve a maneuver, spending a Superiority Die. Call after a successful hit unless the maneuver is a bonus action.",
+            "Battle Master: Resolve a maneuver, spending a Superiority Die.",
             json!({
                 "type": "object",
                 "properties": {
@@ -787,8 +754,8 @@ fn fighter_combat_tools() -> Vec<Value> {
                             "Riposte", "Sweeping Attack", "Tactical Assessment", "Trip Attack"
                         ]
                     },
-                    "target_id": { "type": "string", "description": "Combat enemy ID for maneuvers that target an enemy" },
-                    "superiority_roll": { "type": "integer", "description": "The result of rolling the superiority die" }
+                    "target_id": { "type": "string" },
+                    "superiority_roll": { "type": "integer" }
                 },
                 "required": ["maneuver_name", "superiority_roll"]
             })
@@ -798,7 +765,7 @@ fn fighter_combat_tools() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
-                    "psi_roll": { "type": "integer", "description": "Result of rolling the Psionic Energy Die" }
+                    "psi_roll": { "type": "integer" }
                 },
                 "required": ["psi_roll"]
             })
@@ -808,7 +775,7 @@ fn fighter_combat_tools() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
-                    "psi_roll": { "type": "integer", "description": "Result of rolling the Psionic Energy Die" }
+                    "psi_roll": { "type": "integer" }
                 },
                 "required": ["psi_roll"]
             })
@@ -820,57 +787,23 @@ fn fighter_combat_tools() -> Vec<Value> {
     ]
 }
 
-// ─── Fighter Leveling Tools ───────────────────────────────────────────────────
+// ─── Fighter Exploration Tools ────────────────────────────────────────────────
 
-fn fighter_leveling_tools() -> Vec<Value> {
+fn fighter_exploration_tools() -> Vec<Value> {
     vec![
-        tool("set_subclass",
-            "Set the Fighter's subclass at level 3.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "subclass": {
-                        "type": "string",
-                        "enum": ["Champion", "Battle Master", "Psi Warrior", "Eldritch Knight"]
-                    }
-                },
-                "required": ["subclass"]
-            })
-        ),
         tool("change_weapon_mastery",
-            "Fighter: Change one weapon mastery choice (allowed after each long rest).",
+            "Fighter: Swap one weapon mastery choice after a long rest.",
             json!({
                 "type": "object",
                 "properties": {
-                    "old_weapon": { "type": "string", "description": "Weapon type to remove mastery from" },
-                    "new_weapon": { "type": "string", "description": "Weapon type to gain mastery with" },
+                    "old_weapon": { "type": "string" },
+                    "new_weapon": { "type": "string" },
                     "new_property": {
                         "type": "string",
                         "enum": ["cleave","graze","nick","push","sap","slow","topple","vex"]
                     }
                 },
                 "required": ["old_weapon", "new_weapon", "new_property"]
-            })
-        ),
-        tool("replace_maneuver",
-            "Battle Master: Replace a known maneuver with a new one when leveling up.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "old_maneuver": { "type": "string" },
-                    "new_maneuver": {
-                        "type": "string",
-                        "enum": [
-                            "Ambush", "Bait and Switch", "Commander's Strike",
-                            "Commanding Presence", "Disarming Attack", "Distracting Strike",
-                            "Evasive Footwork", "Feinting Attack", "Goading Attack",
-                            "Lunging Attack", "Maneuvering Attack", "Menacing Attack",
-                            "Parry", "Precision Attack", "Pushing Attack", "Rally",
-                            "Riposte", "Sweeping Attack", "Tactical Assessment", "Trip Attack"
-                        ]
-                    }
-                },
-                "required": ["old_maneuver", "new_maneuver"]
             })
         ),
         tool("query_weapon_masteries",
