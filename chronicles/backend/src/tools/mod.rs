@@ -5,7 +5,7 @@ pub fn tools_for_state(state: &GameState) -> Vec<Value> {
     match state {
         GameState::Exploration => exploration_tools(),
         GameState::Combat      => combat_tools(),
-        GameState::Dialogue    => dialogue_tools(),
+        GameState::Dialogue    => exploration_tools(),
         GameState::Rest        => rest_tools(),
         GameState::Leveling    => leveling_tools(),
         GameState::Shopping    => shopping_tools(),
@@ -41,6 +41,8 @@ fn combat_tools() -> Vec<Value> {
     tools
 }
 
+/* Commenting these out as they may no longer be necessary
+
 fn dialogue_tools() -> Vec<Value> {
     let mut tools = vec![];
     tools.extend(world_query_tools());
@@ -51,6 +53,7 @@ fn dialogue_tools() -> Vec<Value> {
     tools.push(request_roll_tool());
     tools
 }
+*/
 
 fn rest_tools() -> Vec<Value> {
     let mut tools = vec![];
