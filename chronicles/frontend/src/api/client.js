@@ -2,7 +2,7 @@ const BASE = '/api'
 
 export async function listCampaigns() {
   const res = await fetch(`${BASE}/campaigns`)
-  if (!res.ok) throw new Error(`Failed to list campaigns`)
+  if (!res.ok) throw new Error('Failed to list campaigns')
   return res.json()
 }
 
@@ -18,35 +18,41 @@ export async function createCampaign(data) {
 
 export async function getCampaignState(campaignId) {
   const res = await fetch(`${BASE}/campaigns/${campaignId}`)
-  if (!res.ok) throw new Error(`Failed to get campaign: ${res.statusText}`)
+  if (!res.ok) throw new Error('Failed to get campaign')
   return res.json()
 }
 
 export async function getPlayerState(campaignId) {
   const res = await fetch(`${BASE}/campaigns/${campaignId}/player-state`)
-  if (!res.ok) throw new Error(`Failed to get player state`)
+  if (!res.ok) throw new Error('Failed to get player state')
   return res.json()
 }
 
 export async function getSessionMessages(campaignId, sessionId) {
   const res = await fetch(`${BASE}/campaigns/${campaignId}/sessions/${sessionId}/messages`)
-  if (!res.ok) throw new Error(`Failed to get session messages`)
+  if (!res.ok) throw new Error('Failed to get session messages')
   return res.json()
 }
 
 export async function startSession(campaignId) {
-  const res = await fetch(`${BASE}/campaigns/${campaignId}/session`, {
-    method: 'POST'
-  })
-  if (!res.ok) throw new Error(`Failed to start session`)
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/session`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to start session')
   return res.json()
 }
 
 export async function endSession(campaignId, sessionId) {
-  const res = await fetch(`${BASE}/campaigns/${campaignId}/sessions/${sessionId}/end`, {
-    method: 'POST'
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/sessions/${sessionId}/end`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to end session')
+  return res.json()
+}
+
+export async function levelUp(campaignId, choices) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/level-up`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(choices)
   })
-  if (!res.ok) throw new Error(`Failed to end session`)
+  if (!res.ok) throw new Error('Failed to level up')
   return res.json()
 }
 
@@ -62,6 +68,6 @@ export async function sendMessage({ campaignId, sessionId, content, gameState, r
       roll_result: rollResult || null
     })
   })
-  if (!res.ok) throw new Error(`Failed to send message`)
+  if (!res.ok) throw new Error('Failed to send message')
   return res.json()
 }

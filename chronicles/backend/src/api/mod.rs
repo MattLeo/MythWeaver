@@ -517,6 +517,191 @@ pub async fn send_message(
     })))
 }
 
+// ── Level Up ───────────────────────────────────────────────────
+
+pub async fn level_up(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<LevelUpRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+
+    if p.level >= 20 {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Already at maximum level"})));
+    }
+
+    // Check XP threshold
+    let threshold = Player::xp_threshold(p.level);
+    if p.experience < threshold {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "error": "Not enough XP to level up",
+            "current_xp": p.experience,
+            "required_xp": threshold
+        })));
+    }
+
+    // Level up the player
+    let result = match player::level_up_player(pool, &p.id, &p).await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    };
+
+    // Handle subclass selection
+    if let Some(ref subclass) = req.subclass {
+        if let Err(e) = player::set_subclass(pool, &p.id, subclass).await {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})));
+        }
+        if let Err(e) = fighter::seed_subclass(pool, &campaign_id, &p.id, subclass, result.new_level).await {
+            tracing::warn!("Failed to seed subclass {}: {}", subclass, e);
+        }
+    }
+
+    // Handle ASI
+    if let Some(ref stat1) = req.asi_stat1 {
+        let stat2 = req.asi_stat2.as_deref();
+        if let Err(e) = player::apply_asi(pool, &p.id, stat1, stat2).await {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})));
+        }
+        // Recalculate AC in case DEX or CON changed
+        let _ = items::recalculate_ac(pool, &p.id).await;
+    }
+
+    // Handle Battle Master maneuver selection
+    if let Some(ref maneuvers) = req.new_maneuvers {
+        for maneuver in maneuvers {
+            let _ = fighter::add_maneuver(pool, &campaign_id, &p.id, maneuver).await;
+        }
+    }
+
+    // Handle maneuver replacement
+    if let (Some(ref old_m), Some(ref new_m)) = (&req.replaced_maneuver, req.new_maneuvers.as_ref().and_then(|v| v.last())) {
+        let _ = fighter::replace_maneuver(pool, &p.id, old_m, new_m).await;
+    }
+
+    // Seed new abilities for this level
+    let subclass_now = req.subclass.as_deref().or(p.subclass.as_deref());
+    seed_level_up_abilities_direct(pool, &campaign_id, &p.id, &p.class, result.new_level, subclass_now).await;
+
+    // Return full updated player state
+    let updated_player = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to fetch updated player"}))),
+    };
+
+    let abilities = world::get_abilities(pool, &updated_player.id, "player").await.unwrap_or_default();
+    let all_items = items::get_player_items(pool, &updated_player.id).await.unwrap_or_default();
+    let active_companions = companions::get_active_companions(pool, &campaign_id).await.unwrap_or_default();
+    let camp_time = time::get_campaign_time(pool, &campaign_id).await.ok().flatten();
+    let weapon_masteries = fighter::get_weapon_masteries(pool, &updated_player.id).await.unwrap_or_default();
+    let known_maneuvers = fighter::get_known_maneuvers(pool, &updated_player.id).await.unwrap_or_default();
+    let superiority_dice = if let Some(ref sc) = updated_player.subclass {
+        fighter::get_superiority_dice(pool, &updated_player.id, sc).await.unwrap_or(None)
+    } else { None };
+
+    (StatusCode::OK, Json(json!({
+        "player": updated_player,
+        "abilities": abilities,
+        "items": all_items,
+        "companions": active_companions,
+        "time": camp_time,
+        "weapon_masteries": weapon_masteries,
+        "known_maneuvers": known_maneuvers,
+        "superiority_dice": superiority_dice,
+        "level_up_result": result,
+    })))
+}
+
+async fn seed_level_up_abilities_direct(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    class: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    // Reuse the same logic from executor.rs
+    // This is a direct call so the model is not involved
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+
+    if class != "Fighter" { return; }
+
+    match new_level {
+        2 => {
+            if !has("Action Surge") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Action Surge",
+                    Some("Take one additional action on your turn (not Magic action). Recharges on short or long rest."),
+                    1, "short_rest").await;
+            }
+            if !has("Tactical Mind") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Tactical Mind",
+                    Some("When you fail an ability check, spend a Second Wind use to roll 1d10 and add to the check."),
+                    1, "manual").await;
+            }
+        }
+        5 => {
+            if !has("Tactical Shift") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Tactical Shift",
+                    Some("When you use Second Wind, move up to half your Speed without provoking Opportunity Attacks."),
+                    1, "manual").await;
+            }
+        }
+        9 => {
+            if !has("Indomitable") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Indomitable",
+                    Some("When you fail a saving throw, reroll it with a bonus equal to your Fighter level."),
+                    1, "long_rest").await;
+            }
+            if !has("Tactical Master") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Tactical Master",
+                    Some("When attacking with a mastered weapon, replace its mastery property with Push, Sap, or Slow."),
+                    1, "manual").await;
+            }
+        }
+        13 => {
+            if !has("Studied Attacks") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Studied Attacks",
+                    Some("If you miss an attack against a creature, you have Advantage on your next attack against it before end of your next turn."),
+                    1, "manual").await;
+            }
+        }
+        _ => {}
+    }
+
+    match subclass {
+        Some("Champion") => match new_level {
+            7  => { if !has("Additional Fighting Style") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Additional Fighting Style", Some("Gain another Fighting Style feat."), 1, "manual").await; } }
+            10 => { if !has("Heroic Warrior") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Heroic Warrior", Some("Give yourself Heroic Inspiration at start of your turn if you don't have it."), 1, "per_turn").await; } }
+            18 => { if !has("Survivor: Heroic Rally") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Survivor: Heroic Rally", Some("Regain 5 + CON modifier HP at start of each turn if Bloodied with at least 1 HP."), 1, "per_turn").await; } }
+            _ => {}
+        },
+        Some("Battle Master") => match new_level {
+            7  => { if !has("Know Your Enemy") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Know Your Enemy", Some("Learn a creature's Immunities, Resistances, and Vulnerabilities within 30 feet."), 1, "long_rest").await; } }
+            15 => { if !has("Relentless") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Relentless", Some("Once per turn when you use a maneuver, roll 1d8 instead of expending a Superiority Die."), 1, "per_turn").await; } }
+            _ => {}
+        },
+        Some("Psi Warrior") => match new_level {
+            7  => { if !has("Psi-Powered Leap") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Psi-Powered Leap", Some("Gain Fly Speed equal to twice your Speed until end of turn."), 1, "short_rest").await; } }
+            10 => { if !has("Guarded Mind") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Guarded Mind", Some("Resistance to Psychic damage. Spend a Psionic Energy Die to end Charmed or Frightened."), 1, "manual").await; } }
+            15 => { if !has("Bulwark of Force") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Bulwark of Force", Some("Grant Half Cover to up to INT modifier creatures within 30 feet for 1 minute."), 1, "long_rest").await; } }
+            18 => { if !has("Telekinetic Master") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Telekinetic Master", Some("Telekinesis always prepared, cast without spell slot. Make one weapon attack as Bonus Action each turn while concentrating."), 1, "long_rest").await; } }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
 // ─── Combat turn resolver ─────────────────────────────────────────────────────
 
 async fn resolve_combat_turns(

@@ -646,3 +646,12 @@ pub struct PlayerStateResponse {
     pub current_location: Option<Location>,
     pub campaign_time: Option<CampaignTime>,
 }
+
+#[derive(Debug, serde::Deserialize)]
+pub struct LevelUpRequest {
+    pub subclass: Option<String>,
+    pub asi_stat1: Option<String>,
+    pub asi_stat2: Option<String>,
+    pub new_maneuvers: Option<Vec<String>>,
+    pub replaced_maneuver: Option<String>,
+}
