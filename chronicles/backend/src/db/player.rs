@@ -293,20 +293,29 @@ pub async fn apply_asi(
     stat2: Option<&str>,
 ) -> Result<()> {
     let col1 = stat_to_column(stat1)?;
+
+    // If stat2 is the same as stat1, or not provided, apply +2 to stat1
+    let is_same_stat = stat2.map(|s| s.eq_ignore_ascii_case(stat1)).unwrap_or(false);
+
     if let Some(s2) = stat2 {
-        let col2 = stat_to_column(s2)?;
-        let query = format!(
-            "UPDATE players SET {} = {} + 1, {} = {} + 1, updated_at = datetime('now') WHERE id = ?",
-            col1, col1, col2, col2
-        );
-        sqlx::query(&query).bind(player_id).execute(pool).await?;
-    } else {
-        let query = format!(
-            "UPDATE players SET {} = {} + 2, updated_at = datetime('now') WHERE id = ?",
-            col1, col1
-        );
-        sqlx::query(&query).bind(player_id).execute(pool).await?;
+        if !is_same_stat {
+            let col2 = stat_to_column(s2)?;
+            let query = format!(
+                "UPDATE players SET {} = {} + 1, {} = {} + 1, updated_at = datetime('now') WHERE id = ?",
+                col1, col1, col2, col2
+            );
+            sqlx::query(&query).bind(player_id).execute(pool).await?;
+            return Ok(());
+        }
     }
+
+    // +2 to a single stat
+    let query = format!(
+        "UPDATE players SET {} = {} + 2, updated_at = datetime('now') WHERE id = ?",
+        col1, col1
+    );
+    sqlx::query(&query).bind(player_id).execute(pool).await?;
+
     Ok(())
 }
 

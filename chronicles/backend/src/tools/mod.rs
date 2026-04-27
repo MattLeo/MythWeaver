@@ -505,12 +505,12 @@ fn progression_tools() -> Vec<Value> {
             })
         ),
         tool("apply_asi",
-            "Apply an Ability Score Improvement.",
+            "Apply an Ability Score Improvement. To raise one stat by 2, pass the same stat for both stat1 and stat2, or omit stat2. To raise two different stats by 1 each, pass two different stats.",
             json!({
                 "type": "object",
                 "properties": {
                     "stat1": { "type": "string", "enum": ["str","dex","con","int","wis","cha"] },
-                    "stat2": { "type": "string", "enum": ["str","dex","con","int","wis","cha"], "description": "Optional second stat" }
+                    "stat2": { "type": "string", "enum": ["str","dex","con","int","wis","cha"], "description": "Omit or set same as stat1 for +2 to one stat. Set different from stat1 for +1 to each." }
                 },
                 "required": ["stat1"]
             })

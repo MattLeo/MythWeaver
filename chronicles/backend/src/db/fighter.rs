@@ -1,5 +1,4 @@
 use anyhow::Result;
-use serde_json::json;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 

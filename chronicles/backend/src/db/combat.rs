@@ -553,7 +553,7 @@ pub async fn resolve_player_attack_with_roll(
             fighter::remove_active_effect(pool, &effect.id).await?;
         }
 
-        fighter::advance_turn(pool, &encounter).await?;
+        advance_turn(pool, &encounter).await?;
 
         return Ok(json!({
             "hit": false,
@@ -1191,14 +1191,13 @@ pub async fn resolve_enemy_attack(
     };
 
     // Frightened enemies have disadvantage on attacks
-    let (roll1, roll2) = (roll_die(20), roll_die(20));
-    let attack_roll = if enemy.is_frightened {
-        roll1.min(roll2) // disadvantage
+    let base_roll = if enemy.is_frightened {
+        let (roll1, roll2) = (roll_die(20), roll_die(20));
+        roll1.min(roll2)
     } else {
-        roll1.max(roll2).max(roll1) // normal — just use roll1 but keep both for logging
+        roll_die(20)
     };
-
-    let attack_roll = roll_die(20) + enemy.attack_bonus;
+    let attack_roll = base_roll + enemy.attack_bonus;
 
     // Player AC includes active effect bonuses
     let ac_bonus = get_ac_bonus_from_effects(pool, &player.id).await;
