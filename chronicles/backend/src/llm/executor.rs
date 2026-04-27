@@ -184,13 +184,29 @@ pub async fn execute_tool(
             Ok(json!({"message": "Player moved", "new_location": loc}))
         }
 
-        "update_gold" => {
+        "update_currency" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let amount = parse_i64(&args["amount"]);
-            let new_gold = (p.gold + amount).max(0);
-            player::update_player_gold(pool, &p.id, new_gold).await?;
-            Ok(json!({"message": "Gold updated", "previous": p.gold, "change": amount, "new_total": new_gold}))
+
+            let delta_pp = parse_i64(&args["platinum"]);
+            let delta_gp = parse_i64(&args["gold"]);
+            let delta_sp = parse_i64(&args["silver"]);
+            let delta_cp = parse_i64(&args["copper"]);
+
+            let (new_pp, new_gp, new_sp, new_cp) = player::update_currency(
+                pool, &p.id, delta_pp, delta_gp, delta_sp, delta_cp
+            ).await?;
+
+            Ok(json!({
+                "message": "Currency updated",
+                "reason": args["reason"],
+                "new_balance": {
+                    "platinum": new_pp,
+                    "gold": new_gp,
+                    "silver": new_sp,
+                    "copper": new_cp
+                }
+            }))
         }
 
         // ── Items ─────────────────────────────────────────────────────────────

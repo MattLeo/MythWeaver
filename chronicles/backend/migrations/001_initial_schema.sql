@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS players (
     cha                  INTEGER NOT NULL DEFAULT 10,
     proficiency_bonus    INTEGER NOT NULL DEFAULT 2,
     gold                 INTEGER NOT NULL DEFAULT 0,
+    platinum             INTEGER NOT NULL DEFAULT 0,
+    silver               INTEGER NOT NULL DEFAULT 0,
+    copper               INTEGER NOT NULL DEFAULT 0,
     -- Combat modifiers
     crit_range_min       INTEGER NOT NULL DEFAULT 20,   -- Champion: 19, then 18
     extra_attacks        INTEGER NOT NULL DEFAULT 1,    -- Fighter 5: 2, 11: 3, 20: 4

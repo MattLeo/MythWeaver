@@ -242,15 +242,18 @@ fn world_mutation_tools() -> Vec<Value> {
                 "required": ["location_id"]
             })
         ),
-        tool("update_gold",
-            "Update player gold. Positive to add, negative to subtract.",
+        tool("update_currency",
+            "Update player currency. Pass the amount of each denomination to add or subtract. Positive adds, negative subtracts. The backend handles all conversion and rollup automatically — never do math yourself, just pass the denomination amounts as stated.",
             json!({
                 "type": "object",
                 "properties": {
-                    "amount": { "type": "integer" },
-                    "reason": { "type": "string" }
+                    "platinum": { "type": "integer", "description": "Platinum pieces to add or subtract" },
+                    "gold":     { "type": "integer", "description": "Gold pieces to add or subtract" },
+                    "silver":   { "type": "integer", "description": "Silver pieces to add or subtract" },
+                    "copper":   { "type": "integer", "description": "Copper pieces to add or subtract" },
+                    "reason":   { "type": "string",  "description": "Why currency is changing" }
                 },
-                "required": ["amount"]
+                "required": ["reason"]
             })
         ),
     ]

@@ -224,7 +224,12 @@ export default function Sidebar({
               </div>
             ))
           }
-          <div className="gp">⊙ {player.gold} gp</div>
+          <div className="gp">
+            {player.platinum > 0 && <span>⊙ {player.platinum}pp · </span>}
+            {player.gold > 0 && <span>{player.gold}gp · </span>}
+            {player.silver > 0 && <span>{player.silver}sp · </span>}
+            <span>{player.copper}cp</span>
+          </div>
         </div>
 
         {/* Companions */}

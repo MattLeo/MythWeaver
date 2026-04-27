@@ -43,7 +43,7 @@ PLAYER CHARACTER:
 - Name: {name} | Race: {race} | Class: {class} Lv.{level} | Background: {background}
 - HP: {hp}/{max_hp} | AC: {ac} | XP: {xp} | Proficiency: +{prof}
 - STR {str} | DEX {dex} | CON {con} | INT {int} | WIS {wis} | CHA {cha}
-- Gold: {gold}gp{backstory}
+- Gold: {pp}pp {gp}gp {sp}sp {cp}cp{backstory}
 
 {time}{summaries}
 
@@ -119,7 +119,10 @@ TOOL USAGE
         int = player.int,
         wis = player.wis,
         cha = player.cha,
-        gold = player.gold,
+        pp = player.platinum,
+        gp = player.gold,
+        sp = player.silver,
+        cp = player.copper,
         backstory = player.backstory.as_ref()
             .map(|b| format!("\n- Backstory: {}", b))
             .unwrap_or_default(),

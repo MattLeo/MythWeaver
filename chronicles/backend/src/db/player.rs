@@ -77,12 +77,65 @@ pub async fn update_player_location(pool: &SqlitePool, player_id: &str, location
 }
 
 pub async fn update_player_gold(pool: &SqlitePool, player_id: &str, new_gold: i64) -> Result<()> {
+    // Legacy function - only adds gold
     sqlx::query("UPDATE players SET gold = ?, updated_at = datetime('now') WHERE id = ?")
         .bind(new_gold)
         .bind(player_id)
         .execute(pool)
         .await?;
     Ok(())
+}
+
+pub async fn update_currency(
+    pool: &SqlitePool,
+    player_id: &str,
+    delta_pp: i64,
+    delta_gp: i64,
+    delta_sp: i64,
+    delta_cp: i64,
+) -> Result<(i64, i64, i64, i64)> {
+    let player = get_player(pool, player_id).await?
+        .ok_or_else(|| anyhow::anyhow!("Player not found"))?;
+
+    let new_pp = player.platinum + delta_pp;
+    let new_gp = player.gold + delta_gp;
+    let new_sp = player.silver + delta_sp;
+    let new_cp = player.copper + delta_cp;
+
+    normalize_and_save_currency(pool, player_id, new_pp, new_gp, new_sp, new_cp).await
+}
+
+pub async fn normalize_and_save_currency(
+    pool: &SqlitePool,
+    player_id: &str,
+    pp: i64,
+    gp: i64,
+    sp: i64,
+    cp: i64,
+) -> Result<(i64, i64, i64, i64)> {
+    let mut total_cp = (pp * 1000) + (gp * 100) + (sp * 10) + cp;
+
+    total_cp = total_cp.max(0);
+
+    let final_pp = total_cp / 1000;
+    total_cp %= 1000;
+    let final_gp = total_cp / 100;
+    total_cp %= 100;
+    let final sp = total_cp /10;
+    let final cp = tota_cp % 10;
+
+    sqls::query(
+        "UPDATE players SET platinum = ?, gold = ?, silver = ?, copper = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(final_pp)
+    .bind(final_gp)
+    .bind(final_sp)
+    .bind(final_cp)
+    .bind(player_id)
+    .execute(pool)
+    .await?;
+
+    Ok((final_pp, final_gp, final_sp, final_cp))
 }
 
 pub async fn update_player_xp(pool: &SqlitePool, player_id: &str, new_xp: i64) -> Result<()> {
