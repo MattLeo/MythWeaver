@@ -20,26 +20,33 @@ fn exploration_tools() -> Vec<Value> {
     tools.extend(item_tools());
     tools.extend(companion_query_tools());
     tools.extend(time_tools());
-    tools.extend(event_tools());
     tools.extend(session_tools());
     tools.extend(progression_tools());
     tools.extend(fighter_exploration_tools());
-    tools.extend(species_ability_tools());
-    tools.push(request_roll_tool());
+    tools.extend(mechanical_tools());
+    tools.push(start_combat_tool());
     tools
 }
 
 fn combat_tools() -> Vec<Value> {
+    // Combat is now fully UI-driven. The model only initiates combat
+    // and awards XP after victory. Everything else is handled by the
+    // combat UI making direct API calls to the backend.
     let mut tools = vec![];
     tools.extend(world_query_tools());
-    tools.extend(mechanical_tools());
-    tools.extend(companion_combat_tools());
-    tools.extend(ability_tools());
-    tools.extend(death_tools());
     tools.extend(session_tools());
-    tools.extend(base_combat_tools());
-    tools.extend(fighter_combat_tools());
-    tools.extend(species_ability_tools());
+    tools.push(start_combat_tool());
+    tools.push(tool("award_experience",
+        "Award XP to the player after combat ends.",
+        json!({
+            "type": "object",
+            "properties": {
+                "amount": { "type": "integer" },
+                "reason": { "type": "string" }
+            },
+            "required": ["amount", "reason"]
+        })
+    ));
     tools
 }
 
@@ -52,10 +59,7 @@ fn rest_tools() -> Vec<Value> {
 }
 
 fn leveling_tools() -> Vec<Value> {
-    let mut tools = vec![];
-    tools.extend(world_query_tools());
-    tools.extend(session_tools());
-    tools
+    vec![]
 }
 
 fn shopping_tools() -> Vec<Value> {
@@ -101,6 +105,7 @@ fn world_query_tools() -> Vec<Value> {
                 "required": ["keyword"]
             })
         ),
+        /* -- Already being handled by query location 
         tool("query_nearby_npcs",
             "Get all NPCs at a given location.",
             json!({
@@ -111,6 +116,8 @@ fn world_query_tools() -> Vec<Value> {
                 "required": ["location_id"]
             })
         ),
+        */
+        /* -- Should already be returned via the query_location
         tool("query_connected_locations",
             "Get all locations connected to a given location.",
             json!({
@@ -121,14 +128,17 @@ fn world_query_tools() -> Vec<Value> {
                 "required": ["location_id"]
             })
         ),
+        */
         tool("query_player_state",
             "Get full current player state: HP, AC, XP, level, subclass, currency, location, inventory, abilities, weapon masteries, maneuvers, and superiority dice.",
             json!({ "type": "object", "properties": {} })
         ),
+        /*  -- TIme of day is being passed via the prompt, removing for now
         tool("query_time",
             "Get the current time of day, day number, and season.",
             json!({ "type": "object", "properties": {} })
         ),
+        */
     ]
 }
 
@@ -325,24 +335,14 @@ fn item_tools() -> Vec<Value> {
 }
 
 // ─── Mechanical ───────────────────────────────────────────────────────────────
+// apply_damage removed — all damage is resolved by the combat UI directly.
+// apply_healing kept for narrative healing outside combat (potions, NPC healers, etc.)
 
 fn mechanical_tools() -> Vec<Value> {
     vec![
         request_roll_tool(),
-        tool("apply_damage",
-            "Apply damage to the player.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "amount": { "type": "integer" },
-                    "damage_type": { "type": "string" },
-                    "source": { "type": "string" }
-                },
-                "required": ["amount", "source"]
-            })
-        ),
         tool("apply_healing",
-            "Heal the player. Cannot exceed max HP.",
+            "Heal the player from a non-combat source — potion, NPC healing, environmental effect. Cannot exceed max HP.",
             json!({
                 "type": "object",
                 "properties": {
@@ -413,45 +413,6 @@ fn companion_query_tools() -> Vec<Value> {
     ]
 }
 
-fn companion_combat_tools() -> Vec<Value> {
-    let mut tools = companion_query_tools();
-    tools.push(tool("apply_companion_damage",
-        "Apply damage to a companion.",
-        json!({
-            "type": "object",
-            "properties": {
-                "companion_id": { "type": "string" },
-                "amount": { "type": "integer" },
-                "source": { "type": "string" }
-            },
-            "required": ["companion_id", "amount", "source"]
-        })
-    ));
-    tools.push(tool("apply_companion_healing",
-        "Heal a companion.",
-        json!({
-            "type": "object",
-            "properties": {
-                "companion_id": { "type": "string" },
-                "amount": { "type": "integer" }
-            },
-            "required": ["companion_id", "amount"]
-        })
-    ));
-    tools.push(tool("use_companion_ability",
-        "Use a companion's ability.",
-        json!({
-            "type": "object",
-            "properties": {
-                "companion_id": { "type": "string" },
-                "ability_id": { "type": "string" }
-            },
-            "required": ["companion_id", "ability_id"]
-        })
-    ));
-    tools
-}
-
 // ─── Progression ──────────────────────────────────────────────────────────────
 
 fn progression_tools() -> Vec<Value> {
@@ -497,33 +458,6 @@ fn ability_tools() -> Vec<Value> {
                     "rest_type": { "type": "string", "enum": ["short","long"] }
                 },
                 "required": ["rest_type"]
-            })
-        ),
-    ]
-}
-
-// ─── Death ────────────────────────────────────────────────────────────────────
-
-fn death_tools() -> Vec<Value> {
-    vec![
-        tool("roll_death_save",
-            "Record a death saving throw result.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "success": { "type": "boolean" },
-                    "natural_20": { "type": "boolean" }
-                },
-                "required": ["success"]
-            })
-        ),
-        tool("stabilize_player",
-            "Stabilize the player with healing or medicine.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "healing_amount": { "type": "integer", "default": 1 }
-                }
             })
         ),
     ]
@@ -617,159 +551,55 @@ fn session_tools() -> Vec<Value> {
     ]
 }
 
-// ─── Base Combat ──────────────────────────────────────────────────────────────
+// ─── Combat ───────────────────────────────────────────────────────────────────
 
-fn base_combat_tools() -> Vec<Value> {
-    vec![
-        tool("start_combat",
-            "Initiate a combat encounter. Call this the instant any hostile encounter begins, before writing any narrative.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "enemies": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "enemy_name": { "type": "string" },
-                                "enemy_description": { "type": "string" },
-                                "enemy_hp": { "type": "integer" },
-                                "enemy_ac": { "type": "integer" },
-                                "enemy_damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
-                                "enemy_damage_bonus": { "type": "integer" },
-                                "enemy_damage_type": { "type": "string" },
-                                "enemy_attack_bonus": { "type": "integer" }
-                            },
-                            "required": ["enemy_name","enemy_hp","enemy_ac","enemy_damage_die","enemy_damage_type"]
-                        }
+fn start_combat_tool() -> Value {
+    tool("start_combat",
+        "Initiate a combat encounter. Call this the instant any hostile encounter begins, before writing any narrative. Include ALL enemies and any NPC allies who would logically join the fight. Registered companions are added automatically.",
+        json!({
+            "type": "object",
+            "properties": {
+                "enemies": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "enemy_name": { "type": "string" },
+                            "enemy_description": { "type": "string" },
+                            "enemy_hp": { "type": "integer" },
+                            "enemy_ac": { "type": "integer" },
+                            "enemy_damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
+                            "enemy_damage_bonus": { "type": "integer" },
+                            "enemy_damage_type": { "type": "string" },
+                            "enemy_attack_bonus": { "type": "integer" },
+                            "enemy_weapon_name": { "type": "string", "description": "Name of the weapon or natural attack e.g. 'rusty shortsword', 'claws', 'bone club'" }
+                        },
+                        "required": ["enemy_name","enemy_hp","enemy_ac","enemy_damage_die","enemy_damage_type"]
                     }
                 },
-                "required": ["enemies"]
-            })
-        ),
-        tool("declare_attack",
-            "Declare the player is attacking a specific target. The backend handles all rolls and resolution.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "target_name": { "type": "string" }
-                },
-                "required": ["target_name"]
-            })
-        ),
-        tool("add_companion_to_combat",
-            "Add an existing companion to the encounter.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "companion_id": { "type": "string" }
-                },
-                "required": ["companion_id"]
-            })
-        ),
-        tool("add_ally_to_combat",
-            "Add a temporary NPC ally to the encounter.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string" },
-                    "description": { "type": "string" },
-                    "hp": { "type": "integer" },
-                    "ac": { "type": "integer" },
-                    "attack_bonus": { "type": "integer" },
-                    "damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
-                    "damage_bonus": { "type": "integer" },
-                    "damage_type": { "type": "string" }
-                },
-                "required": ["name","hp","ac","damage_die","damage_type"]
-            })
-        ),
-    ]
-}
-
-// ─── Fighter Combat ───────────────────────────────────────────────────────────
-
-fn fighter_combat_tools() -> Vec<Value> {
-    vec![
-        tool("use_second_wind",
-            "Fighter: Use Second Wind as a bonus action to regain 1d10 + Fighter level HP.",
-            json!({ "type": "object", "properties": {} })
-        ),
-        tool("use_action_surge",
-            "Fighter: Activate Action Surge to take one additional action this turn. Only usable once per turn.",
-            json!({ "type": "object", "properties": {} })
-        ),
-        tool("use_indomitable",
-            "Fighter (level 9+): When you fail a saving throw, reroll it with a bonus equal to your Fighter level.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "original_roll": { "type": "integer" }
-                },
-                "required": ["original_roll"]
-            })
-        ),
-        tool("use_tactical_mind",
-            "Fighter (level 2+): When you fail an ability check, spend a Second Wind use to roll 1d10 and potentially add it to the check.",
-            json!({ "type": "object", "properties": {} })
-        ),
-        tool("commit_tactical_mind",
-            "Fighter: Commit the Tactical Mind use after confirming the check succeeded.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "ability_id": { "type": "string" }
-                },
-                "required": ["ability_id"]
-            })
-        ),
-        tool("resolve_maneuver",
-            "Battle Master: Resolve a maneuver, spending a Superiority Die.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "maneuver_name": {
-                        "type": "string",
-                        "enum": [
-                            "Ambush", "Bait and Switch", "Commander's Strike",
-                            "Commanding Presence", "Disarming Attack", "Distracting Strike",
-                            "Evasive Footwork", "Feinting Attack", "Goading Attack",
-                            "Lunging Attack", "Maneuvering Attack", "Menacing Attack",
-                            "Parry", "Precision Attack", "Pushing Attack", "Rally",
-                            "Riposte", "Sweeping Attack", "Tactical Assessment", "Trip Attack"
-                        ]
-                    },
-                    "target_id": { "type": "string" },
-                    "superiority_roll": { "type": "integer" }
-                },
-                "required": ["maneuver_name", "superiority_roll"]
-            })
-        ),
-        tool("use_psionic_strike",
-            "Psi Warrior: After hitting with a weapon attack, expend a Psionic Energy Die to deal bonus force damage.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "psi_roll": { "type": "integer" }
-                },
-                "required": ["psi_roll"]
-            })
-        ),
-        tool("use_protective_field",
-            "Psi Warrior: As a reaction when you or a creature within 30 feet takes damage, expend a Psionic Energy Die to reduce the damage.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "psi_roll": { "type": "integer" }
-                },
-                "required": ["psi_roll"]
-            })
-        ),
-        tool("query_superiority_dice",
-            "Check current superiority dice or psionic energy dice remaining.",
-            json!({ "type": "object", "properties": {} })
-        ),
-    ]
+                "allies": {
+                    "type": "array",
+                    "description": "NPC allies who join the fight — town guards, bystanders, hired help etc. Do not include registered companions here.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "description": { "type": "string" },
+                            "hp": { "type": "integer" },
+                            "ac": { "type": "integer" },
+                            "attack_bonus": { "type": "integer" },
+                            "damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
+                            "damage_bonus": { "type": "integer" },
+                            "damage_type": { "type": "string" },
+                            "weapon_name": { "type": "string" }
+                        },
+                        "required": ["name","hp","ac","damage_die","damage_type"]
+                    }
+                }
+            },
+            "required": ["enemies"]
+        })
+    )
 }
 
 // ─── Fighter Exploration ──────────────────────────────────────────────────────
@@ -793,33 +623,6 @@ fn fighter_exploration_tools() -> Vec<Value> {
         ),
         tool("query_weapon_masteries",
             "Get the player's current weapon mastery selections.",
-            json!({ "type": "object", "properties": {} })
-        ),
-    ]
-}
-
-// ─── Species Abilities ────────────────────────────────────────────────────────
-
-fn species_ability_tools() -> Vec<Value> {
-    vec![
-        tool("use_breath_weapon",
-            "Dragonborn: Replace one attack with a breath weapon exhalation. Deals typed damage in a cone or line. Targets make a DEX save.",
-            json!({ "type": "object", "properties": {} })
-        ),
-        tool("use_healing_hands",
-            "Aasimar: Touch a creature and roll proficiency bonus d4s to restore HP. Once per Long Rest.",
-            json!({ "type": "object", "properties": {} })
-        ),
-        tool("use_relentless_endurance",
-            "Orc: When reduced to 0 HP but not killed, drop to 1 HP instead. Once per Long Rest.",
-            json!({ "type": "object", "properties": {} })
-        ),
-        tool("use_adrenaline_rush",
-            "Orc: Take the Dash action as a Bonus Action and gain Temporary HP equal to Proficiency Bonus.",
-            json!({ "type": "object", "properties": {} })
-        ),
-        tool("use_giant_ancestry",
-            "Goliath: Activate your Giant Ancestry boon. Effect depends on ancestry chosen at creation.",
             json!({ "type": "object", "properties": {} })
         ),
     ]

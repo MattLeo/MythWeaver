@@ -334,67 +334,49 @@ CREATE TABLE IF NOT EXISTS companions (
 -- ─── Combat ──────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS combat_encounters (
-    id                       TEXT PRIMARY KEY,
-    campaign_id              TEXT NOT NULL REFERENCES campaigns(id),
-    is_active                INTEGER NOT NULL DEFAULT 1,
-    round_number             INTEGER NOT NULL DEFAULT 1,
-    turn_index               INTEGER NOT NULL DEFAULT 0,
-    turn_order_json          TEXT,
-    pending_attack_target_id TEXT,
-    -- Action economy
-    actions_remaining        INTEGER NOT NULL DEFAULT 1,
-    bonus_actions_remaining  INTEGER NOT NULL DEFAULT 1,
-    reactions_remaining      INTEGER NOT NULL DEFAULT 1,
-    action_surge_available   INTEGER NOT NULL DEFAULT 0,
-    action_surge_used        INTEGER NOT NULL DEFAULT 0,
-    attacks_made_this_action INTEGER NOT NULL DEFAULT 0,
-    created_at               TEXT NOT NULL DEFAULT (datetime('now'))
+    id                          TEXT PRIMARY KEY,
+    campaign_id                 TEXT NOT NULL REFERENCES campaigns(id),
+    status                      TEXT NOT NULL DEFAULT 'active'
+                                CHECK(status IN ('active', 'victory', 'defeat', 'fled')),
+    round_number                INTEGER NOT NULL DEFAULT 1,
+    turn_index                  INTEGER NOT NULL DEFAULT 0,
+    turn_order_json             TEXT,
+    player_rolled_initiative    INTEGER NOT NULL DEFAULT 0,
+    actions_remaining           INTEGER NOT NULL DEFAULT 1,
+    bonus_actions_remaining     INTEGER NOT NULL DEFAULT 1,
+    reactions_remaining         INTEGER NOT NULL DEFAULT 1,
+    attacks_remaining           INTEGER NOT NULL DEFAULT 1,
+    action_surge_available      INTEGER NOT NULL DEFAULT 0,
+    action_surge_used           INTEGER NOT NULL DEFAULT 0,
+    attacks_made_this_action    INTEGER NOT NULL DEFAULT 0,
+    created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at                  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS combat_enemies (
-    id              TEXT PRIMARY KEY,
-    encounter_id    TEXT NOT NULL REFERENCES combat_encounters(id) ON DELETE CASCADE,
-    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
-    name            TEXT NOT NULL,
-    description     TEXT,
-    current_hp      INTEGER NOT NULL,
-    max_hp          INTEGER NOT NULL,
-    armor_class     INTEGER NOT NULL,
-    attack_bonus    INTEGER NOT NULL DEFAULT 0,
-    damage_die      TEXT NOT NULL DEFAULT 'd6',
-    damage_bonus    INTEGER NOT NULL DEFAULT 0,
-    damage_type     TEXT NOT NULL DEFAULT 'slashing',
-    initiative      INTEGER NOT NULL DEFAULT 0,
-    turn_order      INTEGER NOT NULL DEFAULT 0,
-    is_alive        INTEGER NOT NULL DEFAULT 1,
-    -- Conditions
-    is_prone        INTEGER NOT NULL DEFAULT 0,
-    is_frightened   INTEGER NOT NULL DEFAULT 0,
-    is_disarmed     INTEGER NOT NULL DEFAULT 0,
-    -- Studied Attacks tracking
+    id                  TEXT PRIMARY KEY,
+    encounter_id        TEXT NOT NULL REFERENCES combat_encounters(id),
+    campaign_id         TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    description         TEXT,
+    participant_type     TEXT NOT NULL DEFAULT 'enemy'
+                        CHECK(participant_type IN ('enemy', 'ally')),
+    weapon_name         TEXT NOT NULL DEFAULT 'weapon',
+    max_hp              INTEGER NOT NULL DEFAULT 10,
+    current_hp          INTEGER NOT NULL DEFAULT 10,
+    armor_class         INTEGER NOT NULL DEFAULT 11,
+    attack_bonus        INTEGER NOT NULL DEFAULT 0,
+    damage_die          TEXT NOT NULL DEFAULT 'd6',
+    damage_bonus        INTEGER NOT NULL DEFAULT 0,
+    damage_type         TEXT NOT NULL DEFAULT 'slashing',
+    initiative_score    INTEGER NOT NULL DEFAULT 0,
+    is_alive            INTEGER NOT NULL DEFAULT 1,
+    is_bloodied         INTEGER NOT NULL DEFAULT 0,
+    is_prone            INTEGER NOT NULL DEFAULT 0,
+    is_frightened       INTEGER NOT NULL DEFAULT 0,
+    is_disarmed         INTEGER NOT NULL DEFAULT 0,
     player_missed_last_attack INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS combat_allies (
-    id              TEXT PRIMARY KEY,
-    encounter_id    TEXT NOT NULL REFERENCES combat_encounters(id) ON DELETE CASCADE,
-    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
-    ally_type       TEXT NOT NULL CHECK(ally_type IN ('companion', 'npc')),
-    companion_id    TEXT REFERENCES companions(id),
-    name            TEXT NOT NULL,
-    description     TEXT,
-    current_hp      INTEGER NOT NULL,
-    max_hp          INTEGER NOT NULL,
-    armor_class     INTEGER NOT NULL,
-    attack_bonus    INTEGER NOT NULL DEFAULT 2,
-    damage_die      TEXT NOT NULL DEFAULT 'd6',
-    damage_bonus    INTEGER NOT NULL DEFAULT 0,
-    damage_type     TEXT NOT NULL DEFAULT 'slashing',
-    initiative      INTEGER NOT NULL DEFAULT 0,
-    turn_order      INTEGER NOT NULL DEFAULT 0,
-    is_alive        INTEGER NOT NULL DEFAULT 1,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ─── Time ────────────────────────────────────────────────────────────────────
@@ -455,7 +437,6 @@ CREATE INDEX IF NOT EXISTS idx_companions_campaign   ON companions(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_event_entries_table   ON event_entries(table_id);
 CREATE INDEX IF NOT EXISTS idx_combat_encounter      ON combat_encounters(campaign_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_combat_enemies        ON combat_enemies(encounter_id);
-CREATE INDEX IF NOT EXISTS idx_combat_allies         ON combat_allies(encounter_id);
 CREATE INDEX IF NOT EXISTS idx_proficiencies_player  ON proficiencies(player_id);
 CREATE INDEX IF NOT EXISTS idx_active_effects_target ON active_effects(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_superiority_player    ON superiority_dice(player_id);

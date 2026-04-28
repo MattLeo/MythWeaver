@@ -46,13 +46,9 @@ pub async fn create_campaign(
             Json(json!({"error": e.to_string()}))),
     };
 
-    // Seed class abilities
     seed_class_abilities(pool, &camp.id, &p.id, &p.class).await;
-
-    // Seed equipment from player's choice
     seed_starting_equipment(pool, &camp.id, &p.id, &p.class, &req.equipment_choice).await;
 
-    // Seed class proficiencies
     if p.class == "Fighter" {
         if let Err(e) = fighter::seed_fighter_proficiencies(pool, &camp.id, &p.id).await {
             tracing::warn!("Failed to seed fighter proficiencies: {}", e);
@@ -67,7 +63,6 @@ pub async fn create_campaign(
         }
     }
 
-    // Seed background proficiencies
     if let Err(e) = player::seed_background_proficiencies(
         pool, &camp.id, &p.id,
         &req.player_background_skill_1,
@@ -77,12 +72,7 @@ pub async fn create_campaign(
         tracing::warn!("Failed to seed background proficiencies: {}", e);
     }
 
-    // Seed species abilities
-    seed_species_abilities(
-        pool, &camp.id, &p.id,
-        &p.race, p.species_subtype.as_deref(),
-        &p
-    ).await;
+    seed_species_abilities(pool, &camp.id, &p.id, &p.race, p.species_subtype.as_deref(), &p).await;
 
     if let Err(e) = time::init_campaign_time(pool, &camp.id).await {
         tracing::warn!("Failed to init campaign time: {}", e);
@@ -418,105 +408,6 @@ pub async fn send_message(
 
     let system = prompt::build_system_prompt(&p, camp_time.as_ref(), &summaries);
 
-    // ── Combat roll interception ──────────────────────────────────────────────
-    if let Some(roll) = &req.roll_result {
-        if let Ok(Some(_)) = crate::db::combat::get_active_encounter(pool, campaign_id).await {
-            let skill = roll.skill.as_deref().unwrap_or("");
-
-            if skill == "Attack" {
-                let attack_result = crate::db::combat::resolve_player_attack_with_roll(
-                    pool, campaign_id, &p, roll.result
-                ).await.unwrap_or(json!({"error": "attack failed"}));
-
-                if attack_result["needs_damage_roll"].as_bool().unwrap_or(false) {
-                    let damage_die = attack_result["damage_die"].as_str().unwrap_or("d6");
-                    let is_crit = attack_result["is_crit"].as_bool().unwrap_or(false);
-                    return (StatusCode::OK, Json(json!({
-                        "type": "roll_request",
-                        "roll": {
-                            "tool_call_id": "damage",
-                            "die": damage_die,
-                            "skill": "Damage",
-                            "dc": 0,
-                            "reason": if is_crit {
-                                format!("Critical Hit! Roll {} damage twice and add together.", damage_die)
-                            } else {
-                                format!("You hit! Roll {} damage.", damage_die)
-                            }
-                        },
-                        "is_crit": is_crit,
-                        "weapon_mastery": attack_result["weapon_mastery"],
-                    })));
-                }
-
-                let raw = state.llm.narrate_combat_result(&system, &attack_result).await
-                    .unwrap_or_else(|_| "Your attack misses.".to_string());
-                let (narrative, _) = strip_state_tag(&raw);
-                let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &narrative, None).await;
-                let (combat_turns, player_downed) = resolve_combat_turns(
-                    pool, campaign_id, &state.llm, &system
-                ).await;
-                for t in &combat_turns {
-                    let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", t, None).await;
-                }
-                return (StatusCode::OK, Json(json!({
-                    "type": "narrative",
-                    "content": narrative,
-                    "combat_turns": combat_turns,
-                    "player_downed": player_downed,
-                    "new_state": if player_downed { "combat" } else { "" }
-                })));
-            }
-
-            if skill == "Damage" {
-                let damage_result = crate::db::combat::apply_player_damage(
-                    pool, campaign_id, &p, roll.result
-                ).await.unwrap_or(json!({"error": "damage failed"}));
-
-                let raw = state.llm.narrate_combat_result(&system, &damage_result).await
-                    .unwrap_or_else(|_| "The attack lands.".to_string());
-                let (narrative, _) = strip_state_tag(&raw);
-                let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &narrative, None).await;
-
-                if damage_result["can_attack_again"].as_bool().unwrap_or(false) {
-                    return (StatusCode::OK, Json(json!({
-                        "type": "narrative",
-                        "content": narrative,
-                        "combat_turns": [],
-                        "can_attack_again": true,
-                        "attacks_made": damage_result["attacks_made"],
-                        "max_attacks": damage_result["max_attacks"],
-                    })));
-                }
-
-                if damage_result["all_enemies_defeated"].as_bool().unwrap_or(false) {
-                    let _ = crate::db::combat::end_combat(pool, campaign_id, "victory", 100).await;
-                    return (StatusCode::OK, Json(json!({
-                        "type": "narrative",
-                        "content": narrative,
-                        "combat_turns": [],
-                        "combat_ended": true,
-                        "new_state": "exploration"
-                    })));
-                }
-
-                let (combat_turns, player_downed) = resolve_combat_turns(
-                    pool, campaign_id, &state.llm, &system
-                ).await;
-                for t in &combat_turns {
-                    let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", t, None).await;
-                }
-                return (StatusCode::OK, Json(json!({
-                    "type": "narrative",
-                    "content": narrative,
-                    "combat_turns": combat_turns,
-                    "player_downed": player_downed,
-                    "new_state": if player_downed { "combat" } else { "" }
-                })));
-            }
-        }
-    }
-
     // ── Sliding window ────────────────────────────────────────────────────────
     let all_history = campaign::get_session_messages(pool, session_id).await
         .unwrap_or_default();
@@ -593,14 +484,6 @@ pub async fn send_message(
     let _ = campaign::save_message(pool, session_id, campaign_id, "user", &user_content, None).await;
     messages.push(ChatMessage::user(&user_content));
 
-    let event_context = check_random_event(pool, campaign_id, &game_state).await;
-    if let Some(event) = event_context {
-        let augmented = format!("{}\n\n[WORLD EVENT - narrate naturally]: {}", user_content, event);
-        if let Some(last) = messages.last_mut() {
-            last.content = Some(augmented);
-        }
-    }
-
     let result = match state.llm.run_agentic_loop(
         pool, campaign_id, &system, messages, &game_state,
     ).await {
@@ -612,38 +495,9 @@ pub async fn send_message(
         }
     };
 
-    if result.tool_calls_made.iter().any(|t| t.tool_name == "declare_attack") {
-        if let Ok(Some(_)) = crate::db::combat::get_active_encounter(pool, campaign_id).await {
-            let (clean_narrative, _) = strip_state_tag(&result.narrative);
-            if !clean_narrative.is_empty() {
-                let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &clean_narrative, None).await;
-            }
-            return (StatusCode::OK, Json(json!({
-                "type": "roll_request",
-                "roll": {
-                    "tool_call_id": "attack",
-                    "die": "d20",
-                    "skill": "Attack",
-                    "dc": 0,
-                    "reason": "Roll to attack!"
-                },
-                "opening_narrative": clean_narrative
-            })));
-        }
-    }
-
-    let mut combat_turns: Vec<String> = vec![];
-    let mut player_downed = false;
-    if result.tool_calls_made.iter().any(|t| t.tool_name == "start_combat") {
-        let (turns, downed) = resolve_combat_turns(
-            pool, campaign_id, &state.llm, &system
-        ).await;
-        combat_turns = turns;
-        player_downed = downed;
-        for t in &combat_turns {
-            let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", t, None).await;
-        }
-    }
+    // If start_combat was called, signal the frontend to begin the initiative flow
+    let needs_initiative = result.tool_calls_made.iter()
+        .any(|t| t.tool_name == "start_combat");
 
     if let Some(roll_req) = result.roll_request {
         return (StatusCode::OK, Json(json!({
@@ -659,111 +513,250 @@ pub async fn send_message(
         "type": "narrative",
         "content": clean_narrative,
         "new_state": new_state,
-        "combat_turns": combat_turns,
-        "player_downed": player_downed,
+        "needs_initiative": needs_initiative,
         "tools_used": result.tool_calls_made.iter().map(|t| &t.tool_name).collect::<Vec<_>>()
     })))
 }
 
-// ─── Combat turn resolver ─────────────────────────────────────────────────────
+// ─── Combat handlers ──────────────────────────────────────────────────────────
 
-async fn resolve_combat_turns(
-    pool: &sqlx::SqlitePool,
-    campaign_id: &str,
-    llm: &crate::llm::LlmClient,
-    system: &str,
-) -> (Vec<String>, bool) {
-    let mut narratives = vec![];
-    let mut player_downed = false;
-
-    loop {
-        let enc = match crate::db::combat::get_active_encounter(pool, campaign_id).await.ok().flatten() {
-            Some(e) => e,
-            None => break,
-        };
-
-        let turn_order: Vec<crate::db::combat::TurnParticipant> = enc.turn_order_json
-            .as_deref()
-            .and_then(|j| serde_json::from_str(j).ok())
-            .unwrap_or_default();
-
-        let current = match turn_order.get(enc.turn_index as usize) {
-            Some(p) => p.clone(),
-            None => break,
-        };
-
-        match current.participant_type.as_str() {
-            "player" => break,
-            "enemy" => {
-                let p = match player::get_player_by_campaign(pool, campaign_id).await.ok().flatten() {
-                    Some(p) => p,
-                    None => break,
-                };
-                let result = crate::db::combat::resolve_enemy_attack(
-                    pool, campaign_id, &p, &current.id
-                ).await.unwrap_or(json!({"error": "enemy attack failed"}));
-
-                let raw = llm.narrate_combat_result(system, &result).await
-                    .unwrap_or_else(|_| format!("{} attacks.", current.name));
-                let (narration, _) = strip_state_tag(&raw);
-                narratives.push(narration);
-
-                if result["player_downed"].as_bool().unwrap_or(false) {
-                    player_downed = true;
-                    break;
-                }
-            }
-            "ally" => {
-                let enc2 = match crate::db::combat::get_active_encounter(pool, campaign_id).await.ok().flatten() {
-                    Some(e) => e,
-                    None => break,
-                };
-                let result = crate::db::combat::resolve_ally_turn(pool, &enc2, &current.id).await
-                    .unwrap_or(json!({"ally_acted": false}));
-                if result["ally_acted"].as_bool().unwrap_or(false) {
-                    let raw = llm.narrate_combat_result(system, &result).await
-                        .unwrap_or_else(|_| format!("{} acts.", current.name));
-                    let (narration, _) = strip_state_tag(&raw);
-                    narratives.push(narration);
-                }
-            }
-            _ => break,
-        }
-
-        let enc = match crate::db::combat::get_active_encounter(pool, campaign_id).await.ok().flatten() {
-            Some(e) => e,
-            None => break,
-        };
-        let alive: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1"
-        )
-        .bind(&enc.id)
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
-
-        if alive == 0 {
-            let _ = crate::db::combat::end_combat(pool, campaign_id, "victory", 100).await;
-            break;
-        }
+pub async fn get_combat_state_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    match crate::db::combat::get_combat_state(&state.pool, &campaign_id).await {
+        Ok(Some(combat)) => (StatusCode::OK, Json(combat)),
+        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "No active combat"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
-
-    (narratives, player_downed)
 }
 
-async fn check_random_event(
-    pool: &sqlx::SqlitePool,
-    campaign_id: &str,
-    game_state: &GameState,
-) -> Option<String> {
-    let trigger = match game_state {
-        GameState::Exploration => "travel",
-        GameState::Rest        => "rest",
-        _ => return None,
+#[derive(Debug, serde::Deserialize)]
+pub struct SubmitInitiativeRequest {
+    pub roll: i64,
+    pub advantage_rolls: Option<Vec<i64>>,
+}
+
+pub async fn submit_initiative(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<SubmitInitiativeRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
     };
-    match crate::db::time::roll_random_event(pool, campaign_id, trigger).await {
-        Ok(Some(event)) => Some(event.description),
-        _ => None,
+    match crate::db::combat::submit_player_initiative(
+        pool, &campaign_id, &p, req.roll, req.advantage_rolls
+    ).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SetTargetRequest {
+    pub target_id: String,
+}
+
+pub async fn set_combat_target(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<SetTargetRequest>,
+) -> impl IntoResponse {
+    match crate::db::combat::set_combat_target(&state.pool, &campaign_id, &req.target_id).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Target set", "target_id": req.target_id}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ResolveAttackRequest {
+    pub roll: i64,
+    pub advantage_rolls: Option<Vec<i64>>,
+    pub target_id: String,
+}
+
+pub async fn resolve_attack(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<ResolveAttackRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    if let Err(e) = crate::db::combat::set_combat_target(pool, &campaign_id, &req.target_id).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})));
+    }
+    match crate::db::combat::resolve_player_attack(
+        pool, &campaign_id, &p, req.roll, &req.target_id
+    ).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ResolveDamageRequest {
+    pub rolls: Vec<i64>,
+    pub is_crit: bool,
+}
+
+pub async fn resolve_damage(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<ResolveDamageRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    let dice_total: i64 = req.rolls.iter().sum();
+    let damage_roll = if req.is_crit { dice_total * 2 } else { dice_total };
+    match crate::db::combat::apply_player_damage(pool, &campaign_id, &p, damage_roll).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UseCombatAbilityRequest {
+    pub ability_type: String,
+    pub target_id: Option<String>,
+    pub roll: Option<i64>,
+    pub maneuver_name: Option<String>,
+}
+
+pub async fn use_combat_ability(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<UseCombatAbilityRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+
+    let result = match req.ability_type.as_str() {
+        "second_wind" => {
+            crate::db::combat::use_second_wind(pool, &campaign_id, &p).await
+        }
+        "action_surge" => {
+            let enc = match crate::db::combat::get_active_encounter(pool, &campaign_id).await {
+                Ok(Some(e)) => e,
+                _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "No active combat"}))),
+            };
+            let used = crate::db::fighter::use_action_surge(pool, &enc.id).await
+                .unwrap_or(false);
+            if used {
+                let _ = sqlx::query(
+                    "UPDATE abilities SET current_uses = current_uses - 1
+                     WHERE owner_id = ? AND name = 'Action Surge' AND current_uses > 0"
+                )
+                .bind(&p.id)
+                .execute(pool)
+                .await;
+                Ok(json!({"message": "Action Surge activated", "action_surge_used": true}))
+            } else {
+                Ok(json!({"error": "Action Surge not available"}))
+            }
+        }
+        "indomitable" => {
+            let original_roll = req.roll.unwrap_or(0);
+            crate::db::combat::use_indomitable(pool, &p, original_roll).await
+        }
+        "maneuver" => {
+            let maneuver_name = match req.maneuver_name.as_deref() {
+                Some(m) => m,
+                None => return (StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "maneuver_name required"}))),
+            };
+            let superiority_roll = req.roll.unwrap_or(0);
+            crate::db::combat::resolve_maneuver(
+                pool, &campaign_id, &p,
+                maneuver_name,
+                req.target_id.as_deref(),
+                superiority_roll,
+            ).await
+        }
+        "psionic_strike" => {
+            crate::db::combat::use_psionic_strike(
+                pool, &campaign_id, &p, req.roll.unwrap_or(0)
+            ).await
+        }
+        "protective_field" => {
+            crate::db::combat::use_protective_field(
+                pool, &p, req.roll.unwrap_or(0)
+            ).await
+        }
+        _ => Ok(json!({"error": format!("Unknown ability type: {}", req.ability_type)}))
+    };
+
+    match result {
+        Ok(r) => (StatusCode::OK, Json(r)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+pub async fn end_combat_turn(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match crate::db::combat::end_player_turn(pool, &campaign_id, &p).await {
+        Ok(results) => {
+            let updated_player = player::get_player_by_campaign(pool, &campaign_id)
+                .await.ok().flatten();
+            let combat_state = crate::db::combat::get_combat_state(pool, &campaign_id)
+                .await.ok().flatten();
+            (StatusCode::OK, Json(json!({
+                "turn_results": results,
+                "player": updated_player,
+                "combat_state": combat_state,
+            })))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct FleeRequest {
+    pub roll: i64,
+    pub skill: String,
+}
+
+pub async fn flee_combat(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<FleeRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match crate::db::combat::attempt_flee(pool, &campaign_id, &p, req.roll, &req.skill).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+pub async fn end_combat_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    match crate::db::combat::end_combat(&state.pool, &campaign_id, "victory", 0).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Combat ended"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }
 
@@ -858,7 +851,7 @@ async fn seed_species_abilities(
                         Some("Innate spell. Cast without a slot a number of times equal to your Proficiency Bonus per Long Rest."),
                         prof_bonus, "long_rest").await;
                 }
-                Some("Rock Gnome") | _ => {
+                _ => {
                     let _ = world::create_ability(pool, campaign_id, "player", player_id,
                         "Clockwork Device",
                         Some("Spend 10 minutes to create a Tiny clockwork device using Prestidigitation. Can have up to 3 at once. Each lasts 8 hours."),
@@ -877,10 +870,10 @@ async fn seed_species_abilities(
                     "When you hit with an attack, deal 1d6 Cold damage and reduce target's Speed by 10 ft until your next turn."),
                 Some("Hill Giant") => ("Hill's Tumble",
                     "When you hit a Large or smaller creature, you can give it the Prone condition."),
-                Some("Stone Giant") | _ => ("Stone's Endurance",
-                    "Reaction when you take damage: roll 1d12 + CON modifier and reduce the damage by that amount."),
                 Some("Storm Giant") => ("Storm's Thunder",
                     "Reaction when a creature within 60 ft damages you: deal 1d8 Thunder damage to that creature."),
+                _ => ("Stone's Endurance",
+                    "Reaction when you take damage: roll 1d12 + CON modifier and reduce the damage by that amount."),
             };
             let _ = world::create_ability(pool, campaign_id, "player", player_id,
                 name, Some(desc), prof_bonus, "long_rest").await;
@@ -895,6 +888,7 @@ async fn seed_species_abilities(
                 Some("High Elf Heritage") => "You know the Prestidigitation cantrip.",
                 Some("Wood Elf Heritage") => "Your Speed is 35 feet.",
                 Some("Drow Heritage")     => "Your Darkvision range is 120 feet.",
+                Some("Astral Elf Heritage") => "Resistance to Radiant damage. Starlight Step teleportation.",
                 _                         => "Elven heritage trait.",
             };
             let _ = world::create_ability(pool, campaign_id, "player", player_id,
@@ -933,7 +927,7 @@ async fn seed_species_abilities(
             };
             let _ = world::create_ability(pool, campaign_id, "player", player_id,
                 "Fiendish Legacy Spells",
-                Some(&format!("Innate spellcasting. Resistance to {} damage. {}  Each can be cast once without a slot per Long Rest.", resistance, spells)),
+                Some(&format!("Innate spellcasting. Resistance to {} damage. {} Each can be cast once without a slot per Long Rest.", resistance, spells)),
                 1, "long_rest").await;
         }
 
@@ -950,7 +944,6 @@ async fn seed_starting_equipment(
     class: &str,
     choice: &str,
 ) {
-    // Option B (and C for Fighter) is always gold only
     let gold_only = match (class, choice) {
         ("Barbarian", "B") => Some(75),
         ("Bard",      "B") => Some(90),
@@ -972,120 +965,118 @@ async fn seed_starting_equipment(
         return;
     }
 
-    // Option A (and B for Fighter) — actual items
-    // (name, description, item_type, damage_die, damage_type, weapon_range, weapon_type, base_ac, armor_type, slot, quantity, starting_gp)
     type ItemDef<'a> = (&'a str, &'a str, &'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>, Option<&'a str>, Option<i64>, Option<&'a str>, Option<&'a str>, i64);
 
     let (items, starting_gp): (Vec<ItemDef>, i64) = match (class, choice) {
 
         ("Barbarian", _) => (vec![
-            ("Greataxe",   "A massive two-handed axe.",            "weapon",    Some("d12"), Some("slashing"),     Some("melee"),  Some("greataxe"), None,     None,    Some("main_hand"), 1),
-            ("Handaxe",    "A light axe suitable for throwing.",   "weapon",    Some("d6"),  Some("slashing"),     Some("melee"),  Some("handaxe"),  None,     None,    None,              4),
+            ("Greataxe",        "A massive two-handed axe.",            "weapon",   Some("d12"), Some("slashing"),     Some("melee"),  Some("greataxe"),     None,     None,           Some("main_hand"), 1),
+            ("Handaxe",         "A light axe suitable for throwing.",   "weapon",   Some("d6"),  Some("slashing"),     Some("melee"),  Some("handaxe"),      None,     None,           None,              4),
             ("Explorer's Pack", "Bedroll, mess kit, tinderbox, 10 torches, 10 days rations, waterskin, 50ft rope.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 15),
 
         ("Bard", _) => (vec![
-            ("Leather Armor", "Light armor made of cured leather.",          "armor",  None,        None,             None,           None,             Some(11), Some("light"), Some("armor"),     1),
-            ("Dagger",        "A simple short blade.",                        "weapon", Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),   None,     None,          Some("main_hand"), 2),
-            ("Musical Instrument", "A musical instrument of your choice.",   "wondrous", None,      None,             None,           None,             None,     None,          None,              1),
-            ("Entertainer's Pack", "Backpack, bedroll, 2 costumes, 5 candles, 5 days rations, waterskin, disguise kit.", "wondrous", None, None, None, None, None, None, None, 1),
+            ("Leather Armor",       "Light armor made of cured leather.",        "armor",    None,        None,             None,           None,             Some(11), Some("light"),  Some("armor"),     1),
+            ("Dagger",              "A simple short blade.",                      "weapon",   Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),   None,     None,           Some("main_hand"), 2),
+            ("Musical Instrument",  "A musical instrument of your choice.",       "wondrous", None,        None,             None,           None,             None,     None,           None,              1),
+            ("Entertainer's Pack",  "Backpack, bedroll, 2 costumes, 5 candles, 5 days rations, waterskin, disguise kit.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 19),
 
         ("Cleric", _) => (vec![
-            ("Chain Shirt",  "Medium armor of interlocking rings.",          "armor",  None,        None,             None,           None,             Some(13), Some("medium"), Some("armor"),    1),
-            ("Shield",       "A wooden or metal shield.",                    "armor",  None,        None,             None,           None,             Some(2),  Some("shield"), Some("shield"),   1),
-            ("Mace",         "A bludgeoning weapon with a flanged head.",    "weapon", Some("d6"),  Some("bludgeoning"), Some("melee"), Some("mace"),  None,     None,           Some("main_hand"), 1),
-            ("Holy Symbol",  "A symbol of your deity.",                      "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
+            ("Chain Shirt",  "Medium armor of interlocking rings.",              "armor",    None,        None,               None,           None,           Some(13), Some("medium"), Some("armor"),     1),
+            ("Shield",       "A wooden or metal shield.",                        "armor",    None,        None,               None,           None,           Some(2),  Some("shield"), Some("shield"),    1),
+            ("Mace",         "A bludgeoning weapon with a flanged head.",        "weapon",   Some("d6"),  Some("bludgeoning"), Some("melee"), Some("mace"),   None,     None,           Some("main_hand"), 1),
+            ("Holy Symbol",  "A symbol of your deity.",                          "wondrous", None,        None,               None,           None,           None,     None,           None,              1),
             ("Priest's Pack", "Backpack, blanket, 10 candles, tinderbox, alms box, 2 blocks incense, censer, vestments, 2 days rations, waterskin.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 7),
 
         ("Druid", _) => (vec![
-            ("Leather Armor",   "Light armor made of cured leather.",        "armor",  None,        None,             None,           None,             Some(11), Some("light"),  Some("armor"),    1),
-            ("Shield",          "A wooden shield.",                          "armor",  None,        None,             None,           None,             Some(2),  Some("shield"), Some("shield"),   1),
-            ("Sickle",          "A curved blade used in harvesting.",        "weapon", Some("d4"),  Some("slashing"), Some("melee"),  Some("sickle"),   None,     None,           Some("main_hand"), 1),
-            ("Druidic Focus",   "A quarterstaff serving as a druidic focus.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), Some("quarterstaff"), None, None,        Some("off_hand"), 1),
+            ("Leather Armor",   "Light armor made of cured leather.",            "armor",    None,        None,               None,           None,                 Some(11), Some("light"),  Some("armor"),     1),
+            ("Shield",          "A wooden shield.",                              "armor",    None,        None,               None,           None,                 Some(2),  Some("shield"), Some("shield"),    1),
+            ("Sickle",          "A curved blade used in harvesting.",            "weapon",   Some("d4"),  Some("slashing"),   Some("melee"),  Some("sickle"),       None,     None,           Some("main_hand"), 1),
+            ("Druidic Focus",   "A quarterstaff serving as a druidic focus.",    "weapon",   Some("d6"),  Some("bludgeoning"), Some("melee"), Some("quarterstaff"), None,     None,           Some("off_hand"),  1),
             ("Explorer's Pack", "Bedroll, mess kit, tinderbox, 10 torches, 10 days rations, waterskin, 50ft rope.", "wondrous", None, None, None, None, None, None, None, 1),
-            ("Herbalism Kit",   "Tools for identifying and using herbs.",    "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
+            ("Herbalism Kit",   "Tools for identifying and using herbs.",        "wondrous", None,        None,               None,           None,                 None,     None,           None,              1),
         ], 9),
 
         ("Fighter", "A") => (vec![
-            ("Chain Mail",   "Heavy armor of interlocking rings.",           "armor",  None,        None,             None,           None,             Some(16), Some("heavy"), Some("armor"),    1),
-            ("Greatsword",   "A massive two-handed sword.",                  "weapon", Some("2d6"), Some("slashing"), Some("melee"),  Some("greatsword"), None,   None,          Some("main_hand"), 1),
-            ("Flail",        "A spiked ball on a chain.",                    "weapon", Some("d8"),  Some("bludgeoning"), Some("melee"), Some("flail"),  None,     None,          None,             1),
-            ("Javelin",      "A light thrown spear.",                        "weapon", Some("d6"),  Some("piercing"), Some("melee"),  Some("javelin"),  None,     None,          None,             8),
+            ("Chain Mail",        "Heavy armor of interlocking rings.",          "armor",    None,        None,               None,           None,               Some(16), Some("heavy"), Some("armor"),     1),
+            ("Greatsword",        "A massive two-handed sword.",                 "weapon",   Some("2d6"), Some("slashing"),   Some("melee"),  Some("greatsword"), None,     None,          Some("main_hand"), 1),
+            ("Flail",             "A spiked ball on a chain.",                   "weapon",   Some("d8"),  Some("bludgeoning"), Some("melee"), Some("flail"),      None,     None,          None,              1),
+            ("Javelin",           "A light thrown spear.",                       "weapon",   Some("d6"),  Some("piercing"),   Some("melee"),  Some("javelin"),    None,     None,          None,              8),
             ("Dungeoneer's Pack", "Backpack, crowbar, hammer, 10 pitons, 10 torches, tinderbox, 10 days rations, waterskin, 50ft rope.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 4),
 
         ("Fighter", "B") => (vec![
-            ("Studded Leather", "Light armor with metal studs.",             "armor",  None,        None,             None,           None,             Some(12), Some("light"), Some("armor"),    1),
-            ("Scimitar",       "A curved slashing sword.",                   "weapon", Some("d6"),  Some("slashing"), Some("melee"),  Some("scimitar"), None,     None,          Some("main_hand"), 1),
-            ("Shortsword",     "A light thrusting blade.",                   "weapon", Some("d6"),  Some("piercing"), Some("melee"),  Some("shortsword"), None,   None,          Some("off_hand"), 1),
-            ("Longbow",        "A powerful ranged weapon.",                  "weapon", Some("d8"),  Some("piercing"), Some("ranged"), Some("longbow"),  None,     None,          None,             1),
-            ("Arrow",          "Ammunition for a bow.",                      "wondrous", None,      None,             None,           None,             None,     None,          None,             20),
-            ("Quiver",         "A container for arrows.",                    "wondrous", None,      None,             None,           None,             None,     None,          None,             1),
+            ("Studded Leather",   "Light armor with metal studs.",               "armor",    None,        None,             None,           None,               Some(12), Some("light"), Some("armor"),     1),
+            ("Scimitar",          "A curved slashing sword.",                    "weapon",   Some("d6"),  Some("slashing"), Some("melee"),  Some("scimitar"),   None,     None,          Some("main_hand"), 1),
+            ("Shortsword",        "A light thrusting blade.",                    "weapon",   Some("d6"),  Some("piercing"), Some("melee"),  Some("shortsword"), None,     None,          Some("off_hand"),  1),
+            ("Longbow",           "A powerful ranged weapon.",                   "weapon",   Some("d8"),  Some("piercing"), Some("ranged"), Some("longbow"),    None,     None,          None,              1),
+            ("Arrow",             "Ammunition for a bow.",                       "wondrous", None,        None,             None,           None,               None,     None,          None,              20),
+            ("Quiver",            "A container for arrows.",                     "wondrous", None,        None,             None,           None,               None,     None,          None,              1),
             ("Dungeoneer's Pack", "Backpack, crowbar, hammer, 10 pitons, 10 torches, tinderbox, 10 days rations, waterskin, 50ft rope.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 11),
 
         ("Monk", _) => (vec![
-            ("Spear",          "A long thrusting weapon.",                   "weapon", Some("d6"),  Some("piercing"), Some("melee"),  Some("spear"),    None,     None,          Some("main_hand"), 1),
-            ("Dagger",         "A simple short blade.",                      "weapon", Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),   None,     None,          None,             5),
+            ("Spear",  "A long thrusting weapon.",                               "weapon",   Some("d6"),  Some("piercing"), Some("melee"),  Some("spear"),    None, None, Some("main_hand"), 1),
+            ("Dagger", "A simple short blade.",                                  "weapon",   Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),   None, None, None,              5),
             ("Artisan's Tools or Musical Instrument", "Tools matching your background tool proficiency.", "wondrous", None, None, None, None, None, None, None, 1),
             ("Explorer's Pack", "Bedroll, mess kit, tinderbox, 10 torches, 10 days rations, waterskin, 50ft rope.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 11),
 
         ("Paladin", _) => (vec![
-            ("Chain Mail",     "Heavy armor of interlocking rings.",         "armor",  None,        None,             None,           None,             Some(16), Some("heavy"),  Some("armor"),    1),
-            ("Shield",         "A wooden or metal shield.",                  "armor",  None,        None,             None,           None,             Some(2),  Some("shield"), Some("shield"),   1),
-            ("Longsword",      "A versatile sword.",                         "weapon", Some("d8"),  Some("slashing"), Some("melee"),  Some("longsword"), None,    None,           Some("main_hand"), 1),
-            ("Javelin",        "A light thrown spear.",                      "weapon", Some("d6"),  Some("piercing"), Some("melee"),  Some("javelin"),  None,     None,           None,             6),
-            ("Holy Symbol",    "A symbol of your deity.",                    "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
-            ("Priest's Pack",  "Backpack, blanket, 10 candles, tinderbox, alms box, 2 blocks incense, censer, vestments, 2 days rations, waterskin.", "wondrous", None, None, None, None, None, None, None, 1),
+            ("Chain Mail",  "Heavy armor of interlocking rings.",                "armor",    None,        None,             None,           None,               Some(16), Some("heavy"),  Some("armor"),     1),
+            ("Shield",      "A wooden or metal shield.",                         "armor",    None,        None,             None,           None,               Some(2),  Some("shield"), Some("shield"),    1),
+            ("Longsword",   "A versatile sword.",                                "weapon",   Some("d8"),  Some("slashing"), Some("melee"),  Some("longsword"),  None,     None,           Some("main_hand"), 1),
+            ("Javelin",     "A light thrown spear.",                             "weapon",   Some("d6"),  Some("piercing"), Some("melee"),  Some("javelin"),    None,     None,           None,              6),
+            ("Holy Symbol", "A symbol of your deity.",                           "wondrous", None,        None,             None,           None,               None,     None,           None,              1),
+            ("Priest's Pack", "Backpack, blanket, 10 candles, tinderbox, alms box, 2 blocks incense, censer, vestments, 2 days rations, waterskin.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 9),
 
         ("Ranger", _) => (vec![
-            ("Studded Leather", "Light armor with metal studs.",             "armor",  None,        None,             None,           None,             Some(12), Some("light"),  Some("armor"),    1),
-            ("Scimitar",        "A curved slashing sword.",                  "weapon", Some("d6"),  Some("slashing"), Some("melee"),  Some("scimitar"), None,     None,           Some("main_hand"), 1),
-            ("Shortsword",      "A light thrusting blade.",                  "weapon", Some("d6"),  Some("piercing"), Some("melee"),  Some("shortsword"), None,   None,           Some("off_hand"), 1),
-            ("Longbow",         "A powerful ranged weapon.",                 "weapon", Some("d8"),  Some("piercing"), Some("ranged"), Some("longbow"),  None,     None,           None,             1),
-            ("Arrow",           "Ammunition for a bow.",                     "wondrous", None,      None,             None,           None,             None,     None,           None,             20),
-            ("Quiver",          "A container for arrows.",                   "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
-            ("Druidic Focus",   "A sprig of mistletoe serving as a druidic focus.", "wondrous", None, None,          None,           None,             None,     None,           None,             1),
+            ("Studded Leather", "Light armor with metal studs.",                 "armor",    None,        None,             None,           None,               Some(12), Some("light"),  Some("armor"),     1),
+            ("Scimitar",        "A curved slashing sword.",                      "weapon",   Some("d6"),  Some("slashing"), Some("melee"),  Some("scimitar"),   None,     None,           Some("main_hand"), 1),
+            ("Shortsword",      "A light thrusting blade.",                      "weapon",   Some("d6"),  Some("piercing"), Some("melee"),  Some("shortsword"), None,     None,           Some("off_hand"),  1),
+            ("Longbow",         "A powerful ranged weapon.",                     "weapon",   Some("d8"),  Some("piercing"), Some("ranged"), Some("longbow"),    None,     None,           None,              1),
+            ("Arrow",           "Ammunition for a bow.",                         "wondrous", None,        None,             None,           None,               None,     None,           None,              20),
+            ("Quiver",          "A container for arrows.",                       "wondrous", None,        None,             None,           None,               None,     None,           None,              1),
+            ("Druidic Focus",   "A sprig of mistletoe serving as a druidic focus.", "wondrous", None,    None,             None,           None,               None,     None,           None,              1),
             ("Explorer's Pack", "Bedroll, mess kit, tinderbox, 10 torches, 10 days rations, waterskin, 50ft rope.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 7),
 
         ("Rogue", _) => (vec![
-            ("Leather Armor",   "Light armor made of cured leather.",        "armor",  None,        None,             None,           None,             Some(11), Some("light"),  Some("armor"),    1),
-            ("Dagger",          "A simple short blade.",                     "weapon", Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),   None,     None,           Some("main_hand"), 2),
-            ("Shortsword",      "A light thrusting blade.",                  "weapon", Some("d6"),  Some("piercing"), Some("melee"),  Some("shortsword"), None,   None,           Some("off_hand"), 1),
-            ("Shortbow",        "A compact ranged weapon.",                  "weapon", Some("d6"),  Some("piercing"), Some("ranged"), Some("shortbow"), None,     None,           None,             1),
-            ("Arrow",           "Ammunition for a bow.",                     "wondrous", None,      None,             None,           None,             None,     None,           None,             20),
-            ("Quiver",          "A container for arrows.",                   "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
-            ("Thieves' Tools",  "Tools for picking locks and disarming traps.", "wondrous", None,   None,             None,           None,             None,     None,           None,             1),
-            ("Burglar's Pack",  "Backpack, 1000 ball bearings, 10ft string, bell, 5 candles, crowbar, hammer, 10 pitons, hooded lantern, 2 oil flasks, 5 days rations, tinderbox, waterskin.", "wondrous", None, None, None, None, None, None, None, 1),
+            ("Leather Armor",  "Light armor made of cured leather.",             "armor",    None,        None,             None,           None,               Some(11), Some("light"),  Some("armor"),     1),
+            ("Dagger",         "A simple short blade.",                          "weapon",   Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),     None,     None,           Some("main_hand"), 2),
+            ("Shortsword",     "A light thrusting blade.",                       "weapon",   Some("d6"),  Some("piercing"), Some("melee"),  Some("shortsword"), None,     None,           Some("off_hand"),  1),
+            ("Shortbow",       "A compact ranged weapon.",                       "weapon",   Some("d6"),  Some("piercing"), Some("ranged"), Some("shortbow"),   None,     None,           None,              1),
+            ("Arrow",          "Ammunition for a bow.",                          "wondrous", None,        None,             None,           None,               None,     None,           None,              20),
+            ("Quiver",         "A container for arrows.",                        "wondrous", None,        None,             None,           None,               None,     None,           None,              1),
+            ("Thieves' Tools", "Tools for picking locks and disarming traps.",   "wondrous", None,        None,             None,           None,               None,     None,           None,              1),
+            ("Burglar's Pack", "Backpack, 1000 ball bearings, 10ft string, bell, 5 candles, crowbar, hammer, 10 pitons, hooded lantern, 2 oil flasks, 5 days rations, tinderbox, waterskin.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 8),
 
         ("Sorcerer", _) => (vec![
-            ("Spear",           "A long thrusting weapon.",                  "weapon", Some("d6"),  Some("piercing"), Some("melee"),  Some("spear"),    None,     None,           Some("main_hand"), 1),
-            ("Dagger",          "A simple short blade.",                     "weapon", Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),   None,     None,           None,             2),
-            ("Arcane Focus",    "A crystal serving as an arcane focus.",     "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
+            ("Spear",             "A long thrusting weapon.",                    "weapon",   Some("d6"), Some("piercing"), Some("melee"),  Some("spear"),  None, None, Some("main_hand"), 1),
+            ("Dagger",            "A simple short blade.",                       "weapon",   Some("d4"), Some("piercing"), Some("melee"),  Some("dagger"), None, None, None,              2),
+            ("Arcane Focus",      "A crystal serving as an arcane focus.",       "wondrous", None,       None,             None,           None,           None, None, None,              1),
             ("Dungeoneer's Pack", "Backpack, crowbar, hammer, 10 pitons, 10 torches, tinderbox, 10 days rations, waterskin, 50ft rope.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 28),
 
         ("Warlock", _) => (vec![
-            ("Leather Armor",   "Light armor made of cured leather.",        "armor",  None,        None,             None,           None,             Some(11), Some("light"),  Some("armor"),    1),
-            ("Sickle",          "A curved blade.",                           "weapon", Some("d4"),  Some("slashing"), Some("melee"),  Some("sickle"),   None,     None,           Some("main_hand"), 1),
-            ("Dagger",          "A simple short blade.",                     "weapon", Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),   None,     None,           None,             2),
-            ("Arcane Focus",    "An orb serving as an arcane focus.",        "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
-            ("Book of Occult Lore", "A book of occult knowledge.",           "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
-            ("Scholar's Pack",  "Backpack, book, ink, ink pen, 10 parchment sheets, a little bag of sand, small knife.", "wondrous", None, None, None, None, None, None, None, 1),
+            ("Leather Armor",       "Light armor made of cured leather.",        "armor",    None,       None,            None,          None,           Some(11), Some("light"), Some("armor"),     1),
+            ("Sickle",              "A curved blade.",                           "weapon",   Some("d4"), Some("slashing"), Some("melee"), Some("sickle"), None,     None,          Some("main_hand"), 1),
+            ("Dagger",              "A simple short blade.",                     "weapon",   Some("d4"), Some("piercing"), Some("melee"), Some("dagger"), None,     None,          None,              2),
+            ("Arcane Focus",        "An orb serving as an arcane focus.",        "wondrous", None,       None,             None,          None,           None,     None,          None,              1),
+            ("Book of Occult Lore", "A book of occult knowledge.",               "wondrous", None,       None,             None,          None,           None,     None,          None,              1),
+            ("Scholar's Pack",      "Backpack, book, ink, ink pen, 10 parchment sheets, a little bag of sand, small knife.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 15),
 
         ("Wizard", _) => (vec![
-            ("Dagger",          "A simple short blade.",                     "weapon", Some("d4"),  Some("piercing"), Some("melee"),  Some("dagger"),   None,     None,           Some("main_hand"), 2),
-            ("Arcane Focus",    "A quarterstaff serving as an arcane focus.", "weapon", Some("d6"), Some("bludgeoning"), Some("melee"), Some("quarterstaff"), None, None,         None,             1),
-            ("Robe",            "A comfortable robe.",                       "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
-            ("Spellbook",       "A book containing your wizard spells.",     "wondrous", None,      None,             None,           None,             None,     None,           None,             1),
-            ("Scholar's Pack",  "Backpack, book, ink, ink pen, 10 parchment sheets, a little bag of sand, small knife.", "wondrous", None, None, None, None, None, None, None, 1),
+            ("Dagger",       "A simple short blade.",                            "weapon",   Some("d4"), Some("piercing"),   Some("melee"), Some("dagger"),       None, None, Some("main_hand"), 2),
+            ("Arcane Focus", "A quarterstaff serving as an arcane focus.",       "weapon",   Some("d6"), Some("bludgeoning"), Some("melee"), Some("quarterstaff"), None, None, None,              1),
+            ("Robe",         "A comfortable robe.",                              "wondrous", None,       None,                None,          None,                 None, None, None,              1),
+            ("Spellbook",    "A book containing your wizard spells.",            "wondrous", None,       None,                None,          None,                 None, None, None,              1),
+            ("Scholar's Pack", "Backpack, book, ink, ink pen, 10 parchment sheets, a little bag of sand, small knife.", "wondrous", None, None, None, None, None, None, None, 1),
         ], 5),
 
         _ => (vec![
@@ -1093,7 +1084,6 @@ async fn seed_starting_equipment(
         ], 10),
     };
 
-    // Seed the items
     for (name, desc, item_type, damage_die, damage_type, weapon_range, weapon_type, base_ac, armor_type, slot, qty) in &items {
         let item_data = json!({
             "name": name,
@@ -1123,7 +1113,6 @@ async fn seed_starting_equipment(
         }
     }
 
-    // Seed starting gold
     if starting_gp > 0 {
         let _ = player::normalize_and_save_currency(pool, player_id, 0, starting_gp, 0, 0).await;
     }
@@ -1217,7 +1206,7 @@ async fn seed_level_up_abilities_direct(
             if !has("Action Surge") {
                 let _ = world::create_ability(pool, campaign_id, "player", player_id,
                     "Action Surge",
-                    Some("Take one additional action on your turn (not Magic action). Recharges on short or long rest."),
+                    Some("Take one additional action on your turn. Recharges on short or long rest."),
                     1, "short_rest").await;
             }
             if !has("Tactical Mind") {

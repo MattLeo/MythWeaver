@@ -85,7 +85,6 @@ pub async fn execute_tool(
             let superiority = if let Some(ref sc) = p.subclass {
                 fighter::get_superiority_dice(pool, &p.id, sc).await?
             } else { None };
-
             Ok(json!({
                 "player": p,
                 "abilities": abilities,
@@ -209,7 +208,6 @@ pub async fn execute_tool(
             }))
         }
 
-        // Legacy alias — model may still call this occasionally
         "update_gold" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
@@ -303,28 +301,6 @@ pub async fn execute_tool(
         }
 
         // ── Mechanical ────────────────────────────────────────────────────────
-        "apply_damage" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let amount = parse_i64(&args["amount"]);
-            let (damage_to_hp, new_temp) = if p.temp_hp > 0 {
-                let absorbed = amount.min(p.temp_hp);
-                (amount - absorbed, p.temp_hp - absorbed)
-            } else {
-                (amount, 0)
-            };
-            let new_hp = (p.current_hp - damage_to_hp).max(0);
-            player::update_player_hp(pool, &p.id, new_hp).await?;
-            Ok(json!({
-                "damage_dealt": amount,
-                "temp_hp_remaining": new_temp,
-                "new_hp": new_hp,
-                "max_hp": p.max_hp,
-                "downed": new_hp == 0,
-                "source": args["source"]
-            }))
-        }
-
         "apply_healing" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
@@ -351,31 +327,11 @@ pub async fn execute_tool(
             Ok(json!({"message": "Companion updated"}))
         }
 
-        "apply_companion_damage" => {
-            let companion_id = args["companion_id"].as_str().unwrap_or("");
-            let amount = parse_i64(&args["amount"]);
-            let (new_hp, is_dead) = companions::apply_companion_damage(pool, companion_id, amount).await?;
-            Ok(json!({"new_hp": new_hp, "is_dead": is_dead, "companion_id": companion_id}))
-        }
-
-        "apply_companion_healing" => {
-            let companion_id = args["companion_id"].as_str().unwrap_or("");
-            let amount = parse_i64(&args["amount"]);
-            let new_hp = companions::apply_companion_healing(pool, companion_id, amount).await?;
-            Ok(json!({"new_hp": new_hp, "companion_id": companion_id}))
-        }
-
         "move_companion" => {
             let companion_id = args["companion_id"].as_str().unwrap_or("");
             let loc_id = args["location_id"].as_str().unwrap_or("");
             companions::update_companion(pool, companion_id, &json!({"location_id": loc_id})).await?;
             Ok(json!({"message": "Companion moved"}))
-        }
-
-        "use_companion_ability" => {
-            let ability_id = args["ability_id"].as_str().unwrap_or("");
-            let remaining = world::use_ability(pool, ability_id, 1).await?;
-            Ok(json!({"remaining_uses": remaining}))
         }
 
         // ── Progression ───────────────────────────────────────────────────────
@@ -422,7 +378,6 @@ pub async fn execute_tool(
                 world::refresh_abilities(pool, &companion.id, "companion", rest_type).await?;
             }
 
-            // Restore superiority dice
             if let Some(ref sc) = p.subclass {
                 match sc.as_str() {
                     "Battle Master" => {
@@ -567,7 +522,7 @@ pub async fn execute_tool(
         // ── Combat ────────────────────────────────────────────────────────────
         "start_combat" => {
             if let Ok(Some(_)) = crate::db::combat::get_active_encounter(pool, campaign_id).await {
-                return Ok(json!({"error": "Combat already active. Use declare_attack to attack."}));
+                return Ok(json!({"error": "Combat already active."}));
             }
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
@@ -579,133 +534,19 @@ pub async fn execute_tool(
                 ).unwrap_or_default(),
             };
 
-            let enemies: Vec<Value> = raw_enemies.iter().map(|e| {
-                let damage_str = e["damage"].as_str()
-                    .or(e["enemy_damage_die"].as_str())
-                    .unwrap_or("d6");
-                let damage_die = if let Some(pos) = damage_str.find('d') {
-                    let die_part = &damage_str[pos..];
-                    let end = die_part.find('+').or(die_part.find('-')).unwrap_or(die_part.len());
-                    format!("d{}", &die_part[1..end].trim())
-                } else { "d6".to_string() };
-                let damage_bonus = if damage_str.contains('+') {
-                    damage_str.split('+').nth(1)
-                        .and_then(|s| s.trim().parse::<i64>().ok())
-                        .unwrap_or(0)
-                } else { 0 };
+            let raw_allies = match args["allies"].as_array() {
+                Some(arr) => arr.clone(),
+                None => vec![],
+            };
 
-                json!({
-                    "enemy_name": e["name"].as_str().or(e["enemy_name"].as_str()).unwrap_or("Enemy"),
-                    "enemy_description": e["description"].as_str().or(e["enemy_description"].as_str()),
-                    "enemy_hp": e["hp"].as_i64().or(e["enemy_hp"].as_i64())
-                        .or_else(|| e["hp"].as_str().and_then(|s| s.parse().ok())).unwrap_or(10),
-                    "enemy_ac": e["ac"].as_i64().or(e["enemy_ac"].as_i64())
-                        .or_else(|| e["ac"].as_str().and_then(|s| s.parse().ok())).unwrap_or(12),
-                    "enemy_damage_die": damage_die,
-                    "enemy_damage_bonus": e["damage_bonus"].as_i64().unwrap_or(damage_bonus),
-                    "enemy_damage_type": e["damage_type"].as_str().or(e["enemy_damage_type"].as_str()).unwrap_or("slashing"),
-                    "enemy_attack_bonus": e["attack_bonus"].as_i64().or(e["enemy_attack_bonus"].as_i64())
-                        .or_else(|| e["attack_bonus"].as_str().and_then(|s| s.parse().ok())).unwrap_or(0)
-                })
-            }).collect();
-
-            if enemies.is_empty() {
+            if raw_enemies.is_empty() {
                 return Ok(json!({"error": "No enemies provided to start_combat"}));
             }
 
-            crate::db::combat::start_combat(pool, campaign_id, &p, enemies).await
+            crate::db::combat::start_combat(pool, campaign_id, &p, raw_enemies, raw_allies).await
         }
 
-        "declare_attack" => {
-            let target_name = args["target_name"].as_str().unwrap_or("");
-            crate::db::combat::declare_attack_target(pool, campaign_id, target_name).await
-        }
-
-        "add_companion_to_combat" => {
-            let companion_id = args["companion_id"].as_str().unwrap_or("");
-            crate::db::combat::add_companion_to_combat(pool, campaign_id, companion_id).await
-        }
-
-        "add_ally_to_combat" => {
-            crate::db::combat::add_ally_to_combat(pool, campaign_id, args).await
-        }
-
-        // ── Fighter specific ──────────────────────────────────────────────────
-        "use_second_wind" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            crate::db::combat::use_second_wind(pool, campaign_id, &p).await
-        }
-
-        "use_action_surge" => {
-            let enc = match crate::db::combat::get_active_encounter(pool, campaign_id).await? {
-                Some(e) => e,
-                None => return Ok(json!({"error": "No active combat"})),
-            };
-            let used = fighter::use_action_surge(pool, &enc.id).await?;
-            if used {
-                let p = player::get_player_by_campaign(pool, campaign_id).await?
-                    .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-                let _ = sqlx::query(
-                    "UPDATE abilities SET current_uses = current_uses - 1
-                     WHERE owner_id = ? AND name = 'Action Surge' AND current_uses > 0"
-                )
-                .bind(&p.id)
-                .execute(pool)
-                .await;
-                Ok(json!({"message": "Action Surge activated. You have one additional action this turn.", "action_surge_used": true}))
-            } else {
-                Ok(json!({"error": "Action Surge not available or already used this turn"}))
-            }
-        }
-
-        "use_indomitable" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let original_roll = parse_i64(&args["original_roll"]);
-            crate::db::combat::use_indomitable(pool, &p, original_roll).await
-        }
-
-        "use_tactical_mind" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            crate::db::combat::use_tactical_mind(pool, &p).await
-        }
-
-        "commit_tactical_mind" => {
-            let ability_id = args["ability_id"].as_str().unwrap_or("");
-            crate::db::combat::commit_tactical_mind(pool, ability_id).await?;
-            Ok(json!({"message": "Tactical Mind use committed"}))
-        }
-
-        "resolve_maneuver" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            if p.subclass.as_deref() != Some("Battle Master") {
-                return Ok(json!({"error": "Battle Master maneuvers not available"}));
-            }
-            let maneuver_name = args["maneuver_name"].as_str().unwrap_or("");
-            let target_id = args["target_id"].as_str();
-            let superiority_roll = parse_i64(&args["superiority_roll"]);
-            crate::db::combat::resolve_maneuver(
-                pool, campaign_id, &p, maneuver_name, target_id, superiority_roll
-            ).await
-        }
-
-        "use_psionic_strike" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let psi_roll = parse_i64(&args["psi_roll"]);
-            crate::db::combat::use_psionic_strike(pool, campaign_id, &p, psi_roll).await
-        }
-
-        "use_protective_field" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let psi_roll = parse_i64(&args["psi_roll"]);
-            crate::db::combat::use_protective_field(pool, &p, psi_roll).await
-        }
-
+        // ── Fighter ───────────────────────────────────────────────────────────
         "change_weapon_mastery" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
@@ -731,249 +572,6 @@ pub async fn execute_tool(
             let pool_name = p.subclass.as_deref().unwrap_or("Battle Master");
             let dice = fighter::get_superiority_dice(pool, &p.id, pool_name).await?;
             Ok(json!({"superiority_dice": dice}))
-        }
-
-        // ── Species abilities ─────────────────────────────────────────────────
-
-        "use_breath_weapon" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-
-            if p.race != "Dragonborn" {
-                return Ok(json!({"error": "Breath Weapon only available to Dragonborn"}));
-            }
-
-            // Spend one use from the Breath Weapon ability
-            let ability: Option<(String, i64)> = sqlx::query_as(
-                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Breath Weapon'"
-            )
-            .bind(&p.id)
-            .fetch_optional(pool)
-            .await?;
-
-            let (ability_id, current_uses) = match ability {
-                Some(a) => a,
-                None => return Ok(json!({"error": "Breath Weapon ability not found"})),
-            };
-
-            if current_uses <= 0 {
-                return Ok(json!({"error": "No Breath Weapon uses remaining"}));
-            }
-
-            sqlx::query(
-                "UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?"
-            )
-            .bind(&ability_id)
-            .execute(pool)
-            .await?;
-
-            // Damage scales with level
-            let damage_dice = if p.level >= 17 { "4d10" }
-                else if p.level >= 11 { "3d10" }
-                else if p.level >= 5  { "2d10" }
-                else                  { "1d10" };
-
-            let damage_type = match p.species_subtype.as_deref() {
-                Some("Black") | Some("Copper") => "acid",
-                Some("Blue")  | Some("Bronze") => "lightning",
-                Some("Green")                  => "poison",
-                Some("Silver") | Some("White") => "cold",
-                _                              => "fire",
-            };
-
-            let con_mod = Player::modifier(p.con);
-            let save_dc = 8 + con_mod + p.proficiency_bonus;
-
-            Ok(json!({
-                "message": "Breath Weapon used",
-                "damage_dice": damage_dice,
-                "damage_type": damage_type,
-                "save_dc": save_dc,
-                "save_type": "dexterity",
-                "uses_remaining": current_uses - 1,
-            }))
-        }
-
-        "use_healing_hands" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-
-            if p.race != "Aasimar" {
-                return Ok(json!({"error": "Healing Hands only available to Aasimar"}));
-            }
-
-            let ability: Option<(String, i64)> = sqlx::query_as(
-                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Healing Hands'"
-            )
-            .bind(&p.id)
-            .fetch_optional(pool)
-            .await?;
-
-            let (ability_id, current_uses) = match ability {
-                Some(a) => a,
-                None => return Ok(json!({"error": "Healing Hands not found"})),
-            };
-
-            if current_uses <= 0 {
-                return Ok(json!({"error": "Healing Hands already used — recharges on Long Rest"}));
-            }
-
-            sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
-                .bind(&ability_id)
-                .execute(pool)
-                .await?;
-
-            Ok(json!({
-                "message": "Healing Hands used",
-                "healing_dice": format!("{}d4", p.proficiency_bonus),
-                "uses_remaining": 0,
-                "note": "Roll the dice and apply healing to the touched creature."
-            }))
-        }
-
-        "use_relentless_endurance" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-
-            if p.race != "Orc" {
-                return Ok(json!({"error": "Relentless Endurance only available to Orcs"}));
-            }
-
-            let ability: Option<(String, i64)> = sqlx::query_as(
-                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Relentless Endurance'"
-            )
-            .bind(&p.id)
-            .fetch_optional(pool)
-            .await?;
-
-            let (ability_id, current_uses) = match ability {
-                Some(a) => a,
-                None => return Ok(json!({"error": "Relentless Endurance not found"})),
-            };
-
-            if current_uses <= 0 {
-                return Ok(json!({"error": "Relentless Endurance already used — recharges on Long Rest"}));
-            }
-
-            sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
-                .bind(&ability_id)
-                .execute(pool)
-                .await?;
-
-            // Drop to 1 HP instead of 0
-            player::update_player_hp(pool, &p.id, 1).await?;
-
-            Ok(json!({
-                "message": "Relentless Endurance activated — dropped to 1 HP instead of falling unconscious",
-                "new_hp": 1,
-                "uses_remaining": 0,
-            }))
-        }
-
-        "use_adrenaline_rush" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-
-            if p.race != "Orc" {
-                return Ok(json!({"error": "Adrenaline Rush only available to Orcs"}));
-            }
-
-            let ability: Option<(String, i64)> = sqlx::query_as(
-                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Adrenaline Rush'"
-            )
-            .bind(&p.id)
-            .fetch_optional(pool)
-            .await?;
-
-            let (ability_id, current_uses) = match ability {
-                Some(a) => a,
-                None => return Ok(json!({"error": "Adrenaline Rush not found"})),
-            };
-
-            if current_uses <= 0 {
-                return Ok(json!({"error": "No Adrenaline Rush uses remaining"}));
-            }
-
-            sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
-                .bind(&ability_id)
-                .execute(pool)
-                .await?;
-
-            let temp_hp = p.proficiency_bonus;
-            // Apply temp HP — only if higher than existing temp HP
-            if temp_hp > p.temp_hp {
-                sqlx::query(
-                    "UPDATE players SET temp_hp = ?, updated_at = datetime('now') WHERE id = ?"
-                )
-                .bind(temp_hp)
-                .bind(&p.id)
-                .execute(pool)
-                .await?;
-            }
-
-            Ok(json!({
-                "message": "Adrenaline Rush used — Dash action taken, temporary HP gained",
-                "temp_hp_gained": temp_hp,
-                "uses_remaining": current_uses - 1,
-            }))
-        }
-
-        "use_giant_ancestry" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-
-            if p.race != "Goliath" {
-                return Ok(json!({"error": "Giant Ancestry only available to Goliaths"}));
-            }
-
-            let ability_name = p.species_subtype.as_deref()
-                .map(|s| match s {
-                    "Cloud Giant" => "Cloud's Jaunt",
-                    "Fire Giant"  => "Fire's Burn",
-                    "Frost Giant" => "Frost's Chill",
-                    "Hill Giant"  => "Hill's Tumble",
-                    "Storm Giant" => "Storm's Thunder",
-                    _             => "Stone's Endurance",
-                })
-                .unwrap_or("Stone's Endurance");
-
-            let ability: Option<(String, i64)> = sqlx::query_as(
-                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = ?"
-            )
-            .bind(&p.id)
-            .bind(ability_name)
-            .fetch_optional(pool)
-            .await?;
-
-            let (ability_id, current_uses) = match ability {
-                Some(a) => a,
-                None => return Ok(json!({"error": format!("{} not found", ability_name)})),
-            };
-
-            if current_uses <= 0 {
-                return Ok(json!({"error": format!("No {} uses remaining", ability_name)}));
-            }
-
-            sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
-                .bind(&ability_id)
-                .execute(pool)
-                .await?;
-
-            let effect_desc = match ability_name {
-                "Cloud's Jaunt"    => "Teleport up to 30 feet to an unoccupied space you can see.",
-                "Fire's Burn"      => "Deal an extra 1d10 Fire damage to the target.",
-                "Frost's Chill"    => "Deal 1d6 Cold damage and reduce target Speed by 10 ft until your next turn.",
-                "Hill's Tumble"    => "The target gains the Prone condition.",
-                "Stone's Endurance"=> "Roll 1d12 + CON modifier and reduce incoming damage by that amount.",
-                "Storm's Thunder"  => "Deal 1d8 Thunder damage to the creature that damaged you.",
-                _                  => "Ability activated.",
-            };
-
-            Ok(json!({
-                "ability": ability_name,
-                "effect": effect_desc,
-                "uses_remaining": current_uses - 1,
-            }))
         }
 
         _ => {

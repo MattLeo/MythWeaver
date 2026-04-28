@@ -1,618 +1,652 @@
 use anyhow::Result;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use uuid::Uuid;
+use rand::Rng;
 
-use crate::models::*;
-use crate::db::fighter;
+use crate::models::Player;
 
-// ─── Models ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CombatEncounter {
     pub id: String,
     pub campaign_id: String,
-    pub is_active: bool,
+    pub status: String,
     pub round_number: i64,
     pub turn_index: i64,
     pub turn_order_json: Option<String>,
-    pub pending_attack_target_id: Option<String>,
+    pub player_rolled_initiative: bool,
     pub actions_remaining: i64,
     pub bonus_actions_remaining: i64,
     pub reactions_remaining: i64,
-    pub action_surge_available: i64,
-    pub action_surge_used: i64,
+    pub attacks_remaining: i64,
+    pub action_surge_available: bool,
+    pub action_surge_used: bool,
     pub attacks_made_this_action: i64,
     pub created_at: String,
+    pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CombatEnemy {
     pub id: String,
     pub encounter_id: String,
     pub campaign_id: String,
     pub name: String,
     pub description: Option<String>,
-    pub current_hp: i64,
+    pub participant_type: String,
+    pub weapon_name: String,
     pub max_hp: i64,
+    pub current_hp: i64,
     pub armor_class: i64,
     pub attack_bonus: i64,
     pub damage_die: String,
     pub damage_bonus: i64,
     pub damage_type: String,
-    pub initiative: i64,
-    pub turn_order: i64,
+    pub initiative_score: i64,
     pub is_alive: bool,
+    pub is_bloodied: bool,
     pub is_prone: bool,
     pub is_frightened: bool,
     pub is_disarmed: bool,
     pub player_missed_last_attack: bool,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct CombatAlly {
-    pub id: String,
-    pub encounter_id: String,
-    pub campaign_id: String,
-    pub ally_type: String,
-    pub companion_id: Option<String>,
-    pub name: String,
-    pub description: Option<String>,
-    pub current_hp: i64,
-    pub max_hp: i64,
-    pub armor_class: i64,
-    pub attack_bonus: i64,
-    pub damage_die: String,
-    pub damage_bonus: i64,
-    pub damage_type: String,
-    pub initiative: i64,
-    pub turn_order: i64,
-    pub is_alive: bool,
-    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnParticipant {
-    pub participant_type: String,
     pub id: String,
     pub name: String,
-    pub initiative: i64,
+    pub participant_type: String, // "player", "enemy", "ally", "companion"
+    pub initiative_score: i64,
+    pub is_alive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttackResult {
-    pub hit: bool,
-    pub is_crit: bool,
-    pub attack_roll: i64,
-    pub total_attack: i64,
-    pub target_ac: i64,
-    pub target_name: String,
-    pub damage_die: String,
-    pub needs_damage_roll: bool,
-    pub advantage: bool,
-    pub disadvantage: bool,
-    pub studied_attack_bonus: bool,
-    pub weapon_mastery: Option<String>,
+pub struct CombatState {
+    pub encounter: CombatEncounter,
+    pub enemies: Vec<CombatEnemy>,
+    pub turn_order: Vec<TurnParticipant>,
+    pub current_actor: Option<TurnParticipant>,
+    pub round_number: i64,
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-fn roll_die(sides: i64) -> i64 {
-    rand::thread_rng().gen_range(1..=sides)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoTurnResult {
+    pub actor_name: String,
+    pub actor_type: String,
+    pub action: String,
+    pub target: Option<String>,
+    pub roll: Option<i64>,
+    pub hit: Option<bool>,
+    pub damage: Option<i64>,
+    pub damage_type: Option<String>,
+    pub text: String,
+    pub combat_ended: bool,
+    pub player_downed: bool,
 }
 
-fn parse_damage_die(die: &str) -> i64 {
-    let normalized = die.trim().to_lowercase();
-    let die_part = if normalized.contains('d') {
-        normalized.split('d').last().unwrap_or("6")
-    } else {
-        "6"
-    };
-    die_part.parse::<i64>().unwrap_or(6)
-}
-
-fn normalize_damage_die(die: &str) -> String {
-    let lower = die.trim().to_lowercase();
-    if let Some(pos) = lower.find('d') {
-        format!("d{}", &lower[pos + 1..])
-    } else {
-        "d6".to_string()
-    }
-}
-
-pub fn enemy_condition(hp: i64, max_hp: i64) -> &'static str {
-    if max_hp == 0 { return "unknown"; }
-    let pct = (hp * 100) / max_hp;
-    match pct {
-        76..=100 => "uninjured",
-        51..=75  => "lightly wounded",
-        26..=50  => "bloodied",
-        1..=25   => "near death",
-        _        => "defeated",
-    }
-}
-
-fn get_ability_mod(player: &Player, weapon: Option<&Item>) -> i64 {
-    let str_mod = Player::modifier(player.str);
-    let dex_mod = Player::modifier(player.dex);
-    if let Some(w) = weapon {
-        if w.weapon_range.as_deref() == Some("ranged") {
-            dex_mod
-        } else {
-            str_mod.max(dex_mod)
-        }
-    } else {
-        str_mod
-    }
-}
-
-// ─── Active effect helpers ────────────────────────────────────────────────────
-
-async fn get_attack_bonus_from_effects(
-    pool: &SqlitePool,
-    player_id: &str,
-) -> i64 {
-    let effects = fighter::get_active_effects(pool, "player", player_id)
-        .await
-        .unwrap_or_default();
-    effects.iter()
-        .filter(|e| e.effect_type == "attack_bonus")
-        .map(|e| e.value.unwrap_or(0))
-        .sum()
-}
-
-async fn get_damage_bonus_from_effects(
-    pool: &SqlitePool,
-    player_id: &str,
-) -> i64 {
-    let effects = fighter::get_active_effects(pool, "player", player_id)
-        .await
-        .unwrap_or_default();
-    effects.iter()
-        .filter(|e| e.effect_type == "damage_bonus")
-        .map(|e| e.value.unwrap_or(0))
-        .sum()
-}
-
-async fn has_advantage_on_attack(
-    pool: &SqlitePool,
-    player_id: &str,
-) -> bool {
-    let effects = fighter::get_active_effects(pool, "player", player_id)
-        .await
-        .unwrap_or_default();
-    effects.iter().any(|e| e.effect_type == "advantage_attack")
-}
-
-async fn has_disadvantage_on_attack(
-    pool: &SqlitePool,
-    player_id: &str,
-) -> bool {
-    let effects = fighter::get_active_effects(pool, "player", player_id)
-        .await
-        .unwrap_or_default();
-    effects.iter().any(|e| e.effect_type == "disadvantage_attack")
-}
-
-async fn get_ac_bonus_from_effects(
-    pool: &SqlitePool,
-    player_id: &str,
-) -> i64 {
-    let effects = fighter::get_active_effects(pool, "player", player_id)
-        .await
-        .unwrap_or_default();
-    effects.iter()
-        .filter(|e| e.effect_type == "ac_bonus")
-        .map(|e| e.value.unwrap_or(0))
-        .sum()
-}
-
-async fn has_resistance(
-    pool: &SqlitePool,
-    player_id: &str,
-    damage_type: &str,
-) -> bool {
-    let effects = fighter::get_active_effects(pool, "player", player_id)
-        .await
-        .unwrap_or_default();
-    effects.iter().any(|e| {
-        e.effect_type == "damage_resistance"
-            && (e.damage_type.as_deref() == Some(damage_type)
-                || e.damage_type.as_deref() == Some("all"))
-    })
-}
-
-// ─── Encounter management ─────────────────────────────────────────────────────
-
-pub async fn get_active_encounter(
-    pool: &SqlitePool,
-    campaign_id: &str,
-) -> Result<Option<CombatEncounter>> {
-    Ok(sqlx::query_as::<_, CombatEncounter>(
-        "SELECT * FROM combat_encounters WHERE campaign_id = ? AND is_active = 1 LIMIT 1"
-    )
-    .bind(campaign_id)
-    .fetch_optional(pool)
-    .await?)
-}
+// ─── Start combat ─────────────────────────────────────────────────────────────
 
 pub async fn start_combat(
     pool: &SqlitePool,
     campaign_id: &str,
     player: &Player,
-    enemies: Vec<Value>,
+    enemies_data: Vec<Value>,
+    allies_data: Vec<Value>,
 ) -> Result<Value> {
-    // Deactivate any existing encounters
-    sqlx::query("UPDATE combat_encounters SET is_active = 0 WHERE campaign_id = ?")
+    let encounter_id = Uuid::new_v4().to_string();
+    let mut rng = rand::thread_rng();
+
+    let action_surge_available = player.class == "Fighter" && player.level >= 2;
+    let attacks_remaining = crate::models::fighter_extra_attacks(player.level);
+
+    sqlx::query(
+        "INSERT INTO combat_encounters (
+            id, campaign_id, status, round_number, turn_index,
+            player_rolled_initiative, actions_remaining, bonus_actions_remaining,
+            reactions_remaining, attacks_remaining,
+            action_surge_available, action_surge_used, attacks_made_this_action
+        ) VALUES (?, ?, 'active', 1, 0, 0, 1, 1, 1, ?, ?, 0, 0)"
+    )
+    .bind(&encounter_id)
+    .bind(campaign_id)
+    .bind(attacks_remaining)
+    .bind(action_surge_available)
+    .execute(pool)
+    .await?;
+
+    let mut participants: Vec<TurnParticipant> = vec![];
+
+    // ── Seed enemies ──────────────────────────────────────────────────────────
+    for enemy_data in &enemies_data {
+        let enemy_id = Uuid::new_v4().to_string();
+        let name = enemy_data["enemy_name"].as_str().unwrap_or("Enemy").to_string();
+        let hp = enemy_data["enemy_hp"].as_i64().unwrap_or(10);
+        let ac = enemy_data["enemy_ac"].as_i64().unwrap_or(12);
+        let atk = enemy_data["enemy_attack_bonus"].as_i64().unwrap_or(0);
+        let dmg_die = enemy_data["enemy_damage_die"].as_str().unwrap_or("d6").to_string();
+        let dmg_bonus = enemy_data["enemy_damage_bonus"].as_i64().unwrap_or(0);
+        let dmg_type = enemy_data["enemy_damage_type"].as_str().unwrap_or("slashing").to_string();
+        let desc = enemy_data["enemy_description"].as_str().map(|s| s.to_string());
+        let weapon_name = enemy_data["enemy_weapon_name"].as_str()
+            .unwrap_or("weapon").to_string();
+
+        let dex_mod = atk / 2;
+        let init_roll: i64 = rng.gen_range(1..=20) + dex_mod;
+
+        sqlx::query(
+            "INSERT INTO combat_enemies (
+                id, encounter_id, campaign_id, name, description,
+                participant_type, weapon_name,
+                max_hp, current_hp, armor_class, attack_bonus,
+                damage_die, damage_bonus, damage_type, initiative_score
+            ) VALUES (?, ?, ?, ?, ?, 'enemy', ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&enemy_id)
+        .bind(&encounter_id)
         .bind(campaign_id)
+        .bind(&name)
+        .bind(&desc)
+        .bind(&weapon_name)
+        .bind(hp)
+        .bind(hp)
+        .bind(ac)
+        .bind(atk)
+        .bind(&dmg_die)
+        .bind(dmg_bonus)
+        .bind(&dmg_type)
+        .bind(init_roll)
         .execute(pool)
         .await?;
 
-    let encounter_id = Uuid::new_v4().to_string();
+        participants.push(TurnParticipant {
+            id: enemy_id,
+            name,
+            participant_type: "enemy".to_string(),
+            initiative_score: init_roll,
+            is_alive: true,
+        });
+    }
 
-    // Determine if player has Action Surge available
-    let surge_uses = if player.class == "Fighter" {
-        fighter_action_surge_uses(player.level)
-    } else {
-        0
+    // ── Seed NPC allies ───────────────────────────────────────────────────────
+    for ally_data in &allies_data {
+        let ally_id = Uuid::new_v4().to_string();
+        let name = ally_data["name"].as_str().unwrap_or("Ally").to_string();
+        let hp = ally_data["hp"].as_i64().unwrap_or(10);
+        let ac = ally_data["ac"].as_i64().unwrap_or(12);
+        let atk = ally_data["attack_bonus"].as_i64().unwrap_or(0);
+        let dmg_die = ally_data["damage_die"].as_str().unwrap_or("d6").to_string();
+        let dmg_bonus = ally_data["damage_bonus"].as_i64().unwrap_or(0);
+        let dmg_type = ally_data["damage_type"].as_str().unwrap_or("slashing").to_string();
+        let desc = ally_data["description"].as_str().map(|s| s.to_string());
+        let weapon_name = ally_data["weapon_name"].as_str()
+            .unwrap_or("weapon").to_string();
+
+        let init_roll: i64 = rng.gen_range(1..=20) + (atk / 2);
+
+        sqlx::query(
+            "INSERT INTO combat_enemies (
+                id, encounter_id, campaign_id, name, description,
+                participant_type, weapon_name,
+                max_hp, current_hp, armor_class, attack_bonus,
+                damage_die, damage_bonus, damage_type, initiative_score
+            ) VALUES (?, ?, ?, ?, ?, 'ally', ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&ally_id)
+        .bind(&encounter_id)
+        .bind(campaign_id)
+        .bind(&name)
+        .bind(&desc)
+        .bind(&weapon_name)
+        .bind(hp)
+        .bind(hp)
+        .bind(ac)
+        .bind(atk)
+        .bind(&dmg_die)
+        .bind(dmg_bonus)
+        .bind(&dmg_type)
+        .bind(init_roll)
+        .execute(pool)
+        .await?;
+
+        participants.push(TurnParticipant {
+            id: ally_id,
+            name,
+            participant_type: "ally".to_string(),
+            initiative_score: init_roll,
+            is_alive: true,
+        });
+    }
+
+    // ── Seed registered companions ────────────────────────────────────────────
+    let companions = crate::db::companions::get_active_companions(pool, campaign_id)
+        .await
+        .unwrap_or_default();
+
+    for companion in &companions {
+        let init_roll: i64 = rng.gen_range(1..=20);
+        participants.push(TurnParticipant {
+            id: companion.id.clone(),
+            name: companion.name.clone(),
+            participant_type: "companion".to_string(),
+            initiative_score: init_roll,
+            is_alive: companion.current_hp > 0,
+        });
+    }
+
+    let dex_mod = Player::modifier(player.dex);
+    let initiative_bonus = dex_mod;
+
+    Ok(json!({
+        "encounter_id": encounter_id,
+        "needs_player_initiative": true,
+        "initiative_bonus": initiative_bonus,
+        "has_advantage": false,
+        "enemy_count": enemies_data.len(),
+        "ally_count": allies_data.len(),
+        "companion_count": companions.len(),
+        "participants_so_far": participants,
+        "message": "Roll for initiative!"
+    }))
+}
+
+// ─── Submit initiative ────────────────────────────────────────────────────────
+
+pub async fn submit_player_initiative(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+    roll_result: i64,
+    advantage_rolls: Option<Vec<i64>>,
+) -> Result<Value> {
+    let enc = get_active_encounter(pool, campaign_id).await?
+        .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
+
+    let dex_mod = Player::modifier(player.dex);
+    let initiative_bonus = dex_mod;
+    let final_roll = roll_result + initiative_bonus;
+
+    // Get all enemies
+    let enemies = get_combat_enemies(pool, &enc.id).await?;
+
+    // Build full turn order
+    let mut participants: Vec<TurnParticipant> = vec![];
+
+    // Add player
+    participants.push(TurnParticipant {
+        id: player.id.clone(),
+        name: player.name.clone(),
+        participant_type: "player".to_string(),
+        initiative_score: final_roll,
+        is_alive: true,
+    });
+
+    // Add enemies
+    for enemy in &enemies {
+        participants.push(TurnParticipant {
+            id: enemy.id.clone(),
+            name: enemy.name.clone(),
+            participant_type: "enemy".to_string(),
+            initiative_score: enemy.initiative_score,
+            is_alive: enemy.is_alive,
+        });
+    }
+
+    // Add companions
+    let companions = crate::db::companions::get_active_companions(pool, campaign_id)
+        .await
+        .unwrap_or_default();
+
+    for companion in &companions {
+        let init: i64 = rand::thread_rng().gen_range(1..=20);
+        participants.push(TurnParticipant {
+            id: companion.id.clone(),
+            name: companion.name.clone(),
+            participant_type: "companion".to_string(),
+            initiative_score: init,
+            is_alive: companion.current_hp > 0,
+        });
+    }
+
+    // Sort by initiative descending, ties broken by player first
+    participants.sort_by(|a, b| {
+        b.initiative_score.cmp(&a.initiative_score)
+            .then_with(|| {
+                if a.participant_type == "player" { std::cmp::Ordering::Less }
+                else if b.participant_type == "player" { std::cmp::Ordering::Greater }
+                else { std::cmp::Ordering::Equal }
+            })
+    });
+
+    let order_json = serde_json::to_string(&participants)?;
+
+    // Save to encounter
+    sqlx::query(
+        "UPDATE combat_encounters SET
+            turn_order_json = ?,
+            player_rolled_initiative = 1,
+            turn_index = 0,
+            updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(&order_json)
+    .bind(&enc.id)
+    .execute(pool)
+    .await?;
+
+    // Reset action economy for first turn if player goes first
+    let first = participants.first();
+    if first.map(|p| p.participant_type.as_str()) == Some("player") {
+        reset_action_economy(pool, &enc.id, player).await?;
+    }
+
+    Ok(json!({
+        "turn_order": participants,
+        "player_initiative": final_roll,
+        "raw_roll": roll_result,
+        "initiative_bonus": initiative_bonus,
+        "advantage_rolls": advantage_rolls,
+        "combat_ready": true,
+    }))
+}
+
+// ─── Get combat state ─────────────────────────────────────────────────────────
+
+pub async fn get_combat_state(
+    pool: &SqlitePool,
+    campaign_id: &str,
+) -> Result<Option<Value>> {
+    let enc = match get_active_encounter(pool, campaign_id).await? {
+        Some(e) => e,
+        None => return Ok(None),
     };
 
-    // Check if player has Second Wind use remaining for surge availability
-    let surge_ability_available = if surge_uses > 0 {
-        let count: i64 = sqlx::query_scalar(
+    let enemies = get_combat_enemies(pool, &enc.id).await?;
+    let turn_order: Vec<TurnParticipant> = enc.turn_order_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_default();
+
+    let current_actor = turn_order.get(enc.turn_index as usize).cloned();
+
+    Ok(Some(json!({
+        "encounter": enc,
+        "enemies": enemies,
+        "turn_order": turn_order,
+        "current_actor": current_actor,
+        "round_number": enc.round_number,
+        "action_economy": {
+            "actions_remaining": enc.actions_remaining,
+            "bonus_actions_remaining": enc.bonus_actions_remaining,
+            "reactions_remaining": enc.reactions_remaining,
+            "attacks_remaining": enc.attacks_remaining,
+            "action_surge_available": enc.action_surge_available,
+            "action_surge_used": enc.action_surge_used,
+            "attacks_made_this_action": enc.attacks_made_this_action,
+        }
+    })))
+}
+
+// ─── Action economy ───────────────────────────────────────────────────────────
+
+pub async fn reset_action_economy(
+    pool: &SqlitePool,
+    encounter_id: &str,
+    player: &Player,
+) -> Result<()> {
+    let attacks = if player.class == "Fighter" {
+        crate::models::fighter_extra_attacks(player.level)
+    } else { 1 };
+
+    let action_surge_available = player.class == "Fighter"
+        && player.level >= 2;
+
+    sqlx::query(
+        "UPDATE combat_encounters SET
+            actions_remaining = 1,
+            bonus_actions_remaining = 1,
+            reactions_remaining = 1,
+            attacks_remaining = ?,
+            action_surge_used = 0,
+            attacks_made_this_action = 0,
+            updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(attacks)
+    .bind(encounter_id)
+    .execute(pool)
+    .await?;
+
+    // Restore action surge if not used this rest
+    if action_surge_available {
+        let surge_uses: i64 = sqlx::query_scalar(
             "SELECT current_uses FROM abilities WHERE owner_id = ? AND name = 'Action Surge'"
         )
         .bind(&player.id)
         .fetch_optional(pool)
         .await?
         .unwrap_or(0);
-        count
-    } else {
-        0
-    };
-
-    sqlx::query(
-        "INSERT INTO combat_encounters
-         (id, campaign_id, action_surge_available)
-         VALUES (?, ?, ?)"
-    )
-    .bind(&encounter_id)
-    .bind(campaign_id)
-    .bind(surge_ability_available)
-    .execute(pool)
-    .await?;
-
-    let dex_mod = Player::modifier(player.dex);
-
-    // Champion gets advantage on initiative
-    let player_initiative = if player.subclass.as_deref() == Some("Champion") {
-        let roll1 = roll_die(20) + dex_mod;
-        let roll2 = roll_die(20) + dex_mod;
-        roll1.max(roll2)
-    } else {
-        roll_die(20) + dex_mod
-    };
-
-    let mut participants: Vec<TurnParticipant> = vec![TurnParticipant {
-        participant_type: "player".to_string(),
-        id: player.id.clone(),
-        name: player.name.clone(),
-        initiative: player_initiative,
-    }];
-
-    for enemy in &enemies {
-        let enemy_id = Uuid::new_v4().to_string();
-        let attack_bonus = enemy["enemy_attack_bonus"].as_i64().unwrap_or(0);
-        let enemy_initiative = roll_die(20) + attack_bonus.min(3);
-        let hp = enemy["enemy_hp"].as_i64().unwrap_or(10);
-        let name = enemy["enemy_name"].as_str().unwrap_or("Enemy").to_string();
 
         sqlx::query(
-            "INSERT INTO combat_enemies
-             (id, encounter_id, campaign_id, name, description,
-              current_hp, max_hp, armor_class, attack_bonus, damage_die,
-              damage_bonus, damage_type, initiative, turn_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
+            "UPDATE combat_encounters SET action_surge_available = ?
+             WHERE id = ?"
         )
-        .bind(&enemy_id)
-        .bind(&encounter_id)
-        .bind(campaign_id)
-        .bind(&name)
-        .bind(enemy["enemy_description"].as_str())
-        .bind(hp)
-        .bind(hp)
-        .bind(enemy["enemy_ac"].as_i64().unwrap_or(12))
-        .bind(attack_bonus)
-        .bind(enemy["enemy_damage_die"].as_str().unwrap_or("d6"))
-        .bind(enemy["enemy_damage_bonus"].as_i64().unwrap_or(0))
-        .bind(enemy["enemy_damage_type"].as_str().unwrap_or("slashing"))
-        .bind(enemy_initiative)
+        .bind(surge_uses > 0)
+        .bind(encounter_id)
         .execute(pool)
         .await?;
-
-        participants.push(TurnParticipant {
-            participant_type: "enemy".to_string(),
-            id: enemy_id,
-            name,
-            initiative: enemy_initiative,
-        });
     }
 
-    participants.sort_by(|a, b| b.initiative.cmp(&a.initiative));
-
-    for (i, p) in participants.iter().enumerate() {
-        if p.participant_type == "enemy" {
-            sqlx::query("UPDATE combat_enemies SET turn_order = ? WHERE id = ?")
-                .bind(i as i64)
-                .bind(&p.id)
-                .execute(pool)
-                .await?;
-        }
-    }
-
-    let turn_order_json = serde_json::to_string(&participants)?;
-    sqlx::query("UPDATE combat_encounters SET turn_order_json = ? WHERE id = ?")
-        .bind(&turn_order_json)
-        .bind(&encounter_id)
-        .execute(pool)
-        .await?;
-
-    let first = participants.first()
-        .map(|p| p.participant_type.as_str())
-        .unwrap_or("player");
-
-    Ok(json!({
-        "encounter_id": encounter_id,
-        "turn_order": participants,
-        "first_turn": first,
-        "player_initiative": player_initiative,
-        "message": format!("Combat started. {} goes first.",
-            participants.first().map(|p| p.name.as_str()).unwrap_or("Player"))
-    }))
+    Ok(())
 }
 
-pub async fn advance_turn(
-    pool: &SqlitePool,
-    encounter: &CombatEncounter,
-) -> Result<TurnParticipant> {
-    let turn_order: Vec<TurnParticipant> = encounter.turn_order_json
-        .as_deref()
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
+pub async fn use_action(pool: &SqlitePool, encounter_id: &str) -> Result<bool> {
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT actions_remaining FROM combat_encounters WHERE id = ?"
+    )
+    .bind(encounter_id)
+    .fetch_one(pool)
+    .await?;
 
-    let mut next_index = encounter.turn_index + 1;
-    let mut next_round = encounter.round_number;
-
-    if next_index >= turn_order.len() as i64 {
-        next_index = 0;
-        next_round += 1;
-        // Reset action surge used flag at start of new round
-        fighter::reset_surge_used(pool, &encounter.id).await?;
-    }
-
-    // Reset turn economy for the next participant
-    fighter::reset_turn_economy(pool, &encounter.id).await?;
+    if remaining <= 0 { return Ok(false); }
 
     sqlx::query(
-        "UPDATE combat_encounters SET turn_index = ?, round_number = ? WHERE id = ?"
+        "UPDATE combat_encounters SET
+            actions_remaining = actions_remaining - 1,
+            updated_at = datetime('now')
+         WHERE id = ?"
     )
-    .bind(next_index)
-    .bind(next_round)
-    .bind(&encounter.id)
+    .bind(encounter_id)
     .execute(pool)
     .await?;
 
-    // Clear turn-based active effects for the current participant
-    let current = &turn_order[encounter.turn_index as usize];
-    fighter::clear_turn_effects(pool, &current.id).await?;
-
-    Ok(turn_order[next_index as usize].clone())
+    Ok(true)
 }
 
-// ─── Player attack ────────────────────────────────────────────────────────────
-
-pub async fn declare_attack_target(
-    pool: &SqlitePool,
-    campaign_id: &str,
-    target_name: &str,
-) -> Result<Value> {
-    let encounter = match get_active_encounter(pool, campaign_id).await? {
-        Some(e) => e,
-        None => return Ok(json!({"error": "No active combat"})),
-    };
-
-    let enemies = sqlx::query_as::<_, CombatEnemy>(
-        "SELECT * FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1"
+pub async fn use_bonus_action(pool: &SqlitePool, encounter_id: &str) -> Result<bool> {
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT bonus_actions_remaining FROM combat_encounters WHERE id = ?"
     )
-    .bind(&encounter.id)
-    .fetch_all(pool)
+    .bind(encounter_id)
+    .fetch_one(pool)
     .await?;
 
-    let target = enemies.iter().find(|e| {
-        e.name.to_lowercase().contains(&target_name.to_lowercase())
-    });
+    if remaining <= 0 { return Ok(false); }
 
-    match target {
-        Some(t) => {
-            sqlx::query(
-                "UPDATE combat_encounters SET pending_attack_target_id = ? WHERE id = ?"
-            )
-            .bind(&t.id)
-            .bind(&encounter.id)
-            .execute(pool)
-            .await?;
-            Ok(json!({
-                "target_name": t.name,
-                "attack_declared": true
-            }))
-        }
-        None => {
-            // Fall back to first alive enemy
-            match enemies.first() {
-                Some(t) => {
-                    sqlx::query(
-                        "UPDATE combat_encounters SET pending_attack_target_id = ? WHERE id = ?"
-                    )
-                    .bind(&t.id)
-                    .bind(&encounter.id)
-                    .execute(pool)
-                    .await?;
-                    Ok(json!({
-                        "target_name": t.name,
-                        "attack_declared": true
-                    }))
-                }
-                None => Ok(json!({"error": "No living enemies in combat"}))
-            }
-        }
+    sqlx::query(
+        "UPDATE combat_encounters SET
+            bonus_actions_remaining = bonus_actions_remaining - 1,
+            updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(encounter_id)
+    .execute(pool)
+    .await?;
+
+    Ok(true)
+}
+
+pub async fn use_action_surge(pool: &SqlitePool, encounter_id: &str) -> Result<bool> {
+    let row: Option<(bool, bool)> = sqlx::query_as(
+        "SELECT action_surge_available, action_surge_used FROM combat_encounters WHERE id = ?"
+    )
+    .bind(encounter_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let (available, used) = row.unwrap_or((false, false));
+    if !available || used { return Ok(false); }
+
+    sqlx::query(
+        "UPDATE combat_encounters SET
+            action_surge_available = 0,
+            action_surge_used = 1,
+            actions_remaining = actions_remaining + 1,
+            updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(encounter_id)
+    .execute(pool)
+    .await?;
+
+    Ok(true)
+}
+
+// ─── Attack resolution ────────────────────────────────────────────────────────
+
+pub async fn resolve_player_attack(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+    attack_roll: i64,
+    target_id: &str,
+) -> Result<Value> {
+    let enc = get_active_encounter(pool, campaign_id).await?
+        .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
+
+    let enemy = get_enemy(pool, target_id).await?
+        .ok_or_else(|| anyhow::anyhow!("Enemy not found"))?;
+
+    if !enemy.is_alive {
+        return Ok(json!({"error": "Target is already dead"}));
     }
+
+    // Get equipped weapon
+    let weapon = sqlx::query_as::<_, (String, String, String, Option<String>)>(
+        "SELECT id, name, damage_die, weapon_type FROM items
+         WHERE owner_id = ? AND is_equipped = 1 AND item_type = 'weapon'
+         AND (slot = 'main_hand' OR slot = 'off_hand')
+         ORDER BY slot ASC LIMIT 1"
+    )
+    .bind(&player.id)
+    .fetch_optional(pool)
+    .await?;
+
+    let (weapon_id, weapon_name, damage_die, weapon_type) = weapon.unwrap_or((
+        String::new(),
+        "Unarmed Strike".to_string(),
+        "d4".to_string(),
+        None,
+    ));
+
+    // Calculate attack bonus
+    let str_mod = Player::modifier(player.str);
+    let dex_mod = Player::modifier(player.dex);
+    let attack_mod = str_mod.max(dex_mod) + player.proficiency_bonus;
+    let total_attack = attack_roll + attack_mod;
+    let is_crit = attack_roll == 20;
+    let is_miss = attack_roll == 1;
+    let hits = is_crit || (!is_miss && total_attack >= enemy.armor_class);
+
+    // Check weapon mastery
+    let mastery = if !weapon_type.as_deref().unwrap_or("").is_empty() {
+        sqlx::query_scalar::<_, String>(
+            "SELECT mastery_property FROM weapon_mastery WHERE player_id = ? AND weapon_type = ?"
+        )
+        .bind(&player.id)
+        .bind(weapon_type.as_deref().unwrap_or(""))
+        .fetch_optional(pool)
+        .await?
+    } else { None };
+
+    // Update studied attacks
+    if !hits && !is_crit {
+        sqlx::query(
+            "UPDATE combat_enemies SET player_missed_last_attack = 1 WHERE id = ?"
+        )
+        .bind(&enemy.id)
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE combat_enemies SET player_missed_last_attack = 0 WHERE id = ?"
+        )
+        .bind(&enemy.id)
+        .execute(pool)
+        .await?;
+    }
+
+    // Update attack economy
+    sqlx::query(
+        "UPDATE combat_encounters SET
+            attacks_made_this_action = attacks_made_this_action + 1,
+            updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(&enc.id)
+    .execute(pool)
+    .await?;
+
+    let attacks_made: i64 = sqlx::query_scalar(
+        "SELECT attacks_made_this_action FROM combat_encounters WHERE id = ?"
+    )
+    .bind(&enc.id)
+    .fetch_one(pool)
+    .await?;
+
+    let max_attacks = if player.class == "Fighter" {
+        crate::models::fighter_extra_attacks(player.level)
+    } else { 1 };
+
+    Ok(json!({
+        "hit": hits,
+        "is_crit": is_crit,
+        "is_miss": is_miss,
+        "attack_roll": attack_roll,
+        "attack_bonus": attack_mod,
+        "total_attack": total_attack,
+        "enemy_ac": enemy.armor_class,
+        "weapon_name": weapon_name,
+        "damage_die": damage_die,
+        "needs_damage_roll": hits,
+        "weapon_mastery": mastery,
+        "attacks_made": attacks_made,
+        "max_attacks": max_attacks,
+        "can_attack_again": hits && attacks_made < max_attacks,
+        "target_id": target_id,
+        "target_name": enemy.name,
+    }))
 }
 
 pub async fn resolve_player_attack_with_roll(
     pool: &SqlitePool,
     campaign_id: &str,
     player: &Player,
-    attack_roll: i64,
+    roll: i64,
 ) -> Result<Value> {
-    let encounter = match get_active_encounter(pool, campaign_id).await? {
-        Some(e) => e,
-        None => return Ok(json!({"error": "No active combat"})),
-    };
-
-    let target_id = match &encounter.pending_attack_target_id {
-        Some(id) => id.clone(),
-        None => return Ok(json!({"error": "No attack target declared"})),
-    };
-
-    let target = sqlx::query_as::<_, CombatEnemy>(
-        "SELECT * FROM combat_enemies WHERE id = ? AND is_alive = 1"
+    // Get current target from encounter state
+    let target_id: Option<String> = sqlx::query_scalar(
+        "SELECT current_target_id FROM combat_encounters WHERE campaign_id = ? AND status = 'active'"
     )
-    .bind(&target_id)
+    .bind(campaign_id)
     .fetch_optional(pool)
-    .await?;
+    .await?
+    .flatten();
 
-    let target = match target {
-        Some(t) => t,
-        None => return Ok(json!({"error": "Target not found or already defeated"})),
-    };
-
-    let weapon = sqlx::query_as::<_, Item>(
-        "SELECT * FROM items WHERE owner_type = 'player' AND owner_id = ?
-         AND is_equipped = 1 AND item_type = 'weapon' LIMIT 1"
-    )
-    .bind(&player.id)
-    .fetch_optional(pool)
-    .await?;
-
-    let ability_mod = get_ability_mod(player, weapon.as_ref());
-    let effect_attack_bonus = get_attack_bonus_from_effects(pool, &player.id).await;
-
-    // Studied Attacks — if player missed last attack against this target, advantage
-    let studied_attack_bonus = player.subclass.as_deref() == Some("Fighter")
-        && player.level >= 13
-        && target.player_missed_last_attack;
-
-    let has_adv = has_advantage_on_attack(pool, &player.id).await || studied_attack_bonus;
-    let has_dis = has_disadvantage_on_attack(pool, &player.id).await;
-
-    // Net advantage/disadvantage — they cancel out
-    let effective_advantage = has_adv && !has_dis;
-    let effective_disadvantage = has_dis && !has_adv;
-
-    let total_attack = attack_roll
-        + player.proficiency_bonus
-        + ability_mod
-        + effect_attack_bonus;
-
-    // Check crit — use player's crit_range_min (Champion modifies this)
-    let is_crit = attack_roll >= player.crit_range_min;
-    let hit = is_crit || total_attack >= target.armor_class;
-
-    if !hit {
-        // Mark that player missed this target for Studied Attacks
-        sqlx::query(
-            "UPDATE combat_enemies SET player_missed_last_attack = 1 WHERE id = ?"
-        )
-        .bind(&target_id)
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "UPDATE combat_encounters SET pending_attack_target_id = NULL WHERE id = ?"
-        )
-        .bind(&encounter.id)
-        .execute(pool)
-        .await?;
-
-        // Remove until_hit effects
-        let effects = fighter::get_active_effects(pool, "player", &player.id).await?;
-        for effect in effects.iter().filter(|e| e.duration_type == "until_hit") {
-            fighter::remove_active_effect(pool, &effect.id).await?;
-        }
-
-        advance_turn(pool, &encounter).await?;
-
-        return Ok(json!({
-            "hit": false,
-            "is_crit": false,
-            "attack_roll": attack_roll,
-            "total_attack": total_attack,
-            "target_ac": target.armor_class,
-            "target_name": target.name,
-            "advantage": effective_advantage,
-            "disadvantage": effective_disadvantage,
-        }));
-    }
-
-    // Hit — clear missed flag and until_hit effects
-    sqlx::query(
-        "UPDATE combat_enemies SET player_missed_last_attack = 0 WHERE id = ?"
-    )
-    .bind(&target_id)
-    .execute(pool)
-    .await?;
-
-    let effects = fighter::get_active_effects(pool, "player", &player.id).await?;
-    for effect in effects.iter().filter(|e| e.duration_type == "until_hit") {
-        fighter::remove_active_effect(pool, &effect.id).await?;
-    }
-
-    // Get damage die from weapon
-    let raw_die = weapon.as_ref()
-        .and_then(|w| w.damage_die.as_deref())
-        .unwrap_or("d6");
-    let damage_die = normalize_damage_die(raw_die);
-
-    // Get weapon mastery property if applicable
-    let weapon_mastery = if let Some(ref w) = weapon {
-        if let Some(ref wt) = w.weapon_type {
-            fighter::get_weapon_mastery_property(pool, &player.id, wt).await?
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Record attack count
-    fighter::record_attack(pool, &encounter.id).await?;
-
-    Ok(json!({
-        "hit": true,
-        "is_crit": is_crit,
-        "attack_roll": attack_roll,
-        "total_attack": total_attack,
-        "target_ac": target.armor_class,
-        "target_name": target.name,
-        "damage_die": damage_die,
-        "needs_damage_roll": true,
-        "advantage": effective_advantage,
-        "disadvantage": effective_disadvantage,
-        "weapon_mastery": weapon_mastery,
-    }))
+    let target_id = target_id.ok_or_else(|| anyhow::anyhow!("No target selected"))?;
+    resolve_player_attack(pool, campaign_id, player, roll, &target_id).await
 }
 
 pub async fn apply_player_damage(
@@ -621,97 +655,612 @@ pub async fn apply_player_damage(
     player: &Player,
     damage_roll: i64,
 ) -> Result<Value> {
-    let encounter = match get_active_encounter(pool, campaign_id).await? {
-        Some(e) => e,
-        None => return Ok(json!({"error": "No active combat"})),
-    };
+    let enc = get_active_encounter(pool, campaign_id).await?
+        .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
 
-    let target_id = match &encounter.pending_attack_target_id {
-        Some(id) => id.clone(),
-        None => return Ok(json!({"error": "No pending attack"})),
-    };
-
-    let target = sqlx::query_as::<_, CombatEnemy>(
-        "SELECT * FROM combat_enemies WHERE id = ?"
+    let target_id: Option<String> = sqlx::query_scalar(
+        "SELECT current_target_id FROM combat_encounters WHERE id = ?"
     )
+    .bind(&enc.id)
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+
+    let target_id = target_id.ok_or_else(|| anyhow::anyhow!("No target selected"))?;
+    let enemy = get_enemy(pool, &target_id).await?
+        .ok_or_else(|| anyhow::anyhow!("Enemy not found"))?;
+
+    // Get STR mod for damage
+    let str_mod = Player::modifier(player.str);
+    let dex_mod = Player::modifier(player.dex);
+    let dmg_mod = str_mod.max(dex_mod);
+    let total_damage = (damage_roll + dmg_mod).max(1);
+
+    let new_hp = (enemy.current_hp - total_damage).max(0);
+    let is_dead = new_hp == 0;
+    let is_bloodied = new_hp > 0 && new_hp <= enemy.max_hp / 2;
+
+    sqlx::query(
+        "UPDATE combat_enemies SET
+            current_hp = ?,
+            is_alive = ?,
+            is_bloodied = ?,
+            updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(new_hp)
+    .bind(!is_dead)
+    .bind(is_bloodied)
     .bind(&target_id)
+    .execute(pool)
+    .await?;
+
+    // Check if all enemies dead
+    let alive_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1"
+    )
+    .bind(&enc.id)
     .fetch_one(pool)
     .await?;
 
-    let weapon = sqlx::query_as::<_, Item>(
-        "SELECT * FROM items WHERE owner_type = 'player' AND owner_id = ?
-         AND is_equipped = 1 AND item_type = 'weapon' LIMIT 1"
+    let attacks_made: i64 = sqlx::query_scalar(
+        "SELECT attacks_made_this_action FROM combat_encounters WHERE id = ?"
     )
-    .bind(&player.id)
+    .bind(&enc.id)
+    .fetch_one(pool)
+    .await?;
+
+    let max_attacks = if player.class == "Fighter" {
+        crate::models::fighter_extra_attacks(player.level)
+    } else { 1 };
+
+    Ok(json!({
+        "damage_dealt": total_damage,
+        "damage_roll": damage_roll,
+        "damage_bonus": dmg_mod,
+        "enemy_name": enemy.name,
+        "enemy_new_hp": new_hp,
+        "enemy_dead": is_dead,
+        "enemy_bloodied": is_bloodied,
+        "all_enemies_defeated": alive_count == 0,
+        "can_attack_again": !is_dead && alive_count > 0 && attacks_made < max_attacks,
+        "attacks_made": attacks_made,
+        "max_attacks": max_attacks,
+    }))
+}
+
+// ─── Set target ───────────────────────────────────────────────────────────────
+
+pub async fn set_combat_target(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    target_id: &str,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE combat_encounters SET
+            current_target_id = ?,
+            updated_at = datetime('now')
+         WHERE campaign_id = ? AND status = 'active'"
+    )
+    .bind(target_id)
+    .bind(campaign_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+// ─── End turn / auto turns ────────────────────────────────────────────────────
+
+pub async fn end_player_turn(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+) -> Result<Vec<AutoTurnResult>> {
+    let mut results = vec![];
+
+    loop {
+        // Advance turn index
+        advance_turn(pool, campaign_id).await?;
+
+        let enc = match get_active_encounter(pool, campaign_id).await? {
+            Some(e) => e,
+            None => break,
+        };
+
+        let turn_order: Vec<TurnParticipant> = enc.turn_order_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default();
+
+        let current = match turn_order.get(enc.turn_index as usize) {
+            Some(p) => p.clone(),
+            None => break,
+        };
+
+        match current.participant_type.as_str() {
+            "player" => {
+                // Player's turn again — reset economy and stop
+                reset_action_economy(pool, &enc.id, player).await?;
+                break;
+            }
+            "enemy" => {
+                if !current.is_alive { continue; }
+                let result = resolve_enemy_turn(pool, campaign_id, player, &current).await?;
+                let combat_ended = result.combat_ended;
+                let player_downed = result.player_downed;
+                results.push(result);
+                if combat_ended || player_downed { break; }
+            }
+            "companion" | "ally" => {
+                if !current.is_alive { continue; }
+                let result = resolve_companion_turn(pool, campaign_id, &current).await?;
+                let combat_ended = result.combat_ended;
+                results.push(result);
+                if combat_ended { break; }
+            }
+            _ => break,
+        }
+    }
+
+    Ok(results)
+}
+
+async fn advance_turn(pool: &SqlitePool, campaign_id: &str) -> Result<()> {
+    let enc = get_active_encounter(pool, campaign_id).await?
+        .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
+
+    let turn_order: Vec<TurnParticipant> = enc.turn_order_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_default();
+
+    let count = turn_order.len() as i64;
+    if count == 0 { return Ok(()); }
+
+    let new_index = (enc.turn_index + 1) % count;
+    let new_round = if new_index == 0 { enc.round_number + 1 } else { enc.round_number };
+
+    // Move current actor to end of order for next round feel
+    // (we cycle via index mod instead for simplicity)
+
+    sqlx::query(
+        "UPDATE combat_encounters SET
+            turn_index = ?,
+            round_number = ?,
+            updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(new_index)
+    .bind(new_round)
+    .bind(&enc.id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn resolve_enemy_turn(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+    enemy_participant: &TurnParticipant,
+) -> Result<AutoTurnResult> {
+    let mut rng = rand::thread_rng();
+
+    let enemy = match get_enemy(pool, &enemy_participant.id).await? {
+        Some(e) => e,
+        None => return Ok(AutoTurnResult {
+            actor_name: enemy_participant.name.clone(),
+            actor_type: "enemy".to_string(),
+            action: "skip".to_string(),
+            target: None,
+            roll: None,
+            hit: None,
+            damage: None,
+            damage_type: None,
+            text: format!("{} cannot act.", enemy_participant.name),
+            combat_ended: false,
+            player_downed: false,
+        }),
+    };
+
+    if !enemy.is_alive {
+        return Ok(AutoTurnResult {
+            actor_name: enemy.name.clone(),
+            actor_type: "enemy".to_string(),
+            action: "skip".to_string(),
+            target: None, roll: None, hit: None, damage: None, damage_type: None,
+            text: format!("{} is defeated.", enemy.name),
+            combat_ended: false, player_downed: false,
+        });
+    }
+
+    // Roll attack
+    let attack_roll: i64 = rng.gen_range(1..=20);
+    let total_attack = attack_roll + enemy.attack_bonus;
+    let is_crit = attack_roll == 20;
+    let is_miss = attack_roll == 1;
+    let hits = is_crit || (!is_miss && total_attack >= player.armor_class);
+
+    if !hits {
+        return Ok(AutoTurnResult {
+            actor_name: enemy.name.clone(),
+            actor_type: "enemy".to_string(),
+            action: "attack".to_string(),
+            target: Some(player.name.clone()),
+            roll: Some(attack_roll),
+            hit: Some(false),
+            damage: None,
+            damage_type: None,
+            text: format!("{} attacks {} with their {} and misses (rolled {}).",
+                enemy.name, player.name, enemy.weapon_name, total_attack),
+            combat_ended: false,
+            player_downed: false,
+        });
+    }
+
+    // Roll damage
+    let die_size = parse_die_size(&enemy.damage_die);
+    let mut damage: i64 = rng.gen_range(1..=die_size) + enemy.damage_bonus;
+    if is_crit { damage += rng.gen_range(1..=die_size); }
+    damage = damage.max(1);
+
+    // Apply damage to player
+    let new_hp = (player.current_hp - damage).max(0);
+    crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
+
+    let player_downed = new_hp == 0;
+
+    Ok(AutoTurnResult {
+        actor_name: enemy.name.clone(),
+        actor_type: "enemy".to_string(),
+        action: "attack".to_string(),
+        target: Some(player.name.clone()),
+        roll: Some(attack_roll),
+        hit: Some(true),
+        damage: Some(damage),
+        damage_type: Some(enemy.damage_type.clone()),
+        text: if is_crit {
+            format!("Critical hit! {} attacks {} with their {} for {} {} damage!",
+                enemy.name, player.name, enemy.weapon_name, damage, enemy.damage_type)
+        } else {
+            format!("{} attacks {} with their {} and hits for {} {} damage.",
+                enemy.name, player.name, enemy.weapon_name, damage, enemy.damage_type)
+        },
+        combat_ended: false,
+        player_downed,
+    })
+}
+
+async fn resolve_companion_turn(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    companion_participant: &TurnParticipant,
+) -> Result<AutoTurnResult> {
+    let mut rng = rand::thread_rng();
+
+    let companion = sqlx::query_as::<_, crate::models::Companion>(
+        "SELECT * FROM companions WHERE id = ? AND is_active = 1"
+    )
+    .bind(&companion_participant.id)
     .fetch_optional(pool)
     .await?;
 
-    let ability_mod = get_ability_mod(player, weapon.as_ref());
-    let effect_damage_bonus = get_damage_bonus_from_effects(pool, &player.id).await;
+    let companion = match companion {
+        Some(c) => c,
+        None => return Ok(AutoTurnResult {
+            actor_name: companion_participant.name.clone(),
+            actor_type: "companion".to_string(),
+            action: "skip".to_string(),
+            target: None, roll: None, hit: None, damage: None, damage_type: None,
+            text: format!("{} holds.", companion_participant.name),
+            combat_ended: false, player_downed: false,
+        }),
+    };
 
-    // If crit, damage_roll already includes doubled dice from frontend
-    // Just add modifiers on top
-    let total_damage = (damage_roll + ability_mod + effect_damage_bonus).max(1);
-    let new_hp = (target.current_hp - total_damage).max(0);
-    let defeated = new_hp == 0;
+    // Pick a random living enemy
+    let enc = get_active_encounter(pool, campaign_id).await?
+        .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
+
+    let enemies = get_combat_enemies(pool, &enc.id).await?;
+    let living: Vec<&CombatEnemy> = enemies.iter().filter(|e| e.is_alive).collect();
+
+    if living.is_empty() {
+        return Ok(AutoTurnResult {
+            actor_name: companion.name.clone(),
+            actor_type: "companion".to_string(),
+            action: "skip".to_string(),
+            target: None, roll: None, hit: None, damage: None, damage_type: None,
+            text: format!("{} looks around — no enemies remain.", companion.name),
+            combat_ended: true, player_downed: false,
+        });
+    }
+
+    let target = living[rng.gen_range(0..living.len())];
+    let attack_roll: i64 = rng.gen_range(1..=20);
+    let total = attack_roll + companion.attack_bonus;
+    let hits = attack_roll == 20 || (attack_roll != 1 && total >= target.armor_class);
+
+    if !hits {
+        return Ok(AutoTurnResult {
+            actor_name: companion.name.clone(),
+            actor_type: "companion".to_string(),
+            action: "attack".to_string(),
+            target: Some(target.name.clone()),
+            roll: Some(attack_roll),
+            hit: Some(false),
+            damage: None,
+            damage_type: None,
+            text: format!("{} attacks {} with their {} and misses.",
+                companion.name, target.name, companion.damage_die),
+            combat_ended: false, player_downed: false,
+        });
+    }
+
+    let die_size = parse_die_size(&companion.damage_die);
+    let damage = (rng.gen_range(1..=die_size) + companion.damage_bonus).max(1);
+    let new_hp = (target.current_hp - damage).max(0);
+    let is_dead = new_hp == 0;
+    let is_bloodied = new_hp > 0 && new_hp <= target.max_hp / 2;
 
     sqlx::query(
-        "UPDATE combat_enemies SET current_hp = ?, is_alive = ? WHERE id = ?"
+        "UPDATE combat_enemies SET current_hp = ?, is_alive = ?, is_bloodied = ? WHERE id = ?"
     )
     .bind(new_hp)
-    .bind(!defeated)
-    .bind(&target_id)
+    .bind(!is_dead)
+    .bind(is_bloodied)
+    .bind(&target.id)
     .execute(pool)
     .await?;
-
-    sqlx::query(
-        "UPDATE combat_encounters SET pending_attack_target_id = NULL WHERE id = ?"
-    )
-    .bind(&encounter.id)
-    .execute(pool)
-    .await?;
-
-    // Check if player has extra attacks remaining before advancing turn
-    let attacks_made = encounter.attacks_made_this_action;
-    let can_attack_again = attacks_made < player.extra_attacks
-        && encounter.actions_remaining > 0;
-
-    if !can_attack_again {
-        advance_turn(pool, &encounter).await?;
-    }
 
     let alive_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1"
     )
-    .bind(&encounter.id)
+    .bind(&enc.id)
     .fetch_one(pool)
     .await?;
 
+    Ok(AutoTurnResult {
+        actor_name: companion.name.clone(),
+        actor_type: "companion".to_string(),
+        action: "attack".to_string(),
+        target: Some(target.name.clone()),
+        roll: Some(attack_roll),
+        hit: Some(true),
+        damage: Some(damage),
+        damage_type: Some(companion.damage_type.clone()),
+        text: format!("{} attacks {} with their {} and hits for {} {} damage{}",
+            companion.name, target.name, target.weapon_name, damage, companion.damage_type,
+            if is_dead { " — the enemy falls!" } else { "." }
+        ),
+        combat_ended: alive_count == 0,
+        player_downed: false,
+    })
+}
+
+// ─── Flee ─────────────────────────────────────────────────────────────────────
+
+pub async fn attempt_flee(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+    roll: i64,
+    skill: &str,
+) -> Result<Value> {
+    let enc = get_active_encounter(pool, campaign_id).await?
+        .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
+
+    let skill_mod = match skill {
+        "Athletics"   => Player::modifier(player.str) + player.proficiency_bonus,
+        "Acrobatics"  => Player::modifier(player.dex) + player.proficiency_bonus,
+        _             => Player::modifier(player.dex),
+    };
+
+    let total = roll + skill_mod;
+    let dc = 15i64;
+    let success = total >= dc;
+
+    if success {
+        end_combat(pool, campaign_id, "fled", 0).await?;
+        Ok(json!({
+            "success": true,
+            "roll": roll,
+            "modifier": skill_mod,
+            "total": total,
+            "dc": dc,
+            "text": format!("{} successfully flees combat! (rolled {} + {} = {} vs DC {})",
+                player.name, roll, skill_mod, total, dc),
+        }))
+    } else {
+        // Opportunity attack from nearest enemy
+        let enemies = get_combat_enemies(pool, &enc.id).await?;
+        let living: Vec<&CombatEnemy> = enemies.iter().filter(|e| e.is_alive).collect();
+        let mut rng = rand::thread_rng();
+
+        let opp_text = if let Some(enemy) = living.first() {
+            let opp_roll: i64 = rng.gen_range(1..=20);
+            let opp_total = opp_roll + enemy.attack_bonus;
+            let opp_hits = opp_roll != 1 && (opp_roll == 20 || opp_total >= player.armor_class);
+            if opp_hits {
+                let die_size = parse_die_size(&enemy.damage_die);
+                let dmg = (rng.gen_range(1..=die_size) + enemy.damage_bonus).max(1);
+                let new_hp = (player.current_hp - dmg).max(0);
+                crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
+                format!("{} strikes as an opportunity attack for {} damage!", enemy.name, dmg)
+            } else {
+                format!("{} swings an opportunity attack but misses.", enemy.name)
+            }
+        } else {
+            String::new()
+        };
+
+        Ok(json!({
+            "success": false,
+            "roll": roll,
+            "modifier": skill_mod,
+            "total": total,
+            "dc": dc,
+            "opportunity_attack": opp_text,
+            "text": format!("{} fails to flee (rolled {} + {} = {} vs DC {}). {}",
+                player.name, roll, skill_mod, total, dc, opp_text),
+        }))
+    }
+}
+
+// ─── End combat ───────────────────────────────────────────────────────────────
+
+pub async fn end_combat(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    status: &str,
+    _xp: i64,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE combat_encounters SET status = ?, updated_at = datetime('now')
+         WHERE campaign_id = ? AND status = 'active'"
+    )
+    .bind(status)
+    .bind(campaign_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+pub async fn get_active_encounter(
+    pool: &SqlitePool,
+    campaign_id: &str,
+) -> Result<Option<CombatEncounter>> {
+    Ok(sqlx::query_as::<_, CombatEncounter>(
+        "SELECT * FROM combat_encounters WHERE campaign_id = ? AND status = 'active' LIMIT 1"
+    )
+    .bind(campaign_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub async fn get_combat_enemies(
+    pool: &SqlitePool,
+    encounter_id: &str,
+) -> Result<Vec<CombatEnemy>> {
+    Ok(sqlx::query_as::<_, CombatEnemy>(
+        "SELECT * FROM combat_enemies WHERE encounter_id = ? ORDER BY initiative_score DESC"
+    )
+    .bind(encounter_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn get_enemy(pool: &SqlitePool, enemy_id: &str) -> Result<Option<CombatEnemy>> {
+    Ok(sqlx::query_as::<_, CombatEnemy>(
+        "SELECT * FROM combat_enemies WHERE id = ?"
+    )
+    .bind(enemy_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub async fn declare_attack_target(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    target_name: &str,
+) -> Result<Value> {
+    let enc = get_active_encounter(pool, campaign_id).await?
+        .ok_or_else(|| anyhow::anyhow!("No active combat"))?;
+
+    let enemy = sqlx::query_as::<_, CombatEnemy>(
+        "SELECT * FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1
+         AND LOWER(name) LIKE LOWER(?) LIMIT 1"
+    )
+    .bind(&enc.id)
+    .bind(format!("%{}%", target_name))
+    .fetch_optional(pool)
+    .await?;
+
+    match enemy {
+        Some(e) => {
+            set_combat_target(pool, campaign_id, &e.id).await?;
+            Ok(json!({"target_id": e.id, "target_name": e.name, "message": "Target acquired"}))
+        }
+        None => Ok(json!({"error": format!("No living enemy named '{}'", target_name)}))
+    }
+}
+
+pub async fn resolve_enemy_attack(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+    enemy_id: &str,
+) -> Result<Value> {
+    let enemy = get_enemy(pool, enemy_id).await?
+        .ok_or_else(|| anyhow::anyhow!("Enemy not found"))?;
+
+    let mut rng = rand::thread_rng();
+    let attack_roll: i64 = rng.gen_range(1..=20);
+    let total = attack_roll + enemy.attack_bonus;
+    let hits = attack_roll == 20 || (attack_roll != 1 && total >= player.armor_class);
+
+    if !hits {
+        return Ok(json!({
+            "hit": false,
+            "roll": attack_roll,
+            "enemy_name": enemy.name,
+            "text": format!("{} attacks and misses.", enemy.name)
+        }));
+    }
+
+    let die_size = parse_die_size(&enemy.damage_die);
+    let damage: i64 = (rng.gen_range(1..=die_size) + enemy.damage_bonus).max(1);
+    let new_hp = (player.current_hp - damage).max(0);
+    crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
+
     Ok(json!({
         "hit": true,
-        "damage_roll": damage_roll,
-        "ability_mod": ability_mod,
-        "effect_damage_bonus": effect_damage_bonus,
-        "total_damage": total_damage,
-        "damage_type": weapon.as_ref().and_then(|w| w.damage_type.as_deref()).unwrap_or("bludgeoning"),
-        "target_name": target.name,
-        "enemy_condition": enemy_condition(new_hp, target.max_hp),
-        "enemy_defeated": defeated,
-        "all_enemies_defeated": alive_count == 0,
-        "can_attack_again": can_attack_again,
-        "attacks_made": attacks_made + 1,
-        "max_attacks": player.extra_attacks,
+        "roll": attack_roll,
+        "damage": damage,
+        "damage_type": enemy.damage_type,
+        "enemy_name": enemy.name,
+        "new_player_hp": new_hp,
+        "player_downed": new_hp == 0,
+        "text": format!("{} attacks and hits for {} {} damage.", enemy.name, damage, enemy.damage_type)
     }))
 }
 
-// ─── Second Wind ──────────────────────────────────────────────────────────────
+pub async fn resolve_ally_turn(
+    pool: &SqlitePool,
+    enc: &CombatEncounter,
+    ally_id: &str,
+) -> Result<Value> {
+    let companion = sqlx::query_as::<_, crate::models::Companion>(
+        "SELECT * FROM companions WHERE id = ?"
+    )
+    .bind(ally_id)
+    .fetch_optional(pool)
+    .await?;
+
+    match companion {
+        Some(c) => {
+            let participant = TurnParticipant {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                participant_type: "companion".to_string(),
+                initiative_score: 0,
+                is_alive: c.current_hp > 0,
+            };
+            let result = resolve_companion_turn(pool, &enc.campaign_id, &participant).await?;
+            Ok(json!({"ally_acted": true, "text": result.text}))
+        }
+        None => Ok(json!({"ally_acted": false}))
+    }
+}
 
 pub async fn use_second_wind(
     pool: &SqlitePool,
     campaign_id: &str,
     player: &Player,
 ) -> Result<Value> {
-    // Check uses remaining
+    let mut rng = rand::thread_rng();
     let ability: Option<(String, i64)> = sqlx::query_as(
         "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Second Wind'"
     )
@@ -719,95 +1268,31 @@ pub async fn use_second_wind(
     .fetch_optional(pool)
     .await?;
 
-    let (ability_id, current_uses) = match ability {
+    let (ability_id, uses) = match ability {
         Some(a) => a,
         None => return Ok(json!({"error": "Second Wind not found"})),
     };
 
-    if current_uses <= 0 {
+    if uses <= 0 {
         return Ok(json!({"error": "No Second Wind uses remaining"}));
     }
 
-    let heal_roll = roll_die(10) + player.level;
-    let new_hp = (player.current_hp + heal_roll).min(player.max_hp);
+    sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+        .bind(&ability_id)
+        .execute(pool)
+        .await?;
 
-    sqlx::query(
-        "UPDATE players SET current_hp = ?, updated_at = datetime('now') WHERE id = ?"
-    )
-    .bind(new_hp)
-    .bind(&player.id)
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        "UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?"
-    )
-    .bind(&ability_id)
-    .execute(pool)
-    .await?;
+    let heal: i64 = rng.gen_range(1..=10) + player.level;
+    let new_hp = (player.current_hp + heal).min(player.max_hp);
+    crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
 
     Ok(json!({
-        "heal_roll": heal_roll,
+        "healing": heal,
         "new_hp": new_hp,
-        "max_hp": player.max_hp,
-        "uses_remaining": current_uses - 1,
+        "uses_remaining": uses - 1,
+        "message": format!("Second Wind restores {} HP.", heal)
     }))
 }
-
-// ─── Tactical Mind ────────────────────────────────────────────────────────────
-// Spend a Second Wind use to add 1d10 to a failed ability check
-
-pub async fn use_tactical_mind(
-    pool: &SqlitePool,
-    player: &Player,
-) -> Result<Value> {
-    if player.class != "Fighter" || player.level < 2 {
-        return Ok(json!({"error": "Tactical Mind not available"}));
-    }
-
-    let ability: Option<(String, i64)> = sqlx::query_as(
-        "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Second Wind'"
-    )
-    .bind(&player.id)
-    .fetch_optional(pool)
-    .await?;
-
-    let (ability_id, current_uses) = match ability {
-        Some(a) => a,
-        None => return Ok(json!({"error": "Second Wind not found"})),
-    };
-
-    if current_uses <= 0 {
-        return Ok(json!({"error": "No Second Wind uses remaining for Tactical Mind"}));
-    }
-
-    let bonus_roll = roll_die(10);
-
-    // Only spend the use if it turns the check into a success
-    // The caller must confirm success before committing — return the roll
-    // and let the frontend/backend decide whether to consume the use
-    Ok(json!({
-        "bonus_roll": bonus_roll,
-        "ability_id": ability_id,
-        "current_uses": current_uses,
-        "message": format!("Roll {} added to ability check. Spend use only if check succeeds.", bonus_roll)
-    }))
-}
-
-pub async fn commit_tactical_mind(
-    pool: &SqlitePool,
-    ability_id: &str,
-) -> Result<()> {
-    sqlx::query(
-        "UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?"
-    )
-    .bind(ability_id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-// ─── Indomitable ─────────────────────────────────────────────────────────────
 
 pub async fn use_indomitable(
     pool: &SqlitePool,
@@ -817,12 +1302,8 @@ pub async fn use_indomitable(
     if player.indomitable_uses <= 0 {
         return Ok(json!({"error": "No Indomitable uses remaining"}));
     }
-
-    let reroll = roll_die(20) + player.level;
-
     sqlx::query(
-        "UPDATE players SET indomitable_uses = indomitable_uses - 1,
-         updated_at = datetime('now') WHERE id = ?"
+        "UPDATE players SET indomitable_uses = indomitable_uses - 1 WHERE id = ?"
     )
     .bind(&player.id)
     .execute(pool)
@@ -830,14 +1311,46 @@ pub async fn use_indomitable(
 
     Ok(json!({
         "original_roll": original_roll,
-        "new_roll": reroll,
+        "reroll_bonus": player.level,
+        "message": format!("Indomitable used. Add {} to your reroll.", player.level),
         "uses_remaining": player.indomitable_uses - 1,
-        "message": format!("Indomitable: rerolled {} as {} + {} (Fighter level) = {}",
-            original_roll, reroll - player.level, player.level, reroll)
     }))
 }
 
-// ─── Maneuver resolution ──────────────────────────────────────────────────────
+pub async fn use_tactical_mind(
+    pool: &SqlitePool,
+    player: &Player,
+) -> Result<Value> {
+    let ability: Option<(String, i64)> = sqlx::query_as(
+        "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Second Wind'"
+    )
+    .bind(&player.id)
+    .fetch_optional(pool)
+    .await?;
+
+    let (ability_id, uses) = match ability {
+        Some(a) => a,
+        None => return Ok(json!({"error": "Second Wind not found"})),
+    };
+
+    if uses <= 0 {
+        return Ok(json!({"error": "No Second Wind uses remaining for Tactical Mind"}));
+    }
+
+    Ok(json!({
+        "ability_id": ability_id,
+        "message": "Roll 1d10. If the result plus your check total meets the DC, commit the use.",
+        "uses_remaining": uses,
+    }))
+}
+
+pub async fn commit_tactical_mind(pool: &SqlitePool, ability_id: &str) -> Result<()> {
+    sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+        .bind(ability_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
 
 pub async fn resolve_maneuver(
     pool: &SqlitePool,
@@ -847,265 +1360,80 @@ pub async fn resolve_maneuver(
     target_id: Option<&str>,
     superiority_roll: i64,
 ) -> Result<Value> {
-    // Verify player knows this maneuver
-    let known = fighter::get_known_maneuvers(pool, &player.id).await?;
-    if !known.iter().any(|m| m.maneuver_name == maneuver_name) {
-        return Ok(json!({"error": format!("Maneuver '{}' not known", maneuver_name)}));
-    }
-
     // Spend a superiority die
-    let die_size = match fighter::spend_superiority_die(pool, &player.id, "Battle Master").await? {
-        Some(d) => d,
-        None => return Ok(json!({"error": "No superiority dice remaining"})),
-    };
+    let spent = crate::db::fighter::spend_superiority_die(pool, &player.id, "Battle Master").await?;
+    if !spent {
+        return Ok(json!({"error": "No superiority dice remaining"}));
+    }
 
     let save_dc = player.maneuver_save_dc();
 
-    match maneuver_name {
-        "Precision Attack" => {
-            // Add to a missed attack roll — no target needed
-            Ok(json!({
-                "maneuver": "Precision Attack",
-                "superiority_roll": superiority_roll,
-                "effect": format!("Add {} to your attack roll", superiority_roll),
-                "save_dc": null,
-            }))
+    let effect = match maneuver_name {
+        "Disarming Attack" => format!(
+            "Target must succeed DC {} STR save or drop one item.", save_dc
+        ),
+        "Pushing Attack" => format!(
+            "Target must succeed DC {} STR save or be pushed 15 feet.", save_dc
+        ),
+        "Trip Attack" => format!(
+            "Target must succeed DC {} STR save or fall Prone.", save_dc
+        ),
+        "Menacing Attack" => format!(
+            "Target must succeed DC {} WIS save or be Frightened until end of your next turn.", save_dc
+        ),
+        "Precision Attack" => format!(
+            "Add {} to the attack roll.", superiority_roll
+        ),
+        "Parry" => format!(
+            "Reduce incoming damage by {} + DEX modifier.", superiority_roll
+        ),
+        "Rally" => format!(
+            "An ally gains {} temporary HP.", superiority_roll + Player::modifier(player.cha)
+        ),
+        _ => format!(
+            "{} applied with superiority roll of {}.", maneuver_name, superiority_roll
+        ),
+    };
+
+    if let Some(tid) = target_id {
+        // Apply condition effects
+        match maneuver_name {
+            "Disarming Attack" => {
+                sqlx::query(
+                    "UPDATE combat_enemies SET is_disarmed = 1 WHERE id = ?"
+                )
+                .bind(tid)
+                .execute(pool)
+                .await?;
+            }
+            "Trip Attack" => {
+                sqlx::query(
+                    "UPDATE combat_enemies SET is_prone = 1 WHERE id = ?"
+                )
+                .bind(tid)
+                .execute(pool)
+                .await?;
+            }
+            "Menacing Attack" => {
+                sqlx::query(
+                    "UPDATE combat_enemies SET is_frightened = 1 WHERE id = ?"
+                )
+                .bind(tid)
+                .execute(pool)
+                .await?;
+            }
+            _ => {}
         }
-
-        "Trip Attack" => {
-            let target_id = target_id.ok_or_else(|| anyhow::anyhow!("Target required"))?;
-            // Add damage and force STR save vs prone
-            sqlx::query(
-                "UPDATE combat_enemies SET is_prone = 1 WHERE id = ?"
-            )
-            .bind(target_id)
-            .execute(pool)
-            .await?;
-
-            Ok(json!({
-                "maneuver": "Trip Attack",
-                "superiority_roll": superiority_roll,
-                "bonus_damage": superiority_roll,
-                "effect": "Target must make STR saving throw or become prone",
-                "save_dc": save_dc,
-                "condition_applied": "prone",
-            }))
-        }
-
-        "Disarming Attack" => {
-            let target_id = target_id.ok_or_else(|| anyhow::anyhow!("Target required"))?;
-            sqlx::query(
-                "UPDATE combat_enemies SET is_disarmed = 1 WHERE id = ?"
-            )
-            .bind(target_id)
-            .execute(pool)
-            .await?;
-
-            Ok(json!({
-                "maneuver": "Disarming Attack",
-                "superiority_roll": superiority_roll,
-                "bonus_damage": superiority_roll,
-                "effect": "Target must make STR saving throw or drop one held object",
-                "save_dc": save_dc,
-                "condition_applied": "disarmed",
-            }))
-        }
-
-        "Menacing Attack" => {
-            let target_id = target_id.ok_or_else(|| anyhow::anyhow!("Target required"))?;
-            sqlx::query(
-                "UPDATE combat_enemies SET is_frightened = 1 WHERE id = ?"
-            )
-            .bind(target_id)
-            .execute(pool)
-            .await?;
-
-            Ok(json!({
-                "maneuver": "Menacing Attack",
-                "superiority_roll": superiority_roll,
-                "bonus_damage": superiority_roll,
-                "effect": "Target must make WIS saving throw or become frightened until end of your next turn",
-                "save_dc": save_dc,
-                "condition_applied": "frightened",
-            }))
-        }
-
-        "Goading Attack" => {
-            Ok(json!({
-                "maneuver": "Goading Attack",
-                "superiority_roll": superiority_roll,
-                "bonus_damage": superiority_roll,
-                "effect": "Target must make WIS saving throw or have disadvantage on attacks against targets other than you",
-                "save_dc": save_dc,
-            }))
-        }
-
-        "Pushing Attack" => {
-            Ok(json!({
-                "maneuver": "Pushing Attack",
-                "superiority_roll": superiority_roll,
-                "bonus_damage": superiority_roll,
-                "effect": "Target must make STR saving throw or be pushed up to 15 feet away",
-                "save_dc": save_dc,
-            }))
-        }
-
-        "Sweeping Attack" => {
-            Ok(json!({
-                "maneuver": "Sweeping Attack",
-                "superiority_roll": superiority_roll,
-                "effect": format!("Choose another creature within 5 feet of target. If original attack would hit it, deals {} {} damage",
-                    superiority_roll,
-                    player.subclass.as_deref().unwrap_or("slashing")),
-            }))
-        }
-
-        "Feinting Attack" => {
-            // Bonus action — grants advantage on next attack this turn
-            fighter::add_active_effect(
-                pool, campaign_id, "player", &player.id,
-                "Feinting Attack", "advantage_attack",
-                None, None, "until_hit", None, "Feinting Attack"
-            ).await?;
-
-            Ok(json!({
-                "maneuver": "Feinting Attack",
-                "superiority_roll": superiority_roll,
-                "effect": "You have advantage on your next attack this turn. If it hits, add superiority die to damage.",
-                "bonus_damage_on_hit": superiority_roll,
-            }))
-        }
-
-        "Parry" => {
-            // Reaction — reduce damage taken
-            let best_mod = Player::modifier(player.str).max(Player::modifier(player.dex));
-            let reduction = superiority_roll + best_mod;
-            Ok(json!({
-                "maneuver": "Parry",
-                "superiority_roll": superiority_roll,
-                "damage_reduction": reduction,
-                "effect": format!("Reduce incoming melee damage by {}", reduction),
-            }))
-        }
-
-        "Riposte" => {
-            // Reaction after being missed — make a melee attack
-            Ok(json!({
-                "maneuver": "Riposte",
-                "superiority_roll": superiority_roll,
-                "effect": "Make a melee attack against the creature that missed you. Add superiority die to damage on hit.",
-                "bonus_damage": superiority_roll,
-                "requires_attack_roll": true,
-            }))
-        }
-
-        "Rally" => {
-            // Bonus action — give ally temp HP
-            let temp_hp = superiority_roll + (player.level / 2);
-            Ok(json!({
-                "maneuver": "Rally",
-                "superiority_roll": superiority_roll,
-                "temp_hp_granted": temp_hp,
-                "effect": format!("Choose an ally within 30 feet. They gain {} temporary HP.", temp_hp),
-            }))
-        }
-
-        "Distracting Strike" => {
-            Ok(json!({
-                "maneuver": "Distracting Strike",
-                "superiority_roll": superiority_roll,
-                "bonus_damage": superiority_roll,
-                "effect": "Next attack roll against this target by someone other than you has advantage before start of your next turn",
-            }))
-        }
-
-        "Commander's Strike" => {
-            Ok(json!({
-                "maneuver": "Commander's Strike",
-                "superiority_roll": superiority_roll,
-                "effect": "Choose a willing ally who can see or hear you. They can use their reaction to make one attack, adding the superiority die to damage on hit.",
-            }))
-        }
-
-        "Maneuvering Attack" => {
-            Ok(json!({
-                "maneuver": "Maneuvering Attack",
-                "superiority_roll": superiority_roll,
-                "bonus_damage": superiority_roll,
-                "effect": "Choose a willing ally. They can use their reaction to move up to half their speed without provoking opportunity attacks from your target.",
-            }))
-        }
-
-        "Evasive Footwork" => {
-            // Bonus action — add to AC until start of next turn
-            fighter::add_active_effect(
-                pool, campaign_id, "player", &player.id,
-                "Evasive Footwork", "ac_bonus",
-                Some(superiority_roll), None,
-                "start_of_next_turn", None, "Evasive Footwork"
-            ).await?;
-
-            Ok(json!({
-                "maneuver": "Evasive Footwork",
-                "superiority_roll": superiority_roll,
-                "ac_bonus": superiority_roll,
-                "effect": format!("Your AC increases by {} until the start of your next turn.", superiority_roll),
-            }))
-        }
-
-        "Lunging Attack" => {
-            Ok(json!({
-                "maneuver": "Lunging Attack",
-                "superiority_roll": superiority_roll,
-                "bonus_damage": superiority_roll,
-                "effect": "You can add the superiority die to damage if you moved 5+ feet in a straight line before hitting.",
-            }))
-        }
-
-        "Bait and Switch" => {
-            fighter::add_active_effect(
-                pool, campaign_id, "player", &player.id,
-                "Bait and Switch", "ac_bonus",
-                Some(superiority_roll), None,
-                "start_of_next_turn", None, "Bait and Switch"
-            ).await?;
-
-            Ok(json!({
-                "maneuver": "Bait and Switch",
-                "superiority_roll": superiority_roll,
-                "effect": format!("Switch places with a willing creature. You or it gains +{} AC until your next turn.", superiority_roll),
-            }))
-        }
-
-        "Ambush" => {
-            Ok(json!({
-                "maneuver": "Ambush",
-                "superiority_roll": superiority_roll,
-                "effect": format!("Add {} to a Stealth check or Initiative roll.", superiority_roll),
-            }))
-        }
-
-        "Commanding Presence" => {
-            Ok(json!({
-                "maneuver": "Commanding Presence",
-                "superiority_roll": superiority_roll,
-                "effect": format!("Add {} to a Charisma (Intimidation, Performance, or Persuasion) check.", superiority_roll),
-            }))
-        }
-
-        "Tactical Assessment" => {
-            Ok(json!({
-                "maneuver": "Tactical Assessment",
-                "superiority_roll": superiority_roll,
-                "effect": format!("Add {} to an Intelligence (History or Investigation) or Wisdom (Insight) check.", superiority_roll),
-            }))
-        }
-
-        _ => Ok(json!({"error": format!("Unknown maneuver: {}", maneuver_name)}))
     }
-}
 
-// ─── Psi Warrior ─────────────────────────────────────────────────────────────
+    Ok(json!({
+        "maneuver": maneuver_name,
+        "superiority_roll": superiority_roll,
+        "save_dc": save_dc,
+        "effect": effect,
+        "extra_damage": superiority_roll,
+    }))
+}
 
 pub async fn use_psionic_strike(
     pool: &SqlitePool,
@@ -1113,25 +1441,19 @@ pub async fn use_psionic_strike(
     player: &Player,
     psi_roll: i64,
 ) -> Result<Value> {
-    if player.subclass.as_deref() != Some("Psi Warrior") {
-        return Ok(json!({"error": "Psionic Strike not available"}));
+    let spent = crate::db::fighter::spend_superiority_die(pool, &player.id, "Psi Warrior").await?;
+    if !spent {
+        return Ok(json!({"error": "No Psionic Energy Dice remaining"}));
     }
 
-    let die_size = match fighter::spend_superiority_die(pool, &player.id, "Psi Warrior").await? {
-        Some(d) => d,
-        None => return Ok(json!({"error": "No Psionic Energy Dice remaining"})),
-    };
-
     let int_mod = Player::modifier(player.int);
-    let total_force_damage = psi_roll + int_mod;
+    let total_damage = (psi_roll + int_mod).max(1);
 
     Ok(json!({
-        "ability": "Psionic Strike",
         "psi_roll": psi_roll,
         "int_modifier": int_mod,
-        "total_force_damage": total_force_damage,
-        "damage_type": "force",
-        "die_size": die_size,
+        "force_damage": total_damage,
+        "message": format!("Psionic Strike deals {} force damage.", total_damage),
     }))
 }
 
@@ -1140,405 +1462,23 @@ pub async fn use_protective_field(
     player: &Player,
     psi_roll: i64,
 ) -> Result<Value> {
-    if player.subclass.as_deref() != Some("Psi Warrior") {
-        return Ok(json!({"error": "Protective Field not available"}));
+    let spent = crate::db::fighter::spend_superiority_die(pool, &player.id, "Psi Warrior").await?;
+    if !spent {
+        return Ok(json!({"error": "No Psionic Energy Dice remaining"}));
     }
-
-    let die_size = match fighter::spend_superiority_die(pool, &player.id, "Psi Warrior").await? {
-        Some(d) => d,
-        None => return Ok(json!({"error": "No Psionic Energy Dice remaining"})),
-    };
 
     let int_mod = Player::modifier(player.int);
-    let damage_reduction = (psi_roll + int_mod).max(1);
+    let reduction = (psi_roll + int_mod).max(1);
 
     Ok(json!({
-        "ability": "Protective Field",
         "psi_roll": psi_roll,
-        "int_modifier": int_mod,
-        "damage_reduction": damage_reduction,
-        "die_size": die_size,
+        "damage_reduction": reduction,
+        "message": format!("Protective Field reduces damage by {}.", reduction),
     }))
 }
 
-// ─── Enemy attack ─────────────────────────────────────────────────────────────
-
-pub async fn resolve_enemy_attack(
-    pool: &SqlitePool,
-    campaign_id: &str,
-    player: &Player,
-    enemy_id: &str,
-) -> Result<Value> {
-    let encounter = match get_active_encounter(pool, campaign_id).await? {
-        Some(e) => e,
-        None => return Ok(json!({"error": "No active combat"})),
-    };
-
-    let enemy = sqlx::query_as::<_, CombatEnemy>(
-        "SELECT * FROM combat_enemies WHERE id = ? AND encounter_id = ?"
-    )
-    .bind(enemy_id)
-    .bind(&encounter.id)
-    .fetch_optional(pool)
-    .await?;
-
-    let enemy = match enemy {
-        Some(e) if e.is_alive => e,
-        _ => {
-            advance_turn(pool, &encounter).await?;
-            return Ok(json!({"skipped": true, "reason": "enemy not found or already defeated"}));
-        }
-    };
-
-    // Frightened enemies have disadvantage on attacks
-    let base_roll = if enemy.is_frightened {
-        let (roll1, roll2) = (roll_die(20), roll_die(20));
-        roll1.min(roll2)
-    } else {
-        roll_die(20)
-    };
-    let attack_roll = base_roll + enemy.attack_bonus;
-
-    // Player AC includes active effect bonuses
-    let ac_bonus = get_ac_bonus_from_effects(pool, &player.id).await;
-    let effective_ac = player.armor_class + ac_bonus;
-
-    let hit = attack_roll >= effective_ac;
-
-    if !hit {
-        advance_turn(pool, &encounter).await?;
-        return Ok(json!({
-            "hit": false,
-            "attacker": enemy.name,
-            "attack_roll": attack_roll,
-            "player_ac": effective_ac,
-        }));
-    }
-
-    let damage_sides = parse_damage_die(&enemy.damage_die);
-    let damage_roll = roll_die(damage_sides);
-    let total_damage_raw = (damage_roll + enemy.damage_bonus).max(1);
-
-    // Check resistance (e.g. from Rage for Barbarian — future use)
-    let total_damage = if has_resistance(pool, &player.id, &enemy.damage_type).await {
-        total_damage_raw / 2
-    } else {
-        total_damage_raw
-    };
-
-    let (damage_to_hp, new_temp) = if player.temp_hp > 0 {
-        let absorbed = total_damage.min(player.temp_hp);
-        (total_damage - absorbed, player.temp_hp - absorbed)
-    } else {
-        (total_damage, 0)
-    };
-
-    let new_hp = (player.current_hp - damage_to_hp).max(0);
-
-    sqlx::query(
-        "UPDATE players SET current_hp = ?, temp_hp = ?, updated_at = datetime('now') WHERE id = ?"
-    )
-    .bind(new_hp)
-    .bind(new_temp)
-    .bind(&player.id)
-    .execute(pool)
-    .await?;
-
-    // Champion Survivor — at start of turn if bloodied, regain HP
-    // This is handled in advance_turn for the player's turn
-
-    advance_turn(pool, &encounter).await?;
-
-    Ok(json!({
-        "hit": true,
-        "attacker": enemy.name,
-        "attack_roll": attack_roll,
-        "player_ac": effective_ac,
-        "damage_roll": damage_roll,
-        "damage_bonus": enemy.damage_bonus,
-        "total_damage": total_damage,
-        "damage_type": enemy.damage_type,
-        "was_resisted": total_damage < total_damage_raw,
-        "player_new_hp": new_hp,
-        "player_max_hp": player.max_hp,
-        "player_downed": new_hp == 0,
-    }))
-}
-
-// ─── Ally turn ────────────────────────────────────────────────────────────────
-
-pub async fn resolve_ally_turn(
-    pool: &SqlitePool,
-    encounter: &CombatEncounter,
-    ally_id: &str,
-) -> Result<Value> {
-    let ally = sqlx::query_as::<_, CombatAlly>(
-        "SELECT * FROM combat_allies WHERE id = ? AND encounter_id = ?"
-    )
-    .bind(ally_id)
-    .bind(&encounter.id)
-    .fetch_optional(pool)
-    .await?;
-
-    let ally = match ally {
-        Some(a) if a.is_alive => a,
-        _ => {
-            advance_turn(pool, encounter).await?;
-            return Ok(json!({"ally_acted": false}));
-        }
-    };
-
-    let target = sqlx::query_as::<_, CombatEnemy>(
-        "SELECT * FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1
-         ORDER BY current_hp ASC LIMIT 1"
-    )
-    .bind(&encounter.id)
-    .fetch_optional(pool)
-    .await?;
-
-    let target = match target {
-        Some(t) => t,
-        None => {
-            advance_turn(pool, encounter).await?;
-            return Ok(json!({"ally_acted": false, "reason": "no targets"}));
-        }
-    };
-
-    let attack_roll = roll_die(20) + ally.attack_bonus;
-    let hit = attack_roll >= target.armor_class;
-
-    if !hit {
-        advance_turn(pool, encounter).await?;
-        return Ok(json!({
-            "ally_acted": true,
-            "ally_name": ally.name,
-            "target": target.name,
-            "hit": false,
-        }));
-    }
-
-    let damage_sides = parse_damage_die(&ally.damage_die);
-    let damage_roll = roll_die(damage_sides);
-    let total_damage = (damage_roll + ally.damage_bonus).max(1);
-    let new_hp = (target.current_hp - total_damage).max(0);
-    let defeated = new_hp == 0;
-
-    sqlx::query("UPDATE combat_enemies SET current_hp = ?, is_alive = ? WHERE id = ?")
-        .bind(new_hp)
-        .bind(!defeated)
-        .bind(&target.id)
-        .execute(pool)
-        .await?;
-
-    advance_turn(pool, encounter).await?;
-
-    Ok(json!({
-        "ally_acted": true,
-        "ally_name": ally.name,
-        "target": target.name,
-        "hit": true,
-        "total_damage": total_damage,
-        "damage_type": ally.damage_type,
-        "enemy_condition": enemy_condition(new_hp, target.max_hp),
-        "enemy_defeated": defeated,
-    }))
-}
-
-// ─── Companion to combat ──────────────────────────────────────────────────────
-
-pub async fn add_companion_to_combat(
-    pool: &SqlitePool,
-    campaign_id: &str,
-    companion_id: &str,
-) -> Result<Value> {
-    let encounter = match get_active_encounter(pool, campaign_id).await? {
-        Some(e) => e,
-        None => return Ok(json!({"error": "No active combat"})),
-    };
-
-    let companion = sqlx::query_as::<_, Companion>(
-        "SELECT * FROM companions WHERE id = ? AND campaign_id = ?"
-    )
-    .bind(companion_id)
-    .bind(campaign_id)
-    .fetch_optional(pool)
-    .await?;
-
-    let companion = match companion {
-        Some(c) => c,
-        None => return Ok(json!({"error": "Companion not found"})),
-    };
-
-    let initiative = roll_die(20) + 1;
-    let ally_id = Uuid::new_v4().to_string();
-
-    sqlx::query(
-        "INSERT INTO combat_allies
-         (id, encounter_id, campaign_id, ally_type, companion_id,
-          name, description, current_hp, max_hp, armor_class, attack_bonus,
-          damage_die, damage_bonus, damage_type, initiative, turn_order)
-         VALUES (?, ?, ?, 'companion', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
-    )
-    .bind(&ally_id)
-    .bind(&encounter.id)
-    .bind(campaign_id)
-    .bind(companion_id)
-    .bind(&companion.name)
-    .bind(companion.current_hp)
-    .bind(companion.max_hp)
-    .bind(companion.armor_class)
-    .bind(companion.attack_bonus)
-    .bind(&companion.damage_die)
-    .bind(companion.damage_bonus)
-    .bind(&companion.damage_type)
-    .bind(initiative)
-    .execute(pool)
-    .await?;
-
-    let mut turn_order: Vec<TurnParticipant> = encounter.turn_order_json
-        .as_deref()
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
-
-    turn_order.push(TurnParticipant {
-        participant_type: "ally".to_string(),
-        id: ally_id.clone(),
-        name: companion.name.clone(),
-        initiative,
-    });
-    turn_order.sort_by(|a, b| b.initiative.cmp(&a.initiative));
-
-    let new_json = serde_json::to_string(&turn_order)?;
-    sqlx::query("UPDATE combat_encounters SET turn_order_json = ? WHERE id = ?")
-        .bind(&new_json)
-        .bind(&encounter.id)
-        .execute(pool)
-        .await?;
-
-    Ok(json!({
-        "message": format!("{} joins the combat", companion.name),
-        "ally_id": ally_id,
-        "initiative": initiative,
-    }))
-}
-
-pub async fn add_ally_to_combat(
-    pool: &SqlitePool,
-    campaign_id: &str,
-    data: &Value,
-) -> Result<Value> {
-    let encounter = match get_active_encounter(pool, campaign_id).await? {
-        Some(e) => e,
-        None => return Ok(json!({"error": "No active combat"})),
-    };
-
-    let initiative = roll_die(20) + data["attack_bonus"].as_i64().unwrap_or(0).min(3);
-    let ally_id = Uuid::new_v4().to_string();
-    let name = data["name"].as_str().unwrap_or("Ally").to_string();
-    let hp = data["hp"].as_i64().unwrap_or(10);
-
-    sqlx::query(
-        "INSERT INTO combat_allies
-         (id, encounter_id, campaign_id, ally_type, name, description,
-          current_hp, max_hp, armor_class, attack_bonus, damage_die,
-          damage_bonus, damage_type, initiative, turn_order)
-         VALUES (?, ?, ?, 'npc', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
-    )
-    .bind(&ally_id)
-    .bind(&encounter.id)
-    .bind(campaign_id)
-    .bind(&name)
-    .bind(data["description"].as_str())
-    .bind(hp)
-    .bind(hp)
-    .bind(data["ac"].as_i64().unwrap_or(12))
-    .bind(data["attack_bonus"].as_i64().unwrap_or(2))
-    .bind(data["damage_die"].as_str().unwrap_or("d6"))
-    .bind(data["damage_bonus"].as_i64().unwrap_or(0))
-    .bind(data["damage_type"].as_str().unwrap_or("slashing"))
-    .bind(initiative)
-    .execute(pool)
-    .await?;
-
-    let mut turn_order: Vec<TurnParticipant> = encounter.turn_order_json
-        .as_deref()
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
-
-    turn_order.push(TurnParticipant {
-        participant_type: "ally".to_string(),
-        id: ally_id.clone(),
-        name: name.clone(),
-        initiative,
-    });
-    turn_order.sort_by(|a, b| b.initiative.cmp(&a.initiative));
-
-    let new_json = serde_json::to_string(&turn_order)?;
-    sqlx::query("UPDATE combat_encounters SET turn_order_json = ? WHERE id = ?")
-        .bind(&new_json)
-        .bind(&encounter.id)
-        .execute(pool)
-        .await?;
-
-    Ok(json!({
-        "message": format!("{} joins the combat as an ally", name),
-        "ally_id": ally_id,
-        "initiative": initiative,
-    }))
-}
-
-// ─── End combat ───────────────────────────────────────────────────────────────
-
-pub async fn end_combat(
-    pool: &SqlitePool,
-    campaign_id: &str,
-    outcome: &str,
-    xp_award: i64,
-) -> Result<Value> {
-    sqlx::query(
-        "UPDATE combat_encounters SET is_active = 0 WHERE campaign_id = ? AND is_active = 1"
-    )
-    .bind(campaign_id)
-    .execute(pool)
-    .await?;
-
-    // Clear all active effects on the player
-    let player = sqlx::query_as::<_, Player>(
-        "SELECT * FROM players WHERE campaign_id = ? LIMIT 1"
-    )
-    .bind(campaign_id)
-    .fetch_optional(pool)
-    .await?;
-
-    if let Some(ref p) = player {
-        sqlx::query(
-            "DELETE FROM active_effects WHERE target_id = ? AND duration_type != 'permanent'"
-        )
-        .bind(&p.id)
-        .execute(pool)
-        .await?;
-    }
-
-    if xp_award > 0 {
-        if let Some(p) = player {
-            let new_xp = p.experience + xp_award;
-            sqlx::query("UPDATE players SET experience = ? WHERE id = ?")
-                .bind(new_xp)
-                .bind(&p.id)
-                .execute(pool)
-                .await?;
-
-            let threshold = Player::xp_threshold(p.level);
-            let level_up_available = new_xp >= threshold && p.level < 20;
-
-            return Ok(json!({
-                "outcome": outcome,
-                "xp_awarded": xp_award,
-                "new_xp": new_xp,
-                "level_up_available": level_up_available,
-            }));
-        }
-    }
-
-    Ok(json!({"outcome": outcome, "xp_awarded": xp_award}))
+fn parse_die_size(die: &str) -> i64 {
+    die.trim_start_matches('d')
+        .parse::<i64>()
+        .unwrap_or(6)
 }
