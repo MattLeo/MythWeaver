@@ -101,6 +101,29 @@ pub async fn create_campaign(
     })))
 }
 
+pub async fn delete_campaign(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let tables = [
+        "messages", "sessions", "session_summaries",
+        "abilities", "items", "companions", "proficiencies",
+        "weapon_mastery", "known_maneuvers", "superiority_dice",
+        "active_effects", "combat_encounters", "combat_enemies",
+        "locations", "location_connections", "npcs", "world_facts",
+        "event_tables", "event_entries", "campaign_time", "players",
+        "campaigns"
+    ];
+    for table in &tables {
+        let _ = sqlx::query(&format!("DELETE FROM {} WHERE campaign_id = ?", table))
+            .bind(&campaign_id)
+            .execute(pool)
+            .await;
+    }
+    (StatusCode::OK, Json(json!({"message": "Campaign deleted"})))
+}
+
 pub async fn get_campaign_state(
     State(state): State<Arc<AppState>>,
     Path(campaign_id): Path<String>,

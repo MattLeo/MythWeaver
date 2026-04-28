@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/campaigns", get(api::list_campaigns).post(api::create_campaign))
-        .route("/api/campaigns/:id", get(api::get_campaign_state))
+        .route("/api/campaigns/:id", get(api::get_campaign_state).delete(api::delete_campaign))
         .route("/api/campaigns/:id/player-state", get(api::get_player_state))
         .route("/api/campaigns/:id/level-up", post(api::level_up))
         .route("/api/campaigns/:id/session", post(api::start_session))

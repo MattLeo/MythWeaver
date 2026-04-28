@@ -26,12 +26,12 @@ ${STYLES}
 .gp { font-size: .82rem; color: var(--gold); margin-top: .4rem; }
 .ability-row {
   display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: nowrap;
   font-size: .75rem; padding: .18rem 0; border-bottom: 1px solid var(--bord);
 }
 .ability-row:last-child { border-bottom: none; }
-.ability-name { color: var(--dim); flex: 1; }
-.ability-uses { font-family: 'Cinzel', serif; color: var(--gold); font-size: .7rem; }
-.ability-uses.empty { color: var(--red); }
+.ability-name { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ability-uses { font-family: 'Cinzel', serif; color: var(--gold); font-size: .7rem; white-space: nowrap; margin-left: .5rem; }
 .time-display {
   font-family: 'Cinzel', serif; font-size: .72rem;
   color: var(--goldl); text-transform: uppercase; letter-spacing: .1em;
@@ -190,14 +190,20 @@ export default function Sidebar({
         {abilities && abilities.length > 0 && (
           <div className="sec">
             <div className="sec-title">Class Abilities</div>
-            {abilities.map(ab => (
-              <div key={ab.id} className="ability-row">
-                <span className="ability-name">{ab.name}</span>
-                <span className={`ability-uses${ab.current_uses === 0 ? ' empty' : ''}`}>
-                  {ab.refresh_type === 'per_turn' ? '∞' : `${ab.current_uses}/${ab.max_uses}`}
-                </span>
-              </div>
-            ))}
+            {abilities
+              .filter(ab => ab.name && ab.name.trim().length > 0)
+              .map(ab => (
+                <div key={ab.id} className="ability-row">
+                  <span className="ability-name">{ab.name}</span>
+                  <span
+                    className="ability-uses"
+                    style={{ color: ab.current_uses === 0 ? 'var(--red)' : 'var(--gold)' }}
+                  >
+                    {ab.refresh_type === 'per_turn' ? '∞' : `${ab.current_uses}/${ab.max_uses}`}
+                  </span>
+                </div>
+              ))
+            }
           </div>
         )}
 

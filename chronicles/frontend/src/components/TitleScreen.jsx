@@ -55,13 +55,14 @@ ${STYLES}
 .campaign-card {
   background: var(--surf); border-bottom: 1px solid var(--bord);
   padding: .9rem 1.2rem;
-  cursor: pointer; text-align: left; width: 100%;
+  text-align: left; width: 100%;
   transition: background .15s;
   display: flex; justify-content: space-between; align-items: center;
   flex-shrink: 0;
 }
 .campaign-card:last-child { border-bottom: none; }
 .campaign-card:hover { background: rgba(200,150,42,.06); }
+.campaign-card-info { flex: 1; cursor: pointer; min-width: 0; }
 .campaign-card-name {
   font-family: 'Cinzel', serif; font-size: .85rem;
   color: var(--goldl); letter-spacing: .08em; margin-bottom: .2rem;
@@ -74,8 +75,44 @@ ${STYLES}
   letter-spacing: .1em; text-transform: uppercase;
   color: var(--gold); border: 1px solid var(--gold);
   border-radius: 2px; padding: .15rem .45rem; opacity: .7;
-  white-space: nowrap; margin-left: 1rem; flex-shrink: 0;
+  white-space: nowrap; margin-left: .75rem; flex-shrink: 0;
 }
+.campaign-card-actions {
+  display: flex; align-items: center; gap: .5rem;
+  margin-left: .75rem; flex-shrink: 0;
+}
+.btn-delete {
+  background: none; border: 1px solid transparent;
+  color: var(--dim); cursor: pointer; border-radius: 2px;
+  font-size: .72rem; padding: .2rem .45rem;
+  transition: all .15s; line-height: 1;
+}
+.btn-delete:hover {
+  border-color: var(--red); color: var(--red);
+  background: rgba(180,50,50,.08);
+}
+.confirm-delete {
+  display: flex; align-items: center; gap: .35rem;
+}
+.confirm-delete span {
+  font-size: .68rem; color: var(--red);
+  font-family: 'Cinzel', serif; letter-spacing: .05em;
+}
+.btn-confirm-yes {
+  background: var(--red); border: none; color: #fff;
+  cursor: pointer; border-radius: 2px;
+  font-size: .68rem; padding: .2rem .45rem;
+  font-family: 'Cinzel', serif;
+  transition: opacity .15s;
+}
+.btn-confirm-yes:hover { opacity: .8; }
+.btn-confirm-no {
+  background: none; border: 1px solid var(--bord); color: var(--dim);
+  cursor: pointer; border-radius: 2px;
+  font-size: .68rem; padding: .2rem .45rem;
+  transition: all .15s;
+}
+.btn-confirm-no:hover { border-color: var(--dim); color: var(--text); }
 .divider {
   width: 100%; max-width: 520px; border: none;
   border-top: 1px solid var(--bord); margin: 0 auto 1.2rem;
@@ -89,6 +126,8 @@ ${STYLES}
 export default function TitleScreen({ onStart, onResume }) {
   const [campaigns, setCampaigns] = useState([])
   const [loadingCampaigns, setLoadingCampaigns] = useState(true)
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [deleting, setDeleting] = useState(null)
 
   useEffect(() => {
     api.listCampaigns()
@@ -96,6 +135,19 @@ export default function TitleScreen({ onStart, onResume }) {
       .catch(() => setCampaigns([]))
       .finally(() => setLoadingCampaigns(false))
   }, [])
+
+  const handleDelete = async (campaignId) => {
+    setDeleting(campaignId)
+    try {
+      await api.deleteCampaign(campaignId)
+      setCampaigns(cs => cs.filter(c => c.campaign.id !== campaignId))
+    } catch (e) {
+      console.error('Failed to delete campaign:', e)
+    } finally {
+      setDeleting(null)
+      setConfirmDelete(null)
+    }
+  }
 
   return (
     <>
@@ -124,12 +176,12 @@ export default function TitleScreen({ onStart, onResume }) {
             <div className="campaign-scroll-outer">
               <div className="campaign-scroll-inner">
                 {campaigns.map(c => (
-                  <button
-                    key={c.campaign.id}
-                    className="campaign-card"
-                    onClick={() => onResume(c.campaign.id)}
-                  >
-                    <div>
+                  <div key={c.campaign.id} className="campaign-card">
+
+                    <div
+                      className="campaign-card-info"
+                      onClick={() => onResume(c.campaign.id)}
+                    >
                       <div className="campaign-card-name">
                         {c.player
                           ? `${c.player.name} — ${c.player.race} ${c.player.class} Lv.${c.player.level}`
@@ -141,16 +193,48 @@ export default function TitleScreen({ onStart, onResume }) {
                           : 'No character data'}
                       </div>
                     </div>
-                    {c.has_active_session && (
-                      <div className="campaign-card-badge">Active</div>
-                    )}
-                  </button>
+
+                    <div className="campaign-card-actions">
+                      {c.has_active_session && (
+                        <div className="campaign-card-badge">Active</div>
+                      )}
+
+                      {confirmDelete === c.campaign.id ? (
+                        <div className="confirm-delete">
+                          <span>Delete?</span>
+                          <button
+                            className="btn-confirm-yes"
+                            disabled={deleting === c.campaign.id}
+                            onClick={() => handleDelete(c.campaign.id)}
+                          >
+                            {deleting === c.campaign.id ? '…' : 'Yes'}
+                          </button>
+                          <button
+                            className="btn-confirm-no"
+                            onClick={() => setConfirmDelete(null)}
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="btn-delete"
+                          onClick={e => { e.stopPropagation(); setConfirmDelete(c.campaign.id) }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                  </div>
                 ))}
               </div>
             </div>
 
             <hr className="divider" />
-            <button className="btn-gold" style={{ flexShrink: 0 }} onClick={onStart}>Begin New Legend</button>
+            <button className="btn-gold" style={{ flexShrink: 0 }} onClick={onStart}>
+              Begin New Legend
+            </button>
           </div>
         ) : (
           <button className="btn-gold" onClick={onStart}>Begin Your Legend</button>

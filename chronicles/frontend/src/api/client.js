@@ -16,6 +16,12 @@ export async function createCampaign(data) {
   return res.json()
 }
 
+export async function deleteCampaign(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Failed to delete campaign')
+  return res.json()
+}
+
 export async function getCampaignState(campaignId) {
   const res = await fetch(`${BASE}/campaigns/${campaignId}`)
   if (!res.ok) throw new Error('Failed to get campaign')
