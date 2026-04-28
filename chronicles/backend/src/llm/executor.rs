@@ -115,7 +115,10 @@ pub async fn execute_tool(
                 args["notes"].as_str(),
             ).await?;
             if let Some(connect_id) = args["connected_to"].as_str() {
-                world::connect_locations(pool, campaign_id, connect_id, &loc.id, args["travel_notes"].as_str()).await?;
+                world::connect_locations(
+                    pool, campaign_id, connect_id, &loc.id,
+                    args["travel_notes"].as_str()
+                ).await?;
             }
             Ok(json!({"location": loc, "message": "Location created"}))
         }
@@ -187,19 +190,35 @@ pub async fn execute_tool(
         "update_currency" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-
             let delta_pp = parse_i64(&args["platinum"]);
             let delta_gp = parse_i64(&args["gold"]);
             let delta_sp = parse_i64(&args["silver"]);
             let delta_cp = parse_i64(&args["copper"]);
-
             let (new_pp, new_gp, new_sp, new_cp) = player::update_currency(
                 pool, &p.id, delta_pp, delta_gp, delta_sp, delta_cp
             ).await?;
-
             Ok(json!({
                 "message": "Currency updated",
                 "reason": args["reason"],
+                "new_balance": {
+                    "platinum": new_pp,
+                    "gold": new_gp,
+                    "silver": new_sp,
+                    "copper": new_cp
+                }
+            }))
+        }
+
+        // Legacy alias — model may still call this occasionally
+        "update_gold" => {
+            let p = player::get_player_by_campaign(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
+            let amount = parse_i64(&args["amount"]);
+            let (new_pp, new_gp, new_sp, new_cp) = player::update_currency(
+                pool, &p.id, 0, amount, 0, 0
+            ).await?;
+            Ok(json!({
+                "message": "Gold updated",
                 "new_balance": {
                     "platinum": new_pp,
                     "gold": new_gp,
@@ -296,7 +315,14 @@ pub async fn execute_tool(
             };
             let new_hp = (p.current_hp - damage_to_hp).max(0);
             player::update_player_hp(pool, &p.id, new_hp).await?;
-            Ok(json!({"damage_dealt": amount, "temp_hp_remaining": new_temp, "new_hp": new_hp, "max_hp": p.max_hp, "downed": new_hp == 0, "source": args["source"]}))
+            Ok(json!({
+                "damage_dealt": amount,
+                "temp_hp_remaining": new_temp,
+                "new_hp": new_hp,
+                "max_hp": p.max_hp,
+                "downed": new_hp == 0,
+                "source": args["source"]
+            }))
         }
 
         "apply_healing" => {
@@ -369,52 +395,6 @@ pub async fn execute_tool(
             }))
         }
 
-        "level_up" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            if p.level >= 20 {
-                return Ok(json!({"error": "Already at maximum level"}));
-            }
-            let result = player::level_up_player(pool, &p.id, &p).await?;
-
-            // Seed new abilities for this level
-            seed_level_up_abilities(pool, campaign_id, &p.id, &p.class, result.new_level, p.subclass.as_deref()).await;
-
-            Ok(json!(result))
-        }
-
-        "set_subclass" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let subclass = args["subclass"].as_str().unwrap_or("");
-
-            // Validate Fighter subclasses
-            if p.class == "Fighter" {
-                let valid = ["Champion", "Battle Master", "Psi Warrior", "Eldritch Knight"];
-                if !valid.contains(&subclass) {
-                    return Ok(json!({"error": format!("Invalid Fighter subclass: {}", subclass)}));
-                }
-            }
-
-            player::set_subclass(pool, &p.id, subclass).await?;
-            fighter::seed_subclass(pool, campaign_id, &p.id, subclass, p.level).await?;
-
-            Ok(json!({
-                "message": format!("Subclass set to {}", subclass),
-                "subclass": subclass,
-            }))
-        }
-
-        "apply_asi" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let stat1 = args["stat1"].as_str().unwrap_or("");
-            let stat2 = args["stat2"].as_str();
-            player::apply_asi(pool, &p.id, stat1, stat2).await?;
-            items::recalculate_ac(pool, &p.id).await?;
-            Ok(json!({"message": "ASI applied", "stat1": stat1, "stat2": stat2}))
-        }
-
         // ── Abilities ─────────────────────────────────────────────────────────
         "query_abilities" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
@@ -442,30 +422,23 @@ pub async fn execute_tool(
                 world::refresh_abilities(pool, &companion.id, "companion", rest_type).await?;
             }
 
-            // Restore superiority dice on rest
+            // Restore superiority dice
             if let Some(ref sc) = p.subclass {
                 match sc.as_str() {
                     "Battle Master" => {
-                        // Recharges on short or long rest
                         fighter::restore_superiority_dice(pool, &p.id, "Battle Master").await?;
                     }
                     "Psi Warrior" => {
-                        // Psi Warrior recharges one die on short rest, all on long rest
                         if rest_type == "long" {
                             fighter::restore_superiority_dice(pool, &p.id, "Psi Warrior").await?;
                         } else {
-                            // Restore one die on short rest
-                            let dice = fighter::get_superiority_dice(pool, &p.id, "Psi Warrior").await?;
-                            if let Some(d) = dice {
-                                if d.current_dice < d.max_dice {
-                                    sqlx::query(
-                                        "UPDATE superiority_dice SET current_dice = MIN(current_dice + 1, max_dice) WHERE player_id = ? AND pool_name = 'Psi Warrior'"
-                                    )
-                                    .bind(&p.id)
-                                    .execute(pool)
-                                    .await?;
-                                }
-                            }
+                            sqlx::query(
+                                "UPDATE superiority_dice SET current_dice = MIN(current_dice + 1, max_dice)
+                                 WHERE player_id = ? AND pool_name = 'Psi Warrior'"
+                            )
+                            .bind(&p.id)
+                            .execute(pool)
+                            .await?;
                         }
                     }
                     _ => {}
@@ -475,7 +448,6 @@ pub async fn execute_tool(
             if rest_type == "long" {
                 player::update_player_hp(pool, &p.id, p.max_hp).await?;
                 player::update_death_saves(pool, &p.id, 0, 0, true, false).await?;
-                // Reset indomitable uses on long rest
                 if p.indomitable_max > 0 {
                     sqlx::query(
                         "UPDATE players SET indomitable_uses = indomitable_max WHERE id = ?"
@@ -500,11 +472,10 @@ pub async fn execute_tool(
             }
         }
 
-        // ── Death ─────────────────────────────────────────────────────────────
+        // ── Death saves ───────────────────────────────────────────────────────
         "roll_death_save" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-
             let success = args["success"].as_bool().unwrap_or(false);
             let nat_20 = args["natural_20"].as_bool().unwrap_or(false);
 
@@ -522,10 +493,14 @@ pub async fn execute_tool(
 
             let is_stable = new_successes >= 3;
             let is_dead = new_failures >= 3;
-
             player::update_death_saves(pool, &p.id, new_successes, new_failures, is_stable, is_dead).await?;
 
-            Ok(json!({"successes": new_successes, "failures": new_failures, "stable": is_stable, "dead": is_dead}))
+            Ok(json!({
+                "successes": new_successes,
+                "failures": new_failures,
+                "stable": is_stable,
+                "dead": is_dead
+            }))
         }
 
         "stabilize_player" => {
@@ -583,7 +558,9 @@ pub async fn execute_tool(
 
         "add_session_note" => {
             let note = args["note"].as_str().unwrap_or("");
-            world::add_world_fact(pool, campaign_id, Some("session_note"), "Session Note", note, None).await?;
+            world::add_world_fact(
+                pool, campaign_id, Some("session_note"), "Session Note", note, None
+            ).await?;
             Ok(json!({"message": "Session note saved"}))
         }
 
@@ -612,18 +589,23 @@ pub async fn execute_tool(
                     format!("d{}", &die_part[1..end].trim())
                 } else { "d6".to_string() };
                 let damage_bonus = if damage_str.contains('+') {
-                    damage_str.split('+').nth(1).and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or(0)
+                    damage_str.split('+').nth(1)
+                        .and_then(|s| s.trim().parse::<i64>().ok())
+                        .unwrap_or(0)
                 } else { 0 };
 
                 json!({
                     "enemy_name": e["name"].as_str().or(e["enemy_name"].as_str()).unwrap_or("Enemy"),
                     "enemy_description": e["description"].as_str().or(e["enemy_description"].as_str()),
-                    "enemy_hp": e["hp"].as_i64().or(e["enemy_hp"].as_i64()).or_else(|| e["hp"].as_str().and_then(|s| s.parse().ok())).unwrap_or(10),
-                    "enemy_ac": e["ac"].as_i64().or(e["enemy_ac"].as_i64()).or_else(|| e["ac"].as_str().and_then(|s| s.parse().ok())).unwrap_or(12),
+                    "enemy_hp": e["hp"].as_i64().or(e["enemy_hp"].as_i64())
+                        .or_else(|| e["hp"].as_str().and_then(|s| s.parse().ok())).unwrap_or(10),
+                    "enemy_ac": e["ac"].as_i64().or(e["enemy_ac"].as_i64())
+                        .or_else(|| e["ac"].as_str().and_then(|s| s.parse().ok())).unwrap_or(12),
                     "enemy_damage_die": damage_die,
                     "enemy_damage_bonus": e["damage_bonus"].as_i64().unwrap_or(damage_bonus),
                     "enemy_damage_type": e["damage_type"].as_str().or(e["enemy_damage_type"].as_str()).unwrap_or("slashing"),
-                    "enemy_attack_bonus": e["attack_bonus"].as_i64().or(e["enemy_attack_bonus"].as_i64()).or_else(|| e["attack_bonus"].as_str().and_then(|s| s.parse().ok())).unwrap_or(0)
+                    "enemy_attack_bonus": e["attack_bonus"].as_i64().or(e["enemy_attack_bonus"].as_i64())
+                        .or_else(|| e["attack_bonus"].as_str().and_then(|s| s.parse().ok())).unwrap_or(0)
                 })
             }).collect();
 
@@ -649,7 +631,6 @@ pub async fn execute_tool(
         }
 
         // ── Fighter specific ──────────────────────────────────────────────────
-
         "use_second_wind" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
@@ -663,20 +644,16 @@ pub async fn execute_tool(
             };
             let used = fighter::use_action_surge(pool, &enc.id).await?;
             if used {
-                // Deduct one use from the Action Surge ability
                 let p = player::get_player_by_campaign(pool, campaign_id).await?
                     .ok_or_else(|| anyhow::anyhow!("No player found"))?;
                 let _ = sqlx::query(
-                    "UPDATE abilities SET current_uses = current_uses - 1 WHERE owner_id = ? AND name = 'Action Surge' AND current_uses > 0"
+                    "UPDATE abilities SET current_uses = current_uses - 1
+                     WHERE owner_id = ? AND name = 'Action Surge' AND current_uses > 0"
                 )
                 .bind(&p.id)
                 .execute(pool)
                 .await;
-
-                Ok(json!({
-                    "message": "Action Surge activated. You have one additional action this turn.",
-                    "action_surge_used": true,
-                }))
+                Ok(json!({"message": "Action Surge activated. You have one additional action this turn.", "action_surge_used": true}))
             } else {
                 Ok(json!({"error": "Action Surge not available or already used this turn"}))
             }
@@ -730,15 +707,15 @@ pub async fn execute_tool(
         }
 
         "change_weapon_mastery" => {
-            let old_weapon = args["old_weapon"].as_str().unwrap_or("");
-            let new_weapon = args["new_weapon"].as_str().unwrap_or("");
-            let new_property = args["new_property"].as_str().unwrap_or("");
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            fighter::change_weapon_mastery(pool, &p.id, old_weapon, new_weapon, new_property).await?;
-            Ok(json!({
-                "message": format!("Weapon mastery changed from {} to {} ({})", old_weapon, new_weapon, new_property)
-            }))
+            fighter::change_weapon_mastery(
+                pool, &p.id,
+                args["old_weapon"].as_str().unwrap_or(""),
+                args["new_weapon"].as_str().unwrap_or(""),
+                args["new_property"].as_str().unwrap_or(""),
+            ).await?;
+            Ok(json!({"message": "Weapon mastery updated"}))
         }
 
         "query_weapon_masteries" => {
@@ -746,17 +723,6 @@ pub async fn execute_tool(
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;
             let masteries = fighter::get_weapon_masteries(pool, &p.id).await?;
             Ok(json!({"weapon_masteries": masteries}))
-        }
-
-        "replace_maneuver" => {
-            let p = player::get_player_by_campaign(pool, campaign_id).await?
-                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
-            let old_maneuver = args["old_maneuver"].as_str().unwrap_or("");
-            let new_maneuver = args["new_maneuver"].as_str().unwrap_or("");
-            fighter::replace_maneuver(pool, &p.id, old_maneuver, new_maneuver).await?;
-            Ok(json!({
-                "message": format!("Replaced {} with {}", old_maneuver, new_maneuver)
-            }))
         }
 
         "query_superiority_dice" => {
@@ -767,192 +733,252 @@ pub async fn execute_tool(
             Ok(json!({"superiority_dice": dice}))
         }
 
+        // ── Species abilities ─────────────────────────────────────────────────
+
+        "use_breath_weapon" => {
+            let p = player::get_player_by_campaign(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
+
+            if p.race != "Dragonborn" {
+                return Ok(json!({"error": "Breath Weapon only available to Dragonborn"}));
+            }
+
+            // Spend one use from the Breath Weapon ability
+            let ability: Option<(String, i64)> = sqlx::query_as(
+                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Breath Weapon'"
+            )
+            .bind(&p.id)
+            .fetch_optional(pool)
+            .await?;
+
+            let (ability_id, current_uses) = match ability {
+                Some(a) => a,
+                None => return Ok(json!({"error": "Breath Weapon ability not found"})),
+            };
+
+            if current_uses <= 0 {
+                return Ok(json!({"error": "No Breath Weapon uses remaining"}));
+            }
+
+            sqlx::query(
+                "UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?"
+            )
+            .bind(&ability_id)
+            .execute(pool)
+            .await?;
+
+            // Damage scales with level
+            let damage_dice = if p.level >= 17 { "4d10" }
+                else if p.level >= 11 { "3d10" }
+                else if p.level >= 5  { "2d10" }
+                else                  { "1d10" };
+
+            let damage_type = match p.species_subtype.as_deref() {
+                Some("Black") | Some("Copper") => "acid",
+                Some("Blue")  | Some("Bronze") => "lightning",
+                Some("Green")                  => "poison",
+                Some("Silver") | Some("White") => "cold",
+                _                              => "fire",
+            };
+
+            let con_mod = Player::modifier(p.con);
+            let save_dc = 8 + con_mod + p.proficiency_bonus;
+
+            Ok(json!({
+                "message": "Breath Weapon used",
+                "damage_dice": damage_dice,
+                "damage_type": damage_type,
+                "save_dc": save_dc,
+                "save_type": "dexterity",
+                "uses_remaining": current_uses - 1,
+            }))
+        }
+
+        "use_healing_hands" => {
+            let p = player::get_player_by_campaign(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
+
+            if p.race != "Aasimar" {
+                return Ok(json!({"error": "Healing Hands only available to Aasimar"}));
+            }
+
+            let ability: Option<(String, i64)> = sqlx::query_as(
+                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Healing Hands'"
+            )
+            .bind(&p.id)
+            .fetch_optional(pool)
+            .await?;
+
+            let (ability_id, current_uses) = match ability {
+                Some(a) => a,
+                None => return Ok(json!({"error": "Healing Hands not found"})),
+            };
+
+            if current_uses <= 0 {
+                return Ok(json!({"error": "Healing Hands already used — recharges on Long Rest"}));
+            }
+
+            sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+                .bind(&ability_id)
+                .execute(pool)
+                .await?;
+
+            Ok(json!({
+                "message": "Healing Hands used",
+                "healing_dice": format!("{}d4", p.proficiency_bonus),
+                "uses_remaining": 0,
+                "note": "Roll the dice and apply healing to the touched creature."
+            }))
+        }
+
+        "use_relentless_endurance" => {
+            let p = player::get_player_by_campaign(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
+
+            if p.race != "Orc" {
+                return Ok(json!({"error": "Relentless Endurance only available to Orcs"}));
+            }
+
+            let ability: Option<(String, i64)> = sqlx::query_as(
+                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Relentless Endurance'"
+            )
+            .bind(&p.id)
+            .fetch_optional(pool)
+            .await?;
+
+            let (ability_id, current_uses) = match ability {
+                Some(a) => a,
+                None => return Ok(json!({"error": "Relentless Endurance not found"})),
+            };
+
+            if current_uses <= 0 {
+                return Ok(json!({"error": "Relentless Endurance already used — recharges on Long Rest"}));
+            }
+
+            sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+                .bind(&ability_id)
+                .execute(pool)
+                .await?;
+
+            // Drop to 1 HP instead of 0
+            player::update_player_hp(pool, &p.id, 1).await?;
+
+            Ok(json!({
+                "message": "Relentless Endurance activated — dropped to 1 HP instead of falling unconscious",
+                "new_hp": 1,
+                "uses_remaining": 0,
+            }))
+        }
+
+        "use_adrenaline_rush" => {
+            let p = player::get_player_by_campaign(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
+
+            if p.race != "Orc" {
+                return Ok(json!({"error": "Adrenaline Rush only available to Orcs"}));
+            }
+
+            let ability: Option<(String, i64)> = sqlx::query_as(
+                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Adrenaline Rush'"
+            )
+            .bind(&p.id)
+            .fetch_optional(pool)
+            .await?;
+
+            let (ability_id, current_uses) = match ability {
+                Some(a) => a,
+                None => return Ok(json!({"error": "Adrenaline Rush not found"})),
+            };
+
+            if current_uses <= 0 {
+                return Ok(json!({"error": "No Adrenaline Rush uses remaining"}));
+            }
+
+            sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+                .bind(&ability_id)
+                .execute(pool)
+                .await?;
+
+            let temp_hp = p.proficiency_bonus;
+            // Apply temp HP — only if higher than existing temp HP
+            if temp_hp > p.temp_hp {
+                sqlx::query(
+                    "UPDATE players SET temp_hp = ?, updated_at = datetime('now') WHERE id = ?"
+                )
+                .bind(temp_hp)
+                .bind(&p.id)
+                .execute(pool)
+                .await?;
+            }
+
+            Ok(json!({
+                "message": "Adrenaline Rush used — Dash action taken, temporary HP gained",
+                "temp_hp_gained": temp_hp,
+                "uses_remaining": current_uses - 1,
+            }))
+        }
+
+        "use_giant_ancestry" => {
+            let p = player::get_player_by_campaign(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No player found"))?;
+
+            if p.race != "Goliath" {
+                return Ok(json!({"error": "Giant Ancestry only available to Goliaths"}));
+            }
+
+            let ability_name = p.species_subtype.as_deref()
+                .map(|s| match s {
+                    "Cloud Giant" => "Cloud's Jaunt",
+                    "Fire Giant"  => "Fire's Burn",
+                    "Frost Giant" => "Frost's Chill",
+                    "Hill Giant"  => "Hill's Tumble",
+                    "Storm Giant" => "Storm's Thunder",
+                    _             => "Stone's Endurance",
+                })
+                .unwrap_or("Stone's Endurance");
+
+            let ability: Option<(String, i64)> = sqlx::query_as(
+                "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = ?"
+            )
+            .bind(&p.id)
+            .bind(ability_name)
+            .fetch_optional(pool)
+            .await?;
+
+            let (ability_id, current_uses) = match ability {
+                Some(a) => a,
+                None => return Ok(json!({"error": format!("{} not found", ability_name)})),
+            };
+
+            if current_uses <= 0 {
+                return Ok(json!({"error": format!("No {} uses remaining", ability_name)}));
+            }
+
+            sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+                .bind(&ability_id)
+                .execute(pool)
+                .await?;
+
+            let effect_desc = match ability_name {
+                "Cloud's Jaunt"    => "Teleport up to 30 feet to an unoccupied space you can see.",
+                "Fire's Burn"      => "Deal an extra 1d10 Fire damage to the target.",
+                "Frost's Chill"    => "Deal 1d6 Cold damage and reduce target Speed by 10 ft until your next turn.",
+                "Hill's Tumble"    => "The target gains the Prone condition.",
+                "Stone's Endurance"=> "Roll 1d12 + CON modifier and reduce incoming damage by that amount.",
+                "Storm's Thunder"  => "Deal 1d8 Thunder damage to the creature that damaged you.",
+                _                  => "Ability activated.",
+            };
+
+            Ok(json!({
+                "ability": ability_name,
+                "effect": effect_desc,
+                "uses_remaining": current_uses - 1,
+            }))
+        }
+
         _ => {
             tracing::warn!("Unknown tool called: {}", tool_name);
             Ok(json!({"error": format!("Unknown tool: {}", tool_name)}))
         }
-    }
-}
-
-// ─── Level up ability seeding ─────────────────────────────────────────────────
-
-async fn seed_level_up_abilities(
-    pool: &SqlitePool,
-    campaign_id: &str,
-    player_id: &str,
-    class: &str,
-    new_level: i64,
-    subclass: Option<&str>,
-) {
-    if class != "Fighter" {
-        return;
-    }
-
-    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
-    let has_ability = |name: &str| existing.iter().any(|a| a.name == name);
-
-    match new_level {
-        2 => {
-            // Action Surge — 1 use, recharges on short rest
-            if !has_ability("Action Surge") {
-                let _ = world::create_ability(
-                    pool, campaign_id, "player", player_id,
-                    "Action Surge",
-                    Some("On your turn, take one additional action (not the Magic action). Recharges on short or long rest."),
-                    1, "short_rest"
-                ).await;
-            }
-            if !has_ability("Tactical Mind") {
-                let _ = world::create_ability(
-                    pool, campaign_id, "player", player_id,
-                    "Tactical Mind",
-                    Some("When you fail an ability check, spend a Second Wind use to roll 1d10 and add to the check. Only expended if the check succeeds."),
-                    1, "manual"
-                ).await;
-            }
-        }
-        5 => {
-            if !has_ability("Tactical Shift") {
-                let _ = world::create_ability(
-                    pool, campaign_id, "player", player_id,
-                    "Tactical Shift",
-                    Some("When you use Second Wind as a Bonus Action, move up to half your Speed without provoking Opportunity Attacks."),
-                    1, "manual"
-                ).await;
-            }
-        }
-        9 => {
-            if !has_ability("Indomitable") {
-                let _ = world::create_ability(
-                    pool, campaign_id, "player", player_id,
-                    "Indomitable",
-                    Some("When you fail a saving throw, reroll it with a bonus equal to your Fighter level. You must use the new roll."),
-                    1, "long_rest"
-                ).await;
-            }
-            if !has_ability("Tactical Master") {
-                let _ = world::create_ability(
-                    pool, campaign_id, "player", player_id,
-                    "Tactical Master",
-                    Some("When you attack with a weapon whose mastery property you can use, you can replace that property with Push, Sap, or Slow for that attack."),
-                    1, "manual"
-                ).await;
-            }
-        }
-        13 => {
-            if !has_ability("Studied Attacks") {
-                let _ = world::create_ability(
-                    pool, campaign_id, "player", player_id,
-                    "Studied Attacks",
-                    Some("If you miss an attack roll against a creature, you have Advantage on your next attack roll against that creature before the end of your next turn."),
-                    1, "manual"
-                ).await;
-            }
-        }
-        _ => {}
-    }
-
-    // Subclass-specific abilities
-    match subclass {
-        Some("Champion") => match new_level {
-            7 => {
-                if !has_ability("Additional Fighting Style") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Additional Fighting Style",
-                        Some("You gain another Fighting Style feat of your choice."),
-                        1, "manual"
-                    ).await;
-                }
-            }
-            10 => {
-                if !has_ability("Heroic Warrior") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Heroic Warrior",
-                        Some("During combat, give yourself Heroic Inspiration at the start of your turn if you don't already have it."),
-                        1, "per_turn"
-                    ).await;
-                }
-            }
-            18 => {
-                if !has_ability("Survivor: Heroic Rally") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Survivor: Heroic Rally",
-                        Some("At the start of each turn, regain HP equal to 5 + CON modifier if you are Bloodied and have at least 1 HP."),
-                        1, "per_turn"
-                    ).await;
-                }
-            }
-            _ => {}
-        },
-        Some("Battle Master") => match new_level {
-            7 => {
-                if !has_ability("Know Your Enemy") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Know Your Enemy",
-                        Some("Bonus action: learn a creature's Immunities, Resistances, and Vulnerabilities within 30 feet. Recharges on long rest or by spending a Superiority Die."),
-                        1, "long_rest"
-                    ).await;
-                }
-            }
-            15 => {
-                if !has_ability("Relentless") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Relentless",
-                        Some("Once per turn when you use a maneuver, roll 1d8 and use that number instead of expending a Superiority Die."),
-                        1, "per_turn"
-                    ).await;
-                }
-            }
-            _ => {}
-        },
-        Some("Psi Warrior") => match new_level {
-            7 => {
-                if !has_ability("Psi-Powered Leap") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Psi-Powered Leap",
-                        Some("Bonus action: gain Fly Speed equal to twice your Speed until end of turn. Recharges on short rest or by spending a Psionic Energy Die."),
-                        1, "short_rest"
-                    ).await;
-                }
-            }
-            10 => {
-                if !has_ability("Guarded Mind") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Guarded Mind",
-                        Some("Resistance to Psychic damage. At start of turn, spend a Psionic Energy Die to end Charmed or Frightened conditions on yourself."),
-                        1, "manual"
-                    ).await;
-                }
-            }
-            15 => {
-                if !has_ability("Bulwark of Force") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Bulwark of Force",
-                        Some("Bonus action: choose up to INT modifier creatures within 30 feet (including yourself). Each has Half Cover for 1 minute. Recharges on long rest or Psionic Energy Die."),
-                        1, "long_rest"
-                    ).await;
-                }
-            }
-            18 => {
-                if !has_ability("Telekinetic Master") {
-                    let _ = world::create_ability(
-                        pool, campaign_id, "player", player_id,
-                        "Telekinetic Master",
-                        Some("Always have Telekinesis prepared. Cast it without a spell slot. While concentrating on it, make one weapon attack as a Bonus Action each turn. Recharges on long rest or Psionic Energy Die."),
-                        1, "long_rest"
-                    ).await;
-                }
-            }
-            _ => {}
-        },
-        _ => {}
     }
 }

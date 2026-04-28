@@ -44,13 +44,17 @@ CREATE TABLE IF NOT EXISTS messages (
 -- ─── Player ──────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS players (
-    id                   TEXT PRIMARY KEY,
+        id                   TEXT PRIMARY KEY,
     campaign_id          TEXT NOT NULL REFERENCES campaigns(id),
     name                 TEXT NOT NULL,
     race                 TEXT NOT NULL,
+    species_subtype      TEXT,
+    sex                  TEXT NOT NULL DEFAULT 'male'
+                         CHECK(sex IN ('male', 'female')),
     class                TEXT NOT NULL,
     subclass             TEXT,
     background           TEXT NOT NULL,
+    background_feat      TEXT,
     level                INTEGER NOT NULL DEFAULT 1,
     experience           INTEGER NOT NULL DEFAULT 0,
     current_hp           INTEGER NOT NULL DEFAULT 10,

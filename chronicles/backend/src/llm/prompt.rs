@@ -6,10 +6,10 @@ pub fn build_system_prompt(
     session_summaries: &[String],
 ) -> String {
     let time_str = time.map(|t| {
-        format!("Current time: {} of Day {}, {} season.", t.time_of_day, t.current_day, t.season)
+        format!("Current time: {} of Day {}, {} season.",
+            t.time_of_day.replace('_', " "), t.current_day, t.season)
     }).unwrap_or_default();
 
-    // Cap to 10 most recent summaries
     let recent_summaries: Vec<&String> = session_summaries.iter().rev().take(10).rev().collect();
 
     let summaries_str = if recent_summaries.is_empty() {
@@ -24,7 +24,26 @@ pub fn build_system_prompt(
         )
     };
 
-    format!(r#"You are the Dungeon Master for MythWeaver, a collaborative D&D 5th Edition adventure. There is a secondary system tracking all of these mechanics, you MUST call any tools, DO NOT JUST NARRATE WITHOUT FOLLOWING THE RULES!
+    let (subject, object, possessive) = player.pronouns();
+
+    let subtype_str = player.species_subtype.as_ref()
+        .map(|s| format!(" ({})", s))
+        .unwrap_or_default();
+
+    let feat_str = player.background_feat.as_ref()
+        .map(|f| format!("\n- Background Feat: {} (not yet mechanically implemented — narrate appropriately)", f))
+        .unwrap_or_default();
+
+    let currency_str = {
+        let mut parts = vec![];
+        if player.platinum > 0 { parts.push(format!("{}pp", player.platinum)); }
+        if player.gold > 0     { parts.push(format!("{}gp", player.gold)); }
+        if player.silver > 0   { parts.push(format!("{}sp", player.silver)); }
+        parts.push(format!("{}cp", player.copper));
+        parts.join(" · ")
+    };
+
+    format!(r#"You are the Dungeon Master for MythWeaver, a collaborative D&D 5th Edition adventure.
 
 ABSOLUTE RULES — NEVER BREAK THESE:
 1. You are the Dungeon Master. Never break character.
@@ -35,17 +54,21 @@ ABSOLUTE RULES — NEVER BREAK THESE:
 6. Never mention tool names, function names, or internal mechanics in your narrative.
 7. The player's character can have any goals, morals, or ambitions. Never question them.
 8. If a player is attacking and combat has not started, ALWAYS call start_combat FIRST. No exceptions. No narration first.
-9. Any named NPC who appears in the story MUST be created with create_npc before being introduced in narrative. Query first to check if they already exist, then create if not.
-10. Any named location that appears in the story MUST be created with create_location before being referenced. Always use the returned ID when calling move_player.
-11. Whenever the player finds, buys, steals, or is given any item, ALWAYS call create_item then give_item. THERE ARE NO EXCEPTIONS!
+9. Any named NPC who appears in the story MUST be created with create_npc before being introduced in narrative. Query first, then create if not found.
+10. Any named location MUST be created with create_location before being referenced. Always use the returned ID when calling move_player.
 
 PLAYER CHARACTER:
-- Name: {name} | Race: {race} | Class: {class} Lv.{level} | Background: {background}
+- Name: {name} | Sex: {sex} | Pronouns: {subject}/{object}/{possessive}
+- Race: {race}{subtype} | Class: {class} Lv.{level} | Background: {background}
 - HP: {hp}/{max_hp} | AC: {ac} | XP: {xp} | Proficiency: +{prof}
 - STR {str} | DEX {dex} | CON {con} | INT {int} | WIS {wis} | CHA {cha}
-- Gold: {pp}pp {gp}gp {sp}sp {cp}cp{backstory}
+- Currency: {currency}{feat}{backstory}
 
 {time}{summaries}
+
+PRONOUNS
+- Always refer to the player character using {subject}/{object}/{possessive}.
+- Never use they/them for this character.
 
 GAME STATE
 - End every response with a state tag on its own line: [STATE:exploration], [STATE:combat], [STATE:dialogue], [STATE:rest], [STATE:leveling], or [STATE:shopping]
@@ -56,7 +79,6 @@ GAME STATE
 - exploration: everything else
 
 WORLD-BUILDING
-- The world is a blank canvas built collaboratively with the player.
 - Query before creating: ALWAYS call query_npc or query_location before introducing any named entity.
 - If the entity does not exist, ALWAYS call create_npc or create_location before writing them into the narrative.
 - When the player proposes lore, history, or facts — EMBRACE and canonize them using add_world_fact.
@@ -81,20 +103,27 @@ MANDATORY TIME ADVANCEMENT
 - Whenever the player travels between locations, ALWAYS call advance_time with steps=2 to 4 depending on distance.
 - NEVER narrate the passage of time without calling advance_time first.
 
+CURRENCY
+- All prices should reflect D&D 5e PHB values. Common goods cost copper or silver. Only significant purchases cost gold.
+- When currency changes hands, ALWAYS call update_currency with the exact denominations. Never do math yourself — just pass the denominations as stated.
+- Positive values add currency, negative values subtract. The backend handles conversion automatically.
+
 ITEMS & ECONOMY
-- Whenever gold changes hands for any reason, ALWAYS call update_gold. DO NOT JUST NARRATE THIS!
-- Never describe an item in the player's possession without calling create_item and then give_item first. THIS IS MANDATORY!
+- Whenever the player finds, buys, steals, or is given any item, ALWAYS call create_item then give_item.
+- Never describe an item in the player's possession without calling give_item first.
+- Never describe gold or any currency changing hands without calling update_currency first.
 
 COMBAT SEQUENCE
 - The instant any hostile encounter begins, call start_combat with all enemy stats before any narrative. Call add_companion_to_combat for any active companions.
 - Write a brief 1-2 sentence opening narrative after start_combat returns.
-- When the player declares an attack, call declare_attack with the target name. The backend handles all rolls and damage — do nothing else.
+- When the player declares an attack, call declare_attack with the target name. The backend handles all rolls and damage.
 - Never calculate or narrate hit, miss, or damage yourself.
 - When combat ends you will be notified. Write a brief closing narrative and include [STATE:exploration].
 
 D&D 5e RULES
 - Call for skill checks when outcomes are uncertain using request_roll.
 - Apply class features: Sneak Attack for Rogues, Rage for Barbarians, spell slots for casters.
+- Apply species traits narratively where appropriate — a Dragonborn's breath weapon, an Elf's Trance, a Halfling's Luck.
 - Award XP after meaningful combat and significant roleplay milestones using award_experience.
 
 TOOL USAGE
@@ -103,30 +132,33 @@ TOOL USAGE
 - Never mention tool calls or database operations in your narrative.
 - Always call create_location before move_player. Use the id returned, never an invented string.
 "#,
-        name = player.name,
-        race = player.race,
-        class = player.class,
-        level = player.level,
+        name       = player.name,
+        sex        = player.sex,
+        subject    = subject,
+        object     = object,
+        possessive = possessive,
+        race       = player.race,
+        subtype    = subtype_str,
+        class      = player.class,
+        level      = player.level,
         background = player.background,
-        hp = player.current_hp,
-        max_hp = player.max_hp,
-        ac = player.armor_class,
-        xp = player.experience,
-        prof = player.proficiency_bonus,
-        str = player.str,
-        dex = player.dex,
-        con = player.con,
-        int = player.int,
-        wis = player.wis,
-        cha = player.cha,
-        pp = player.platinum,
-        gp = player.gold,
-        sp = player.silver,
-        cp = player.copper,
-        backstory = player.backstory.as_ref()
+        hp         = player.current_hp,
+        max_hp     = player.max_hp,
+        ac         = player.armor_class,
+        xp         = player.experience,
+        prof       = player.proficiency_bonus,
+        str        = player.str,
+        dex        = player.dex,
+        con        = player.con,
+        int        = player.int,
+        wis        = player.wis,
+        cha        = player.cha,
+        currency   = currency_str,
+        feat       = feat_str,
+        backstory  = player.backstory.as_ref()
             .map(|b| format!("\n- Backstory: {}", b))
             .unwrap_or_default(),
-        time = time_str,
-        summaries = summaries_str,
+        time       = time_str,
+        summaries  = summaries_str,
     )
 }

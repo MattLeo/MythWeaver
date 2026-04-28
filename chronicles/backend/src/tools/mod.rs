@@ -24,6 +24,7 @@ fn exploration_tools() -> Vec<Value> {
     tools.extend(session_tools());
     tools.extend(progression_tools());
     tools.extend(fighter_exploration_tools());
+    tools.extend(species_ability_tools());
     tools.push(request_roll_tool());
     tools
 }
@@ -38,22 +39,9 @@ fn combat_tools() -> Vec<Value> {
     tools.extend(session_tools());
     tools.extend(base_combat_tools());
     tools.extend(fighter_combat_tools());
+    tools.extend(species_ability_tools());
     tools
 }
-
-/* Commenting these out as they may no longer be necessary
-
-fn dialogue_tools() -> Vec<Value> {
-    let mut tools = vec![];
-    tools.extend(world_query_tools());
-    tools.extend(world_write_tools());
-    tools.extend(world_mutation_tools());
-    tools.extend(companion_query_tools());
-    tools.extend(session_tools());
-    tools.push(request_roll_tool());
-    tools
-}
-*/
 
 fn rest_tools() -> Vec<Value> {
     let mut tools = vec![];
@@ -134,18 +122,12 @@ fn world_query_tools() -> Vec<Value> {
             })
         ),
         tool("query_player_state",
-            "Get full current player state: HP, AC, XP, level, subclass, gold, location, inventory, abilities, weapon masteries, maneuvers, and superiority dice.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            "Get full current player state: HP, AC, XP, level, subclass, currency, location, inventory, abilities, weapon masteries, maneuvers, and superiority dice.",
+            json!({ "type": "object", "properties": {} })
         ),
         tool("query_time",
             "Get the current time of day, day number, and season.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            json!({ "type": "object", "properties": {} })
         ),
     ]
 }
@@ -170,7 +152,7 @@ fn world_write_tools() -> Vec<Value> {
             })
         ),
         tool("create_npc",
-            "Create and persist a new NPC.",
+            "Create and persist a new NPC. ALWAYS call this before introducing any named NPC in the narrative.",
             json!({
                 "type": "object",
                 "properties": {
@@ -243,7 +225,7 @@ fn world_mutation_tools() -> Vec<Value> {
             })
         ),
         tool("update_currency",
-            "Update player currency. Pass the amount of each denomination to add or subtract. Positive adds, negative subtracts. The backend handles all conversion and rollup automatically — never do math yourself, just pass the denomination amounts as stated.",
+            "Update player currency. Pass the amount of each denomination to add (positive) or subtract (negative). Never do math yourself — just pass the denominations as stated. The backend handles all conversion and rollup automatically.",
             json!({
                 "type": "object",
                 "properties": {
@@ -274,7 +256,7 @@ fn item_tools() -> Vec<Value> {
                     "damage_die": { "type": "string" },
                     "damage_type": { "type": "string" },
                     "weapon_range": { "type": "string", "enum": ["melee","ranged"] },
-                    "weapon_type": { "type": "string", "description": "Specific weapon name e.g. 'longsword', 'greataxe' — used for mastery lookup" },
+                    "weapon_type": { "type": "string", "description": "Specific weapon name e.g. 'longsword', 'greataxe'" },
                     "base_ac": { "type": "integer" },
                     "armor_type": { "type": "string", "enum": ["light","medium","heavy"] },
                     "rarity": { "type": "string", "enum": ["common","uncommon","rare","very_rare","legendary"] },
@@ -337,10 +319,7 @@ fn item_tools() -> Vec<Value> {
         ),
         tool("query_items",
             "Get the player's full inventory and equipped items.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            json!({ "type": "object", "properties": {} })
         ),
     ]
 }
@@ -708,7 +687,7 @@ fn base_combat_tools() -> Vec<Value> {
     ]
 }
 
-// ─── Fighter Combat Tools ─────────────────────────────────────────────────────
+// ─── Fighter Combat ───────────────────────────────────────────────────────────
 
 fn fighter_combat_tools() -> Vec<Value> {
     vec![
@@ -793,7 +772,7 @@ fn fighter_combat_tools() -> Vec<Value> {
     ]
 }
 
-// ─── Fighter Exploration Tools ────────────────────────────────────────────────
+// ─── Fighter Exploration ──────────────────────────────────────────────────────
 
 fn fighter_exploration_tools() -> Vec<Value> {
     vec![
@@ -814,6 +793,33 @@ fn fighter_exploration_tools() -> Vec<Value> {
         ),
         tool("query_weapon_masteries",
             "Get the player's current weapon mastery selections.",
+            json!({ "type": "object", "properties": {} })
+        ),
+    ]
+}
+
+// ─── Species Abilities ────────────────────────────────────────────────────────
+
+fn species_ability_tools() -> Vec<Value> {
+    vec![
+        tool("use_breath_weapon",
+            "Dragonborn: Replace one attack with a breath weapon exhalation. Deals typed damage in a cone or line. Targets make a DEX save.",
+            json!({ "type": "object", "properties": {} })
+        ),
+        tool("use_healing_hands",
+            "Aasimar: Touch a creature and roll proficiency bonus d4s to restore HP. Once per Long Rest.",
+            json!({ "type": "object", "properties": {} })
+        ),
+        tool("use_relentless_endurance",
+            "Orc: When reduced to 0 HP but not killed, drop to 1 HP instead. Once per Long Rest.",
+            json!({ "type": "object", "properties": {} })
+        ),
+        tool("use_adrenaline_rush",
+            "Orc: Take the Dash action as a Bonus Action and gain Temporary HP equal to Proficiency Bonus.",
+            json!({ "type": "object", "properties": {} })
+        ),
+        tool("use_giant_ancestry",
+            "Goliath: Activate your Giant Ancestry boon. Effect depends on ancestry chosen at creation.",
             json!({ "type": "object", "properties": {} })
         ),
     ]

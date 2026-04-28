@@ -49,9 +49,12 @@ pub struct Player {
     pub campaign_id: String,
     pub name: String,
     pub race: String,
+    pub species_subtype: Option<String>,
+    pub sex: String,
     pub class: String,
     pub subclass: Option<String>,
     pub background: String,
+    pub background_feat: Option<String>,
     pub level: i64,
     pub experience: i64,
     pub current_hp: i64,
@@ -124,8 +127,20 @@ impl Player {
     }
 
     pub fn is_asi_level(level: i64) -> bool {
-        // 2024 PHB Fighter ASI levels
-        matches!(level, 4 | 6 | 8 | 12 | 14 | 16)
+        matches!(level, 4 | 8 | 12 | 16 | 19)
+    }
+
+    pub fn pronouns(&self) -> (&'static str, &'static str, &'static str) {
+        // (subject, object, possessive)
+        match self.sex.as_str() {
+            "female" => ("she", "her", "her"),
+            _        => ("he",  "him", "his"),
+        }
+    }
+
+    pub fn maneuver_save_dc(&self) -> i64 {
+        let best_mod = Player::modifier(self.str).max(Player::modifier(self.dex));
+        8 + self.proficiency_bonus + best_mod
     }
 
     pub fn spellcasting_modifier(&self) -> i64 {
@@ -133,11 +148,6 @@ impl Player {
             Some("Eldritch Knight") | Some("Psi Warrior") => Player::modifier(self.int),
             _ => 0,
         }
-    }
-
-    pub fn maneuver_save_dc(&self) -> i64 {
-        let best_mod = Player::modifier(self.str).max(Player::modifier(self.dex));
-        8 + self.proficiency_bonus + best_mod
     }
 }
 
@@ -188,12 +198,12 @@ pub fn hp_gained_on_level(class: &str, con_modifier: i64) -> i64 {
     (hit_die / 2 + 1) + con_modifier
 }
 
-// ─── Fighter progression tables ───────────────────────────────────────────────
+// ─── Fighter progression ──────────────────────────────────────────────────────
 
 pub fn fighter_second_wind_uses(level: i64) -> i64 {
     match level {
-        1..=3  => 2,
-        4..=9  => 3,
+        1..=3   => 2,
+        4..=9   => 3,
         10..=19 => 4,
         _ => 4,
     }
@@ -201,8 +211,8 @@ pub fn fighter_second_wind_uses(level: i64) -> i64 {
 
 pub fn fighter_weapon_mastery_count(level: i64) -> i64 {
     match level {
-        1..=3  => 3,
-        4..=15 => 4,
+        1..=3   => 3,
+        4..=15  => 4,
         16..=19 => 5,
         _ => 6,
     }
@@ -210,8 +220,8 @@ pub fn fighter_weapon_mastery_count(level: i64) -> i64 {
 
 pub fn fighter_extra_attacks(level: i64) -> i64 {
     match level {
-        1..=4  => 1,
-        5..=10 => 2,
+        1..=4   => 1,
+        5..=10  => 2,
         11..=19 => 3,
         _ => 4,
     }
@@ -234,35 +244,20 @@ pub fn fighter_indomitable_max(level: i64) -> i64 {
     }
 }
 
-// ─── Battle Master maneuvers ──────────────────────────────────────────────────
+// ─── Battle Master ────────────────────────────────────────────────────────────
 
 pub const ALL_MANEUVERS: &[&str] = &[
-    "Ambush",
-    "Bait and Switch",
-    "Commander's Strike",
-    "Commanding Presence",
-    "Disarming Attack",
-    "Distracting Strike",
-    "Evasive Footwork",
-    "Feinting Attack",
-    "Goading Attack",
-    "Lunging Attack",
-    "Maneuvering Attack",
-    "Menacing Attack",
-    "Parry",
-    "Precision Attack",
-    "Pushing Attack",
-    "Rally",
-    "Riposte",
-    "Sweeping Attack",
-    "Tactical Assessment",
-    "Trip Attack",
+    "Ambush", "Bait and Switch", "Commander's Strike", "Commanding Presence",
+    "Disarming Attack", "Distracting Strike", "Evasive Footwork", "Feinting Attack",
+    "Goading Attack", "Lunging Attack", "Maneuvering Attack", "Menacing Attack",
+    "Parry", "Precision Attack", "Pushing Attack", "Rally",
+    "Riposte", "Sweeping Attack", "Tactical Assessment", "Trip Attack",
 ];
 
 pub fn battle_master_maneuver_count(level: i64) -> i64 {
     match level {
-        3..=6  => 3,
-        7..=9  => 5,
+        3..=6   => 3,
+        7..=9   => 5,
         10..=14 => 7,
         15..=20 => 9,
         _ => 0,
@@ -270,10 +265,9 @@ pub fn battle_master_maneuver_count(level: i64) -> i64 {
 }
 
 pub fn battle_master_superiority_dice(level: i64) -> (i64, i64) {
-    // returns (count, die_size)
     match level {
-        3..=6  => (4, 8),
-        7..=9  => (5, 8),
+        3..=6   => (4, 8),
+        7..=9   => (5, 8),
         10..=14 => (5, 10),
         15..=17 => (6, 10),
         18..=20 => (6, 12),
@@ -281,14 +275,11 @@ pub fn battle_master_superiority_dice(level: i64) -> (i64, i64) {
     }
 }
 
-// ─── Psi Warrior energy dice ──────────────────────────────────────────────────
-
 pub fn psi_warrior_energy_dice(level: i64) -> (i64, i64) {
-    // returns (count, die_size)
     match level {
-        3..=4  => (4, 6),
-        5..=8  => (6, 8),
-        9..=10 => (8, 8),
+        3..=4   => (4, 6),
+        5..=8   => (6, 8),
+        9..=10  => (8, 8),
         11..=12 => (8, 10),
         13..=16 => (10, 10),
         17..=20 => (12, 12),
@@ -345,18 +336,6 @@ pub struct SuperiorityDice {
     pub created_at: String,
 }
 
-// ─── Action Economy ───────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActionEconomy {
-    pub actions_remaining: i64,
-    pub bonus_actions_remaining: i64,
-    pub reactions_remaining: i64,
-    pub action_surge_available: bool,
-    pub action_surge_used: bool,
-    pub attacks_made_this_action: i64,
-}
-
 // ─── Known Maneuver ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -392,6 +371,18 @@ pub struct Proficiency {
     pub expertise: bool,
     pub source: Option<String>,
     pub created_at: String,
+}
+
+// ─── Action Economy ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionEconomy {
+    pub actions_remaining: i64,
+    pub bonus_actions_remaining: i64,
+    pub reactions_remaining: i64,
+    pub action_surge_available: bool,
+    pub action_surge_used: bool,
+    pub attacks_made_this_action: i64,
 }
 
 // ─── Location ─────────────────────────────────────────────────────────────────
@@ -530,15 +521,15 @@ pub struct CampaignTime {
 impl CampaignTime {
     pub fn advance_time_of_day(&self) -> String {
         match self.time_of_day.as_str() {
-            "dawn"      => "morning".to_string(),
-            "morning"   => "midday".to_string(),
-            "midday"    => "afternoon".to_string(),
-            "afternoon" => "dusk".to_string(),
-            "dusk"      => "evening".to_string(),
-            "evening"   => "night".to_string(),
-            "night"     => "deep_night".to_string(),
+            "dawn"       => "morning".to_string(),
+            "morning"    => "midday".to_string(),
+            "midday"     => "afternoon".to_string(),
+            "afternoon"  => "dusk".to_string(),
+            "dusk"       => "evening".to_string(),
+            "evening"    => "night".to_string(),
+            "night"      => "deep_night".to_string(),
             "deep_night" => "dawn".to_string(),
-            _           => "morning".to_string(),
+            _            => "morning".to_string(),
         }
     }
 }
@@ -601,15 +592,32 @@ impl GameState {
 // ─── API Types ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
+pub struct BackgroundAsi {
+    pub str: Option<i64>,
+    pub dex: Option<i64>,
+    pub con: Option<i64>,
+    pub int: Option<i64>,
+    pub wis: Option<i64>,
+    pub cha: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct CreateCampaignRequest {
     pub name: Option<String>,
     pub player_name: String,
     pub player_race: String,
+    pub player_species_subtype: Option<String>,
+    pub player_sex: String,
     pub player_class: String,
     pub player_background: String,
+    pub player_background_feat: Option<String>,
+    pub player_background_skill_1: String,
+    pub player_background_skill_2: String,
+    pub player_background_tool: String,
+    pub player_background_asi: BackgroundAsi,
     pub player_stats: PlayerStats,
     pub player_backstory: Option<String>,
-    pub starting_gold: Option<i64>,
+    pub equipment_choice: String,
 }
 
 #[derive(Debug, Deserialize)]
