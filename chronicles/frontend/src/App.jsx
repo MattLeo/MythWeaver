@@ -7,6 +7,7 @@ import Sidebar from './components/Sidebar.jsx'
 import GameScreen from './components/GameScreen.jsx'
 import DiceRollOverlay from './components/DiceRollOverlay.jsx'
 import LevelUpModal from './components/LevelUpModal.jsx'
+import CombatModal from './components/CombatModal.jsx'
 import {
   isLevelUpAvailable,
   getFighterFeatures,
@@ -42,6 +43,9 @@ export default function App() {
   const [levelUpResult, setLevelUpResult] = useState(null)
   const [showLevelUp, setShowLevelUp] = useState(false)
   const [knownManeuvers, setKnownManeuvers] = useState([])
+  const [showCombat, setShowCombat] = useState(false)
+  const [combatInitiativeBonus, setCombatInitiativeBonus] = useState(0)
+  
 
   // ── Resume campaign ─────────────────────────────────────────────────────────
 
@@ -226,28 +230,11 @@ export default function App() {
           setMessages(m => [...m, { role: 'dm', content: result.content, tools_used: result.tools_used || [], id: Date.now() }])
         }
 
-        if (result.combat_turns && result.combat_turns.length > 0) {
-          for (let i = 0; i < result.combat_turns.length; i++) {
-            await new Promise(resolve => setTimeout(resolve, 2500))
-            setMessages(m => [...m, { role: 'dm', content: result.combat_turns[i], tools_used: [], id: Date.now() + i + 1 }])
-          }
-        }
-
-        if (result.player_downed) {
+        if (result.needs_initiative) {
+          const dexMod = Math.floor((player.dex - 10) / 2)
+          setCombatInitiativeBonus(dexMod)
+          setShowCombat(true)
           setGameState('combat')
-          await new Promise(resolve => setTimeout(resolve, 2500))
-          setMessages(m => [...m, {
-            role: 'dm',
-            content: 'You are unconscious and dying. You must make death saving throws — roll a d20.',
-            tools_used: [],
-            id: Date.now()
-          }])
-          setPendingRoll({
-            tool_call_id: 'death_save', die: 'd20', skill: 'Death Save', dc: 10,
-            reason: 'Roll a death saving throw. 10 or higher is a success. Three successes stabilize you. Three failures mean death.'
-          })
-          setLoading(false)
-          return
         }
 
         if (result.new_state && result.new_state !== '') setGameState(result.new_state)
@@ -296,7 +283,27 @@ export default function App() {
     setPhase(PHASE.TITLE)
   }
 
+  // ── Combat Handler ──────────────────────────────────────────────────────────
+
+  const handleCombatEnd = async (outcome, combatLog) => {
+    setShowCombat(false)
+    setGameState('exploration')
+
+    // Feed the combat log back to the model for cinematic narration
+    const logSummary = combatLog.map(e => e.text).join('\n')
+    if (outcome === 'victory' || outcome === 'fled') {
+      setLoading(true)
+      await sendToBackend(
+        campaign.id, session.id,
+        `[COMBAT RESOLVED — ${outcome.toUpperCase()}]\n\nCombat log:\n${logSummary}\n\nNarrate this combat cinematically in 2-3 paragraphs. Use the weapon names and actions from the log. Do not invent details not in the log.`,
+        'exploration', null, player
+      )
+    }
+    await refreshPlayerState(campaign.id)
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
+
 
   if (phase === PHASE.TITLE) return (
     <TitleScreen onStart={() => setPhase(PHASE.CREATION)} onResume={handleResume} />
@@ -358,6 +365,18 @@ export default function App() {
           levelUpResult={levelUpResult}
           onComplete={handleLevelUpComplete}
           onClose={() => setShowLevelUp(false)}
+        />
+      )}
+
+      {showCombat && (
+        <CombatModal
+          campaignId={campaign.id}
+          player={player}
+          abilities={abilities}
+          initiativeBonus={combatInitiativeBonus}
+          hasAdvantage={false}
+          onCombatEnd={handleCombatEnd}
+          onPlayerUpdate={() => refreshPlayerState(campaign.id)}
         />
       )}
     </div>
