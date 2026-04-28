@@ -826,15 +826,28 @@ async fn seed_species_abilities(
 
         "Elf" => {
             let spells = match subtype {
-                Some("Drow")     => "Level 3: Faerie Fire. Level 5: Darkness.",
-                Some("High Elf") => "Level 3: Detect Magic. Level 5: Misty Step.",
-                Some("Wood Elf") => "Level 3: Longstrider. Level 5: Pass without Trace.",
-                _ => "Lineage spells granted at levels 3 and 5.",
+                Some("Drow")       => "Level 3: Faerie Fire. Level 5: Darkness.",
+                Some("High Elf")   => "Level 3: Detect Magic. Level 5: Misty Step.",
+                Some("Wood Elf")   => "Level 3: Longstrider. Level 5: Pass without Trace.",
+                Some("Astral Elf") => "Radiant Soul once per Long Rest. Starlight Step teleportation.",
+                _                  => "Lineage spells granted at levels 3 and 5.",
             };
-            let _ = world::create_ability(pool, campaign_id, "player", player_id,
-                "Elven Lineage Spells",
-                Some(&format!("Innate spellcasting from your lineage. {}  Each can be cast once without a slot per Long Rest.", spells)),
-                1, "long_rest").await;
+
+            if subtype == Some("Astral Elf") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Starlight Step",
+                    Some("Bonus Action: teleport up to 30 feet to an unoccupied space you can see."),
+                    prof_bonus, "long_rest").await;
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Radiant Soul",
+                    Some("Resistance to Radiant damage. Once per Long Rest add Proficiency Bonus as extra Radiant damage on a hit or spell."),
+                    1, "long_rest").await;
+            } else {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Elven Lineage Spells",
+                    Some(&format!("Innate spellcasting from your lineage. {} Each can be cast once without a slot per Long Rest.", spells)),
+                    1, "long_rest").await;
+            }
         }
 
         "Gnome" => {
@@ -875,6 +888,23 @@ async fn seed_species_abilities(
                 "Large Form",
                 Some("At level 5: Bonus Action to grow to Large size for 10 minutes. Advantage on STR checks, Speed +10 ft."),
                 1, "long_rest").await;
+        }
+
+        "Half-Elf" => {
+            let heritage_desc = match subtype {
+                Some("High Elf Heritage") => "You know the Prestidigitation cantrip.",
+                Some("Wood Elf Heritage") => "Your Speed is 35 feet.",
+                Some("Drow Heritage")     => "Your Darkvision range is 120 feet.",
+                _                         => "Elven heritage trait.",
+            };
+            let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                "Fey Ancestry",
+                Some("You have Advantage on saving throws to avoid or end the Charmed condition."),
+                1, "manual").await;
+            let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                "Elven Heritage",
+                Some(heritage_desc),
+                1, "manual").await;
         }
 
         "Halfling" => {

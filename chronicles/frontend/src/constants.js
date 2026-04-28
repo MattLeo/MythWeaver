@@ -63,6 +63,7 @@ export const SPECIES = [
         { name: 'Drow',     desc: 'Extended darkvision, Dancing Lights, Faerie Fire, Darkness' },
         { name: 'High Elf', desc: 'Prestidigitation cantrip, Detect Magic, Misty Step' },
         { name: 'Wood Elf', desc: 'Speed +5, Druidcraft cantrip, Longstrider, Pass without Trace' },
+        { name: 'Astral Elf', desc: 'Radiant resistance, Starlight Step teleportation, Radiant Soul' },
       ]
     }
   },
@@ -89,6 +90,18 @@ export const SPECIES = [
         { name: 'Hill Giant',  desc: "Hill's Tumble — knock Large or smaller targets Prone on a hit" },
         { name: 'Stone Giant', desc: "Stone's Endurance — reduce incoming damage by 1d12 + CON mod as a Reaction" },
         { name: 'Storm Giant', desc: "Storm's Thunder — deal 1d8 Thunder to a creature that damages you" },
+      ]
+    }
+  },
+  {
+    name: 'Half-Elf',
+    desc: 'Born of human and elven heritage. Darkvision, Fey Ancestry, proficiency in two skills of choice, and a trait inherited from their elven lineage.',
+    subtype: {
+      label: 'Elven Heritage',
+      options: [
+        { name: 'High Elf Heritage',  desc: 'You know the Prestidigitation cantrip from your high elf blood.' },
+        { name: 'Wood Elf Heritage',  desc: 'Your Speed increases to 35 feet from your wood elf blood.' },
+        { name: 'Drow Heritage',      desc: 'Your Darkvision range increases to 120 feet from your drow blood.' },
       ]
     }
   },
