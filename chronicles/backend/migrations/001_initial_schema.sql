@@ -341,6 +341,7 @@ CREATE TABLE IF NOT EXISTS combat_encounters (
     round_number                INTEGER NOT NULL DEFAULT 1,
     turn_index                  INTEGER NOT NULL DEFAULT 0,
     turn_order_json             TEXT,
+    current_target_id           TEXT,
     player_rolled_initiative    INTEGER NOT NULL DEFAULT 0,
     actions_remaining           INTEGER NOT NULL DEFAULT 1,
     bonus_actions_remaining     INTEGER NOT NULL DEFAULT 1,
@@ -426,19 +427,19 @@ CREATE TABLE IF NOT EXISTS event_entries (
 
 -- ─── Indexes ─────────────────────────────────────────────────────────────────
 
-CREATE INDEX IF NOT EXISTS idx_messages_session      ON messages(session_id);
-CREATE INDEX IF NOT EXISTS idx_messages_campaign     ON messages(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_npcs_location         ON npcs(current_location_id);
-CREATE INDEX IF NOT EXISTS idx_npcs_campaign         ON npcs(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_locations_campaign    ON locations(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_items_owner           ON items(owner_type, owner_id);
-CREATE INDEX IF NOT EXISTS idx_world_facts_campaign  ON world_facts(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_companions_campaign   ON companions(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_event_entries_table   ON event_entries(table_id);
-CREATE INDEX IF NOT EXISTS idx_combat_encounter      ON combat_encounters(campaign_id, is_active);
-CREATE INDEX IF NOT EXISTS idx_combat_enemies        ON combat_enemies(encounter_id);
-CREATE INDEX IF NOT EXISTS idx_proficiencies_player  ON proficiencies(player_id);
-CREATE INDEX IF NOT EXISTS idx_active_effects_target ON active_effects(target_type, target_id);
-CREATE INDEX IF NOT EXISTS idx_superiority_player    ON superiority_dice(player_id);
-CREATE INDEX IF NOT EXISTS idx_known_maneuvers_player ON known_maneuvers(player_id);
-CREATE INDEX IF NOT EXISTS idx_weapon_mastery_player ON weapon_mastery(player_id);
+CREATE INDEX IF NOT EXISTS idx_messages_session         ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_campaign        ON messages(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_npcs_location            ON npcs(current_location_id);
+CREATE INDEX IF NOT EXISTS idx_npcs_campaign            ON npcs(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_locations_campaign       ON locations(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_items_owner              ON items(owner_type, owner_id);
+CREATE INDEX IF NOT EXISTS idx_world_facts_campaign     ON world_facts(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_companions_campaign      ON companions(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_event_entries_table      ON event_entries(table_id);
+CREATE INDEX IF NOT EXISTS idx_combat_encounter         ON combat_encounters(campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_combat_enemies           ON combat_enemies(encounter_id);
+CREATE INDEX IF NOT EXISTS idx_proficiencies_player     ON proficiencies(player_id);
+CREATE INDEX IF NOT EXISTS idx_active_effects_target    ON active_effects(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_superiority_player       ON superiority_dice(player_id);
+CREATE INDEX IF NOT EXISTS idx_known_maneuvers_player   ON known_maneuvers(player_id);
+CREATE INDEX IF NOT EXISTS idx_weapon_mastery_player    ON weapon_mastery(player_id);
