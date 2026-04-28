@@ -1307,3 +1307,61 @@ fn parse_die_size(die: &str) -> i64 {
         die.parse::<i64>().unwrap_or(6)
     }
 }
+
+pub async fn process_initial_turns(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+) -> Result<Vec<AutoTurnResult>> {
+    let mut results = vec![];
+
+    loop {
+        let enc = match get_active_encounter(pool, campaign_id).await? {
+            Some(e) => e,
+            None => break,
+        };
+
+        let turn_order: Vec<TurnParticipant> = enc.turn_order_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default();
+
+        let current = match turn_order.get(enc.turn_index as usize) {
+            Some(p) => p.clone(),
+            None => break,
+        };
+
+        match current.participant_type.as_str() {
+            "player" => {
+                reset_action_economy(pool, &enc.id, player).await?;
+                break;
+            }
+            "enemy" => {
+                if !current.is_alive {
+                    advance_turn(pool, campaign_id).await?;
+                    continue;
+                }
+                let result = resolve_enemy_turn(pool, campaign_id, player, &current).await?;
+                let combat_ended = result.combat_ended;
+                let player_downed = result.player_downed;
+                results.push(result);
+                if combat_ended || player_downed { break; }
+                advance_turn(pool, campaign_id).await?;
+            }
+            "companion" | "ally" => {
+                if !current.is_alive {
+                    advance_turn(pool, campaign_id).await?;
+                    continue;
+                }
+                let result = resolve_companion_turn(pool, campaign_id, &current).await?;
+                let combat_ended = result.combat_ended;
+                results.push(result);
+                if combat_ended { break; }
+                advance_turn(pool, campaign_id).await?;
+            }
+            _ => break,
+        }
+    }
+
+    Ok(results)
+}

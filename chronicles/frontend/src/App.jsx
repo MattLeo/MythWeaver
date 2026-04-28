@@ -45,7 +45,7 @@ export default function App() {
   const [knownManeuvers, setKnownManeuvers] = useState([])
   const [showCombat, setShowCombat] = useState(false)
   const [combatInitiativeBonus, setCombatInitiativeBonus] = useState(0)
-  
+
 
   // ── Resume campaign ─────────────────────────────────────────────────────────
 
@@ -155,7 +155,7 @@ export default function App() {
     const extraAttacks = isFighter ? (newLevel >= 20 ? 4 : newLevel >= 11 ? 3 : newLevel >= 5 ? 2 : 1) : 1
     const actionSurgeUses = isFighter ? (newLevel >= 17 ? 2 : newLevel >= 2 ? 1 : 0) : 0
     const indomitableMax = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
-    const asiAvailable = isFighter ? FIGHTER_ASI_LEVELS.includes(newLevel) : [4,8,12,16,19].includes(newLevel)
+    const asiAvailable = isFighter ? FIGHTER_ASI_LEVELS.includes(newLevel) : [4, 8, 12, 16, 19].includes(newLevel)
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
 
     return {
@@ -289,19 +289,17 @@ export default function App() {
     setShowCombat(false)
     setGameState('exploration')
 
-    // Feed the combat log back to the model for cinematic narration
     const logSummary = combatLog.map(e => e.text).join('\n')
     if (outcome === 'victory' || outcome === 'fled') {
       setLoading(true)
       await sendToBackend(
         campaign.id, session.id,
-        `[COMBAT RESOLVED — ${outcome.toUpperCase()}]\n\nCombat log:\n${logSummary}\n\nNarrate this combat cinematically in 2-3 paragraphs. Use the weapon names and actions from the log. Do not invent details not in the log.`,
-        'exploration', null, player
+        `[COMBAT RESOLVED — ${outcome.toUpperCase()}]\n\nCombat log:\n${logSummary}\n\nNarrate this combat cinematically in 2-3 paragraphs using the weapon names and actions from the log. Do not invent details not in the log. Do not address the player directly or give instructions.\n\nAfter narrating, call award_experience with an appropriate XP amount for the difficulty of this encounter. Then set state to exploration with [STATE:exploration].`,
+        'exploration', null
       )
     }
     await refreshPlayerState(campaign.id)
   }
-
   // ── Render ──────────────────────────────────────────────────────────────────
 
 

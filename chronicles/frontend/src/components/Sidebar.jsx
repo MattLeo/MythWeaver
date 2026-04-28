@@ -136,7 +136,7 @@ export default function Sidebar({
               <div className="ds-group">
                 <div className="ds-label">Successes</div>
                 <div className="ds-dots">
-                  {[0,1,2].map(i => (
+                  {[0, 1, 2].map(i => (
                     <div key={i} className={`ds-dot${i < player.death_save_successes ? ' success-filled' : ''}`} />
                   ))}
                 </div>
@@ -144,7 +144,7 @@ export default function Sidebar({
               <div className="ds-group">
                 <div className="ds-label">Failures</div>
                 <div className="ds-dots">
-                  {[0,1,2].map(i => (
+                  {[0, 1, 2].map(i => (
                     <div key={i} className={`ds-dot${i < player.death_save_failures ? ' failure-filled' : ''}`} />
                   ))}
                 </div>

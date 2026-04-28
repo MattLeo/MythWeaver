@@ -728,6 +728,29 @@ pub async fn end_combat_turn(
     }
 }
 
+pub async fn process_initial_turns(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match crate::db::combat::process_initial_turns(pool, &campaign_id, &p).await {
+        Ok(results) => {
+            let updated_player = player::get_player_by_campaign(pool, &campaign_id).await.ok().flatten();
+            let combat_state = crate::db::combat::get_combat_state(pool, &campaign_id).await.ok().flatten();
+            (StatusCode::OK, Json(json!({
+                "turn_results": results,
+                "player": updated_player,
+                "combat_state": combat_state,
+            })))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct FleeRequest {
     pub roll: i64,

@@ -187,17 +187,17 @@ export default function CharacterCreation({ onComplete }) {
 
   const canAdvance = () => {
     switch (currentStep) {
-      case 'name':           return char.name.trim().length > 1
-      case 'sex':            return !!char.sex
-      case 'species':        return !!char.race
+      case 'name': return char.name.trim().length > 1
+      case 'sex': return !!char.sex
+      case 'species': return !!char.race
       case 'species_subtype': return !!char.species_subtype
-      case 'class':          return !!char.player_class
-      case 'background':     return !!char.background
+      case 'class': return !!char.player_class
+      case 'background': return !!char.background
       case 'background_asi': return asiValid()
-      case 'stats':          return true
-      case 'equipment':      return !!char.equipment_choice
-      case 'backstory':      return true
-      default:               return true
+      case 'stats': return true
+      case 'equipment': return !!char.equipment_choice
+      case 'backstory': return true
+      default: return true
     }
   }
 
@@ -539,12 +539,12 @@ export default function CharacterCreation({ onComplete }) {
               <strong>Summary</strong><br />
               {char.name} · {char.sex} {char.race}{char.species_subtype ? ` (${char.species_subtype})` : ''}<br />
               {char.player_class} · {char.background}{bg ? ` · ${bg.feat}` : ''}<br />
-              STR {Math.min(20, char.stats[0] + (char.background_asi.str||0))} ·{' '}
-              DEX {Math.min(20, char.stats[1] + (char.background_asi.dex||0))} ·{' '}
-              CON {Math.min(20, char.stats[2] + (char.background_asi.con||0))} ·{' '}
-              INT {Math.min(20, char.stats[3] + (char.background_asi.int||0))} ·{' '}
-              WIS {Math.min(20, char.stats[4] + (char.background_asi.wis||0))} ·{' '}
-              CHA {Math.min(20, char.stats[5] + (char.background_asi.cha||0))}<br />
+              STR {Math.min(20, char.stats[0] + (char.background_asi.str || 0))} ·{' '}
+              DEX {Math.min(20, char.stats[1] + (char.background_asi.dex || 0))} ·{' '}
+              CON {Math.min(20, char.stats[2] + (char.background_asi.con || 0))} ·{' '}
+              INT {Math.min(20, char.stats[3] + (char.background_asi.int || 0))} ·{' '}
+              WIS {Math.min(20, char.stats[4] + (char.background_asi.wis || 0))} ·{' '}
+              CHA {Math.min(20, char.stats[5] + (char.background_asi.cha || 0))}<br />
               Equipment: Option {char.equipment_choice}
             </div>
           </>
@@ -579,11 +579,11 @@ export default function CharacterCreation({ onComplete }) {
             }
             {!isLast
               ? <button className="btn-gold" disabled={!canAdvance()} onClick={() => setStepIndex(i => i + 1)}>
-                  Continue →
-                </button>
+                Continue →
+              </button>
               : <button className="btn-gold" disabled={!canAdvance()} onClick={handleComplete}>
-                  Begin Adventure ⚔
-                </button>
+                Begin Adventure ⚔
+              </button>
             }
           </div>
 

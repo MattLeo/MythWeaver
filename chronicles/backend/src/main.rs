@@ -70,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/campaigns/:id/combat/end-turn", post(api::end_combat_turn))
         .route("/api/campaigns/:id/combat/flee", post(api::flee_combat))
         .route("/api/campaigns/:id/combat/end", post(api::end_combat_handler))
+        .route("/api/campaigns/:id/combat/process-start", post(api::process_initial_turns))
         .route("/api/message", post(api::send_message))
         .layer(cors)
         .with_state(app_state);

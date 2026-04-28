@@ -214,3 +214,15 @@ export async function endCombat(campaignId) {
   if (!res.ok) throw new Error('Failed to end combat')
   return res.json()
 }
+
+export async function processInitialTurns(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/combat/process-start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to process initial turns (${res.status}): ${body}`)
+  }
+  return res.json()
+}
