@@ -278,23 +278,29 @@ export default function CharacterCreation({ onComplete }) {
           <>
             <h2>Choose Your Species</h2>
             <p className="card-sub">Your species shapes your innate abilities and traits.</p>
-            <div className="pick-grid-2">
-              {SPECIES.map(s => (
-                <div
-                  key={s.name}
-                  className={`pick-card${char.race === s.name ? ' sel' : ''}`}
-                  onClick={() => {
-                    upd('race', s.name)
-                    upd('species_subtype', '')
-                  }}
-                >
-                  <div className="pick-card-name">{s.name}</div>
-                  <div className="pick-card-desc">{s.desc}</div>
-                  {s.subtype && (
-                    <div className="pick-card-meta">Choose {s.subtype.label} →</div>
-                  )}
-                </div>
-              ))}
+            <div style={{
+              maxHeight: '420px', overflowY: 'auto',
+              scrollbarWidth: 'thin', scrollbarColor: 'var(--gold) var(--surf)',
+              paddingRight: '.25rem',
+            }}>
+              <div className="pick-grid-2">
+                {SPECIES.map(s => (
+                  <div
+                    key={s.name}
+                    className={`pick-card${char.race === s.name ? ' sel' : ''}`}
+                    onClick={() => {
+                      upd('race', s.name)
+                      upd('species_subtype', '')
+                    }}
+                  >
+                    <div className="pick-card-name">{s.name}</div>
+                    <div className="pick-card-desc">{s.desc}</div>
+                    {s.subtype && (
+                      <div className="pick-card-meta">Choose {s.subtype.label} →</div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </>
         )
@@ -354,23 +360,29 @@ export default function CharacterCreation({ onComplete }) {
               Your background grants two skill proficiencies, a tool proficiency, an Origin feat,
               and ability score increases applied in the next step.
             </p>
-            <div className="pick-grid-2">
-              {BACKGROUNDS.map(b => (
-                <div
-                  key={b.name}
-                  className={`pick-card${char.background === b.name ? ' sel' : ''}`}
-                  onClick={() => {
-                    upd('background', b.name)
-                    upd('background_asi', { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 })
-                  }}
-                >
-                  <div className="pick-card-name">{b.name}</div>
-                  <div className="pick-card-desc">{b.desc}</div>
-                  <div className="pick-card-meta">
-                    {b.skills.join(' · ')} · {b.feat}
+            <div style={{
+              maxHeight: '420px', overflowY: 'auto',
+              scrollbarWidth: 'thin', scrollbarColor: 'var(--gold) var(--surf)',
+              paddingRight: '.25rem',
+            }}>
+              <div className="pick-grid-2">
+                {BACKGROUNDS.map(b => (
+                  <div
+                    key={b.name}
+                    className={`pick-card${char.background === b.name ? ' sel' : ''}`}
+                    onClick={() => {
+                      upd('background', b.name)
+                      upd('background_asi', { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 })
+                    }}
+                  >
+                    <div className="pick-card-name">{b.name}</div>
+                    <div className="pick-card-desc">{b.desc}</div>
+                    <div className="pick-card-meta">
+                      {b.skills.join(' · ')} · {b.feat}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </>
         )
