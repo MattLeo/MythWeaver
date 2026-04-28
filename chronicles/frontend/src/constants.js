@@ -11,22 +11,302 @@ export const STAT_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha']
 export const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' }
 export const STAT_LABELS_ARRAY = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA']
 
-// ─── Classes ─────────────────────────────────────────────────────────────────
+// ─── Sex ─────────────────────────────────────────────────────────────────────
+
+export const SEX_OPTIONS = ['Male', 'Female']
+
+// ─── Classes ──────────────────────────────────────────────────────────────────
 
 export const CLASSES = [
   'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter',
   'Monk', 'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard'
 ]
 
-export const RACES = [
-  'Human', 'Elf', 'Dwarf', 'Halfling', 'Half-Elf',
-  'Half-Orc', 'Gnome', 'Tiefling', 'Dragonborn'
+// ─── Species ──────────────────────────────────────────────────────────────────
+
+export const SPECIES = [
+  {
+    name: 'Aasimar',
+    desc: 'Mortals who carry a spark of the Upper Planes. Celestial features, healing powers, and radiant transformations.',
+    subtype: null,
+  },
+  {
+    name: 'Dragonborn',
+    desc: 'Descended from dragons. Breath weapon, damage resistance, and draconic flight at level 5.',
+    subtype: {
+      label: 'Draconic Ancestry',
+      options: [
+        { name: 'Black',  desc: 'Acid damage' },
+        { name: 'Blue',   desc: 'Lightning damage' },
+        { name: 'Brass',  desc: 'Fire damage' },
+        { name: 'Bronze', desc: 'Lightning damage' },
+        { name: 'Copper', desc: 'Acid damage' },
+        { name: 'Gold',   desc: 'Fire damage' },
+        { name: 'Green',  desc: 'Poison damage' },
+        { name: 'Red',    desc: 'Fire damage' },
+        { name: 'Silver', desc: 'Cold damage' },
+        { name: 'White',  desc: 'Cold damage' },
+      ]
+    }
+  },
+  {
+    name: 'Dwarf',
+    desc: 'Hardy folk of the mountains. Darkvision, poison resistance, extra HP each level, and Stonecunning.',
+    subtype: null,
+  },
+  {
+    name: 'Elf',
+    desc: 'Ancient and graceful. Darkvision, Fey Ancestry, Trance, and lineage-based innate magic.',
+    subtype: {
+      label: 'Elven Lineage',
+      options: [
+        { name: 'Drow',     desc: 'Extended darkvision, Dancing Lights, Faerie Fire, Darkness' },
+        { name: 'High Elf', desc: 'Prestidigitation cantrip, Detect Magic, Misty Step' },
+        { name: 'Wood Elf', desc: 'Speed +5, Druidcraft cantrip, Longstrider, Pass without Trace' },
+      ]
+    }
+  },
+  {
+    name: 'Gnome',
+    desc: 'Small and clever. Darkvision, Gnomish Cunning, and lineage-based magical abilities.',
+    subtype: {
+      label: 'Gnomish Lineage',
+      options: [
+        { name: 'Forest Gnome', desc: 'Minor Illusion, Speak with Animals (proficiency bonus times per Long Rest)' },
+        { name: 'Rock Gnome',   desc: 'Mending and Prestidigitation cantrips, create clockwork devices' },
+      ]
+    }
+  },
+  {
+    name: 'Goliath',
+    desc: 'Distant descendants of giants. Speed 35, supernatural giant ancestry boon, and Large Form at level 5.',
+    subtype: {
+      label: 'Giant Ancestry',
+      options: [
+        { name: 'Cloud Giant', desc: "Cloud's Jaunt — teleport up to 30 feet as a Bonus Action" },
+        { name: 'Fire Giant',  desc: "Fire's Burn — deal 1d10 extra Fire damage on a hit" },
+        { name: 'Frost Giant', desc: "Frost's Chill — deal 1d6 Cold and reduce target Speed on a hit" },
+        { name: 'Hill Giant',  desc: "Hill's Tumble — knock Large or smaller targets Prone on a hit" },
+        { name: 'Stone Giant', desc: "Stone's Endurance — reduce incoming damage by 1d12 + CON mod as a Reaction" },
+        { name: 'Storm Giant', desc: "Storm's Thunder — deal 1d8 Thunder to a creature that damages you" },
+      ]
+    }
+  },
+  {
+    name: 'Halfling',
+    desc: 'Small and surprisingly lucky. Brave, nimble, naturally stealthy, and can reroll any 1 on a d20.',
+    subtype: null,
+  },
+  {
+    name: 'Human',
+    desc: 'Resourceful and versatile. Gain Heroic Inspiration on Long Rests, a skill proficiency, and an Origin feat.',
+    subtype: null,
+  },
+  {
+    name: 'Orc',
+    desc: 'Enduring and powerful. Darkvision 120 ft, Adrenaline Rush for bonus Dash + temp HP, Relentless Endurance.',
+    subtype: null,
+  },
+  {
+    name: 'Tiefling',
+    desc: 'Touched by fiendish power. Darkvision, Thaumaturgy cantrip, fiendish legacy with innate spells and resistance.',
+    subtype: {
+      label: 'Fiendish Legacy',
+      options: [
+        { name: 'Abyssal',  desc: 'Poison resistance, Poison Spray, Ray of Sickness, Hold Person' },
+        { name: 'Chthonic', desc: 'Necrotic resistance, Chill Touch, False Life, Ray of Enfeeblement' },
+        { name: 'Infernal', desc: 'Fire resistance, Fire Bolt, Hellish Rebuke, Darkness' },
+      ]
+    }
+  },
 ]
 
+// ─── Backgrounds ──────────────────────────────────────────────────────────────
+
 export const BACKGROUNDS = [
-  'Acolyte', 'Charlatan', 'Criminal', 'Entertainer', 'Folk Hero',
-  'Hermit', 'Noble', 'Outlander', 'Sage', 'Soldier', 'Urchin'
+  {
+    name: 'Acolyte',
+    desc: 'You devoted yourself to service in a temple, studying religion and learning to channel divine power.',
+    feat: 'Magic Initiate (Cleric)',
+    skills: ['Insight', 'Religion'],
+    tool: "Calligrapher's Supplies",
+    asi_stats: ['int', 'wis', 'cha'],
+  },
+  {
+    name: 'Artisan',
+    desc: 'You apprenticed in a workshop, learning to craft goods and sweet-talk demanding customers.',
+    feat: 'Crafter',
+    skills: ['Investigation', 'Persuasion'],
+    tool: "Artisan's Tools (your choice)",
+    asi_stats: ['str', 'dex', 'int'],
+  },
+  {
+    name: 'Charlatan',
+    desc: 'You learned to prey on unfortunates with comforting lies, sham potions, and forged documents.',
+    feat: 'Skilled',
+    skills: ['Deception', 'Sleight of Hand'],
+    tool: 'Forgery Kit',
+    asi_stats: ['dex', 'con', 'cha'],
+  },
+  {
+    name: 'Criminal',
+    desc: 'You eked out a living in dark alleyways, cutting purses and burgling shops.',
+    feat: 'Alert',
+    skills: ['Sleight of Hand', 'Stealth'],
+    tool: "Thieves' Tools",
+    asi_stats: ['dex', 'con', 'int'],
+  },
+  {
+    name: 'Entertainer',
+    desc: 'You followed roving fairs and carnivals, performing for crowds and thriving on applause.',
+    feat: 'Musician',
+    skills: ['Acrobatics', 'Performance'],
+    tool: 'Musical Instrument (your choice)',
+    asi_stats: ['str', 'dex', 'cha'],
+  },
+  {
+    name: 'Farmer',
+    desc: 'You grew up close to the land, tending animals and cultivating the earth.',
+    feat: 'Tough',
+    skills: ['Animal Handling', 'Nature'],
+    tool: "Carpenter's Tools",
+    asi_stats: ['str', 'con', 'wis'],
+  },
+  {
+    name: 'Guard',
+    desc: 'You spent countless hours at your post, watching for threats from without and within.',
+    feat: 'Alert',
+    skills: ['Athletics', 'Perception'],
+    tool: 'Gaming Set (your choice)',
+    asi_stats: ['str', 'int', 'wis'],
+  },
+  {
+    name: 'Guide',
+    desc: 'You came of age outdoors, exploring wildernesses and guiding nature priests.',
+    feat: 'Magic Initiate (Druid)',
+    skills: ['Stealth', 'Survival'],
+    tool: "Cartographer's Tools",
+    asi_stats: ['dex', 'con', 'wis'],
+  },
+  {
+    name: 'Hermit',
+    desc: 'You spent your early years secluded in a hut or monastery, pondering the mysteries of creation.',
+    feat: 'Healer',
+    skills: ['Medicine', 'Religion'],
+    tool: 'Herbalism Kit',
+    asi_stats: ['con', 'wis', 'cha'],
+  },
+  {
+    name: 'Merchant',
+    desc: 'You were apprenticed to a trader, learning commerce and traveling broadly to buy and sell goods.',
+    feat: 'Lucky',
+    skills: ['Animal Handling', 'Persuasion'],
+    tool: "Navigator's Tools",
+    asi_stats: ['con', 'int', 'cha'],
+  },
+  {
+    name: 'Noble',
+    desc: 'You were raised in a castle, surrounded by wealth, power, and privilege.',
+    feat: 'Skilled',
+    skills: ['History', 'Persuasion'],
+    tool: 'Gaming Set (your choice)',
+    asi_stats: ['str', 'int', 'cha'],
+  },
+  {
+    name: 'Sage',
+    desc: 'You traveled between manors and monasteries studying books and scrolls, learning the lore of the multiverse.',
+    feat: 'Magic Initiate (Wizard)',
+    skills: ['Arcana', 'History'],
+    tool: "Calligrapher's Supplies",
+    asi_stats: ['con', 'int', 'wis'],
+  },
+  {
+    name: 'Sailor',
+    desc: 'You lived as a seafarer, facing mighty storms and swapping stories in ports of call.',
+    feat: 'Tavern Brawler',
+    skills: ['Acrobatics', 'Perception'],
+    tool: "Navigator's Tools",
+    asi_stats: ['str', 'dex', 'wis'],
+  },
+  {
+    name: 'Scribe',
+    desc: 'You spent formative years in a scriptorium, learning to write clearly and produce finely crafted texts.',
+    feat: 'Skilled',
+    skills: ['Investigation', 'Perception'],
+    tool: "Calligrapher's Supplies",
+    asi_stats: ['dex', 'int', 'wis'],
+  },
+  {
+    name: 'Soldier',
+    desc: 'You trained for war as soon as you reached adulthood. Battle is in your blood.',
+    feat: 'Savage Attacker',
+    skills: ['Athletics', 'Intimidation'],
+    tool: 'Gaming Set (your choice)',
+    asi_stats: ['str', 'dex', 'con'],
+  },
+  {
+    name: 'Wayfarer',
+    desc: 'You grew up on the streets, surviving by odd jobs and occasional theft, never losing your pride.',
+    feat: 'Lucky',
+    skills: ['Insight', 'Stealth'],
+    tool: "Thieves' Tools",
+    asi_stats: ['dex', 'wis', 'cha'],
+  },
 ]
+
+// ─── Equipment packages ───────────────────────────────────────────────────────
+
+export const CLASS_EQUIPMENT = {
+  Barbarian: [
+    { label: 'A', desc: 'Greataxe, 4 Handaxes, Explorer\'s Pack, 15 GP' },
+    { label: 'B', desc: '75 GP' },
+  ],
+  Bard: [
+    { label: 'A', desc: 'Leather Armor, 2 Daggers, Musical Instrument, Entertainer\'s Pack, 19 GP' },
+    { label: 'B', desc: '90 GP' },
+  ],
+  Cleric: [
+    { label: 'A', desc: 'Chain Shirt, Shield, Mace, Holy Symbol, Priest\'s Pack, 7 GP' },
+    { label: 'B', desc: '110 GP' },
+  ],
+  Druid: [
+    { label: 'A', desc: 'Leather Armor, Shield, Sickle, Druidic Focus (Quarterstaff), Explorer\'s Pack, Herbalism Kit, 9 GP' },
+    { label: 'B', desc: '50 GP' },
+  ],
+  Fighter: [
+    { label: 'A', desc: 'Chain Mail, Greatsword, Flail, 8 Javelins, Dungeoneer\'s Pack, 4 GP' },
+    { label: 'B', desc: 'Studded Leather, Scimitar, Shortsword, Longbow, 20 Arrows, Quiver, Dungeoneer\'s Pack, 11 GP' },
+    { label: 'C', desc: '155 GP' },
+  ],
+  Monk: [
+    { label: 'A', desc: 'Spear, 5 Daggers, Artisan\'s Tools or Musical Instrument, Explorer\'s Pack, 11 GP' },
+    { label: 'B', desc: '50 GP' },
+  ],
+  Paladin: [
+    { label: 'A', desc: 'Chain Mail, Shield, Longsword, 6 Javelins, Holy Symbol, Priest\'s Pack, 9 GP' },
+    { label: 'B', desc: '150 GP' },
+  ],
+  Ranger: [
+    { label: 'A', desc: 'Studded Leather, Scimitar, Shortsword, Longbow, 20 Arrows, Quiver, Druidic Focus, Explorer\'s Pack, 7 GP' },
+    { label: 'B', desc: '150 GP' },
+  ],
+  Rogue: [
+    { label: 'A', desc: 'Leather Armor, 2 Daggers, Shortsword, Shortbow, 20 Arrows, Quiver, Thieves\' Tools, Burglar\'s Pack, 8 GP' },
+    { label: 'B', desc: '100 GP' },
+  ],
+  Sorcerer: [
+    { label: 'A', desc: 'Spear, 2 Daggers, Arcane Focus (crystal), Dungeoneer\'s Pack, 28 GP' },
+    { label: 'B', desc: '50 GP' },
+  ],
+  Warlock: [
+    { label: 'A', desc: 'Leather Armor, Sickle, 2 Daggers, Arcane Focus (orb), Book of Occult Lore, Scholar\'s Pack, 15 GP' },
+    { label: 'B', desc: '100 GP' },
+  ],
+  Wizard: [
+    { label: 'A', desc: '2 Daggers, Arcane Focus (Quarterstaff), Robe, Spellbook, Scholar\'s Pack, 5 GP' },
+    { label: 'B', desc: '55 GP' },
+  ],
+}
 
 // ─── Fighter ──────────────────────────────────────────────────────────────────
 
@@ -176,4 +456,12 @@ export function getFighterFeatures(player, newLevel) {
     ? (FIGHTER_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
     : []
   return [...base, ...subFeatures]
+}
+
+export function getBackgroundByName(name) {
+  return BACKGROUNDS.find(b => b.name === name) || null
+}
+
+export function getSpeciesByName(name) {
+  return SPECIES.find(s => s.name === name) || null
 }
