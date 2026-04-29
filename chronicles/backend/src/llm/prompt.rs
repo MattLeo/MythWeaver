@@ -131,7 +131,7 @@ CURRENCY
 - Positive values add, negative values subtract.
 
 ITEMS
-- Always call query_items first before you create an item.
+- Always call query_items first when dealing with itmes to gather the item_id.
 - Always call create_item if you are describing a new item to the player. 
 - Whenever the player finds, buys, steals, or receives any item, ALWAYS call create_item then give_item. No exceptions.
 - Never describe an item in the player's possession without first calling give_item.
