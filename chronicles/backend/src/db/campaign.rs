@@ -44,7 +44,7 @@ pub async fn list_campaigns(pool: &SqlitePool) -> Result<Vec<Campaign>> {
 }
 
 pub async fn get_story_journal(pool:&SqlitePool, campaign_id: &str) -> Result<Option<String>> {
-    Ok(sqls::query_scalar(
+    Ok(sqlx::query_scalar(
         "SELECT story_journal FROM campaigns WHERE id = ?"
     )
     .bind(campaign_id)

@@ -28,7 +28,7 @@ pub fn build_system_prompt(
     */
 
     let journal_str = match story_journal {
-        Some(j) = if !j.trim().is_empty() => format!(
+        Some(j) if !j.trim().is_empty() => format!(
             "\n\nWORLD STORY JOURNAL - Your long term memory of this campaign \
             Trust this above all else when recalling past events, NPC relationships, \
             active quests, and world stateL\n{}",
