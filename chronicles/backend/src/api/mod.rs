@@ -491,7 +491,11 @@ pub async fn send_message(
         req.content.clone()
     };
 
-    let _ = campaign::save_message(pool, session_id, campaign_id, "user", &user_content, None).await;
+    let is_ephemeral = user_content.starts_with("[COMBAT RESOLVED");
+    if !is_ephemeral {
+        let _ = campaign::save_message(pool, session_id, campaign_id, "user", &user_content, None).await;
+    }
+
     messages.push(ChatMessage::user(&user_content));
 
     let result = match state.llm.run_agentic_loop(
