@@ -585,6 +585,49 @@ pub async fn reset_surge_used(pool: &SqlitePool, encounter_id: &str) -> Result<(
     .await?;
     Ok(())
 }
+// ─── Warrior Dice Helpers ───────────────────────────────────────────────────
+
+pub fn psi_warrior_energy_dice(level: i64) -> (i64, i64) {
+    // returns (count, die_size)
+    match level {
+        3..=4   => (4, 6),
+        5..=8   => (6, 8),
+        9..=10  => (8, 8),
+        11..=12 => (8, 10),
+        13..=16 => (10, 10),
+        _       => (12, 12),
+    }
+}
+
+pub fn battle_master_superiority_dice(level: i64) -> (i64, i64) {
+    // returns (count, die_size)
+    match level {
+        3..=6   => (4, 8),
+        7..=14  => (5, 10),
+        _       => (6, 12),
+    }
+}
+
+pub async fn update_psi_warrior_dice(
+    pool: &SqlitePool,
+    player_id: &str,
+    level: i64,
+) -> Result<()> {
+    let (count, die_size) = psi_warrior_energy_dice(level);
+    sqlx::query(
+        "UPDATE superiority_dice SET
+            die_size = ?,
+            max_dice = ?,
+            current_dice = MIN(current_dice, ?)
+         WHERE player_id = ? AND pool_name = 'Psi Warrior'"
+    )
+    .bind(die_size)
+    .bind(count)
+    .bind(count)
+    .bind(player_id)
+    .execute(pool).await?;
+    Ok(())
+}
 
 // ─── Subclass seeding ─────────────────────────────────────────────────────────
 

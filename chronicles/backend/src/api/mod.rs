@@ -1349,13 +1349,71 @@ async fn seed_level_up_abilities_direct(
             15 => { if !has("Relentless") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Relentless", Some("Once per turn when you use a maneuver, roll 1d8 instead of expending a Superiority Die."), 1, "per_turn").await; } }
             _ => {}
         },
-        Some("Psi Warrior") => match new_level {
-            7  => { if !has("Psi-Powered Leap") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Psi-Powered Leap", Some("Gain Fly Speed equal to twice your Speed until end of turn."), 1, "short_rest").await; } }
-            10 => { if !has("Guarded Mind") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Guarded Mind", Some("Resistance to Psychic damage. Spend a Psionic Energy Die to end Charmed or Frightened."), 1, "manual").await; } }
-            15 => { if !has("Bulwark of Force") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Bulwark of Force", Some("Grant Half Cover to up to INT modifier creatures within 30 feet for 1 minute."), 1, "long_rest").await; } }
-            18 => { if !has("Telekinetic Master") { let _ = world::create_ability(pool, campaign_id, "player", player_id, "Telekinetic Master", Some("Telekinesis always prepared, cast without spell slot. Make one weapon attack as Bonus Action each turn while concentrating."), 1, "long_rest").await; } }
-            _ => {}
-        },
+        Some("Psi Warrior") => {
+            let _ = fighter::update_psi_warrior_dice(pool, player_id, new_level).await;
+
+            match new_level {
+                3 => {
+                    if !has("Psionic Strike") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Psionic Strike",
+                            Some("Once per turn, after hitting a target within 30 ft with a weapon, expend one Psionic Energy Die. Deal Force damage = die roll + INT modifier."),
+                            1, "manual").await;
+                    }
+                    if !has("Protective Field") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Protective Field",
+                            Some("Reaction: when you or a creature within 30 ft takes damage, expend one Psionic Energy Die. Reduce damage by die roll + INT modifier (minimum 1)."),
+                            1, "manual").await;
+                    }
+                    if !has("Telekinetic Movement") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Telekinetic Movement",
+                            Some("Move one Large-or-smaller object or willing creature within 30 ft up to 30 ft. Free once per Short Rest, or expend a Psionic Energy Die to restore."),
+                            1, "short_rest").await;
+                    }
+                }
+                7 => {
+                    if !has("Psi-Powered Leap") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Psi-Powered Leap",
+                            Some("Bonus Action: gain Fly Speed equal to twice your Speed until end of turn. Free once per Short Rest, or expend a Psionic Energy Die to restore."),
+                            1, "short_rest").await;
+                    }
+                    if !has("Telekinetic Thrust") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Telekinetic Thrust",
+                            Some("After Psionic Strike deals damage, force target to make STR save (DC 8 + INT mod + Prof). On fail: target is knocked Prone OR pushed 10 ft horizontally."),
+                            1, "manual").await;
+                    }
+                }
+                10 => {
+                    if !has("Guarded Mind") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Guarded Mind",
+                            Some("Resistance to Psychic damage. At start of your turn, expend a Psionic Energy Die to end Charmed or Frightened conditions on yourself."),
+                            1, "manual").await;
+                    }
+                }
+                15 => {
+                    if !has("Bulwark of Force") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Bulwark of Force",
+                            Some("Bonus Action: grant yourself and up to INT modifier creatures within 30 ft a temporary AC bonus for 1 minute. Free once per Long Rest, or expend a Psionic Energy Die to restore."),
+                            1, "long_rest").await;
+                    }
+                }
+                18 => {
+                    if !has("Telekinetic Master") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Telekinetic Master",
+                            Some("Cast Telekinesis without a spell slot (INT is spellcasting ability). While concentrating, make one weapon attack as a Bonus Action each turn. Free once per Long Rest, or expend a Psionic Energy Die to restore."),
+                            1, "long_rest").await;
+                    }
+                }
+                _ => {}
+            }
+        }
         _ => {}
     }
 }
