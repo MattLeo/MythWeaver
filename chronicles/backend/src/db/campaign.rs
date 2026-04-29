@@ -56,7 +56,7 @@ pub async fn get_story_journal(pool:&SqlitePool, campaign_id: &str) -> Result<Op
 pub async fn update_story_journal(pool: &SqlitePool, campaign_id: &str, journal: &str
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE campagins SET story_journal = ?, updated_at = datetime('now') WHERE id = ?"
+        "UPDATE campaigns SET story_journal = ?, updated_at = datetime('now') WHERE id = ?"
     )
     .bind(journal)
     .bind(campaign_id)
