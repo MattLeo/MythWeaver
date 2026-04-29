@@ -610,7 +610,7 @@ pub async fn apply_player_damage(
     .execute(pool).await?;
 
     let alive_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1"
+        "SELECT COUNT(*) FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1 AND participant_type = 'enemy'"
     )
     .bind(&enc.id).fetch_one(pool).await?;
 
@@ -822,6 +822,87 @@ async fn resolve_companion_turn(
     campaign_id: &str,
     companion_participant: &TurnParticipant,
 ) -> Result<AutoTurnResult> {
+
+    // ── Check combat_enemies first (NPC allies seeded via start_combat) ──────
+    let ally_enemy = get_enemy(pool, &companion_participant.id).await?;
+    if let Some(ally) = ally_enemy {
+        if ally.participant_type == "ally" {
+            let enc = get_active_encounter(pool, campaign_id).await?
+                .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
+            let enemies = get_combat_enemies(pool, &enc.id).await?;
+            let living: Vec<&CombatEnemy> = enemies.iter()
+                .filter(|e| e.is_alive && e.participant_type == "enemy")
+                .collect();
+
+            if living.is_empty() {
+                return Ok(AutoTurnResult {
+                    actor_name: ally.name.clone(),
+                    actor_type: "ally".to_string(),
+                    action: "skip".to_string(),
+                    target: None, roll: None, hit: None, damage: None, damage_type: None,
+                    text: format!("{} looks around — no enemies remain.", ally.name),
+                    combat_ended: true, player_downed: false,
+                });
+            }
+
+            let target_idx = (roll(living.len() as i64) as usize - 1).min(living.len() - 1);
+            let target = living[target_idx];
+            let attack_roll = roll(20);
+            let total = attack_roll + ally.attack_bonus;
+            let hits = attack_roll == 20 || (attack_roll != 1 && total >= target.armor_class);
+
+            if !hits {
+                return Ok(AutoTurnResult {
+                    actor_name: ally.name.clone(),
+                    actor_type: "ally".to_string(),
+                    action: "attack".to_string(),
+                    target: Some(target.name.clone()),
+                    roll: Some(attack_roll),
+                    hit: Some(false),
+                    damage: None, damage_type: None,
+                    text: format!("{} attacks {} with their {} and misses.",
+                        ally.name, target.name, ally.weapon_name),
+                    combat_ended: false, player_downed: false,
+                });
+            }
+
+            let die_size = parse_die_size(&ally.damage_die);
+            let damage = (roll(die_size) + ally.damage_bonus).max(1);
+            let new_hp = (target.current_hp - damage).max(0);
+            let is_dead = new_hp == 0;
+            let is_bloodied = new_hp > 0 && new_hp <= target.max_hp / 2;
+
+            sqlx::query(
+                "UPDATE combat_enemies SET current_hp = ?, is_alive = ?, is_bloodied = ? WHERE id = ?"
+            )
+            .bind(new_hp).bind(!is_dead).bind(is_bloodied).bind(&target.id)
+            .execute(pool).await?;
+
+            let alive_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1 AND participant_type = 'enemy'"
+            )
+            .bind(&enc.id).fetch_one(pool).await?;
+
+            return Ok(AutoTurnResult {
+                actor_name: ally.name.clone(),
+                actor_type: "ally".to_string(),
+                action: "attack".to_string(),
+                target: Some(target.name.clone()),
+                roll: Some(attack_roll),
+                hit: Some(true),
+                damage: Some(damage),
+                damage_type: Some(ally.damage_type.clone()),
+                text: format!("{} attacks {} with their {} and hits for {} {} damage{}",
+                    ally.name, target.name, ally.weapon_name, damage, ally.damage_type,
+                    if is_dead { " — the enemy falls!" } else { "." }
+                ),
+                combat_ended: alive_count == 0,
+                player_downed: false,
+            });
+        }
+    }
+
+    // ── Fall through to companions table for registered companions ────────────
     let companion = sqlx::query_as::<_, crate::models::Companion>(
         "SELECT * FROM companions WHERE id = ? AND is_active = 1"
     )
@@ -844,7 +925,9 @@ async fn resolve_companion_turn(
         .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
 
     let enemies = get_combat_enemies(pool, &enc.id).await?;
-    let living: Vec<&CombatEnemy> = enemies.iter().filter(|e| e.is_alive).collect();
+    let living: Vec<&CombatEnemy> = enemies.iter()
+        .filter(|e| e.is_alive && e.participant_type == "enemy")
+        .collect();
 
     if living.is_empty() {
         return Ok(AutoTurnResult {
@@ -857,8 +940,8 @@ async fn resolve_companion_turn(
         });
     }
 
-    let target_idx = roll(living.len() as i64) as usize - 1;
-    let target = living[target_idx.min(living.len() - 1)];
+    let target_idx = (roll(living.len() as i64) as usize - 1).min(living.len() - 1);
+    let target = living[target_idx];
     let attack_roll = roll(20);
     let total = attack_roll + companion.attack_bonus;
     let hits = attack_roll == 20 || (attack_roll != 1 && total >= target.armor_class);
@@ -890,7 +973,7 @@ async fn resolve_companion_turn(
     .execute(pool).await?;
 
     let alive_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1"
+        "SELECT COUNT(*) FROM combat_enemies WHERE encounter_id = ? AND is_alive = 1 AND participant_type = 'enemy'"
     )
     .bind(&enc.id).fetch_one(pool).await?;
 
@@ -1097,26 +1180,15 @@ pub async fn resolve_ally_turn(
     enc: &CombatEncounter,
     ally_id: &str,
 ) -> Result<Value> {
-    let companion = sqlx::query_as::<_, crate::models::Companion>(
-        "SELECT * FROM companions WHERE id = ?"
-    )
-    .bind(ally_id)
-    .fetch_optional(pool).await?;
-
-    match companion {
-        Some(c) => {
-            let participant = TurnParticipant {
-                id: c.id.clone(),
-                name: c.name.clone(),
-                participant_type: "companion".to_string(),
-                initiative_score: 0,
-                is_alive: c.current_hp > 0,
-            };
-            let result = resolve_companion_turn(pool, &enc.campaign_id, &participant).await?;
-            Ok(json!({"ally_acted": true, "text": result.text}))
-        }
-        None => Ok(json!({"ally_acted": false}))
-    }
+    let participant = TurnParticipant {
+        id: ally_id.to_string(),
+        name: String::new(),
+        participant_type: "ally".to_string(),
+        initiative_score: 0,
+        is_alive: true,
+    };
+    let result = resolve_companion_turn(pool, &enc.campaign_id, &participant).await?;
+    Ok(json!({"ally_acted": true, "text": result.text}))
 }
 
 pub async fn use_second_wind(
