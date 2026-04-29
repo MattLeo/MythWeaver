@@ -12,7 +12,8 @@ use crate::models::*;
 use crate::AppState;
 
 const MAX_CONTEXT_MESSAGES: usize = 50;
-const SUMMARIZE_THRESHOLD: usize = 20;
+//const SUMMARIZE_THRESHOLD: usize = 20;
+const JOURNAL_UPDATE_THRESHOLD: usize = 20;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -396,22 +397,30 @@ pub async fn send_message(
     };
 
     let camp_time = time::get_campaign_time(pool, campaign_id).await.ok().flatten();
+    /* Not currently being used in this version
     let summaries = campaign::get_session_summaries(pool, campaign_id).await
         .unwrap_or_default()
         .into_iter()
         .map(|s| s.summary)
         .collect::<Vec<_>>();
+    */    
 
     let game_state = req.game_state.as_deref()
         .map(GameState::from_str)
         .unwrap_or(GameState::Exploration);
 
-    let system = prompt::build_system_prompt(&p, camp_time.as_ref(), &summaries);
+    let story_journal = campaign::get_story_journal(pool, campaign_id)
+        .await.ok().flatten();
 
+    let system = prompt::build_system_prompt(&p, camp_time.as_ref(), &[], story_journal.as_deref());
+
+
+    
     // ── Sliding window ────────────────────────────────────────────────────────
     let all_history = campaign::get_session_messages(pool, session_id).await
         .unwrap_or_default();
-
+    
+    /* - Old Summary Task spawner -- Being replaced by World Journal below
     if all_history.len() > MAX_CONTEXT_MESSAGES {
         let overflow_end = all_history.len() - MAX_CONTEXT_MESSAGES;
         if overflow_end % SUMMARIZE_THRESHOLD == 0 {
@@ -454,6 +463,7 @@ pub async fn send_message(
             }
         }
     }
+    */
 
     let history_slice = if all_history.len() > MAX_CONTEXT_MESSAGES {
         &all_history[all_history.len() - MAX_CONTEXT_MESSAGES..]
@@ -508,6 +518,57 @@ pub async fn send_message(
 
     let (clean_narrative, new_state) = strip_state_tag(&result.narrative);
     let _ = campaign::save_message(pool, session_id, campaign_id, "assistant", &clean_narrative, None).await;
+
+
+    // ── Journal update ────────────────────────────────────────────────────────
+    let total_messages = all_history.len() + 2;
+    if total_messages > 0 && total_messages % JOURNAL_UPDATE_THRESHOLD == 0 {
+        let pool_clone = pool.clone();
+        let campaign_id_clone = campaign_id.clone();
+        let llm_clone = state.llm.clone();
+
+        tokio::spawn(async move {
+            let current_journal = campaign::get_story_journal(&pool_clone, &campaign_id_clone)
+                .await.ok().flatten();
+
+            let recent = campaign::get_recent_messages(&pool_clone, &campaign_id_clone, 30)
+                .await.unwrap_or_default();
+
+            let conversation = recent.iter()
+                .filter(|m| m.role == "user" || m.role == "assistant")
+                .map(|m| format!("[{}]: {}", m.role.to_uppercase(), m.content))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+
+            let prompt = format!(
+                "You are maintaining a World Story Journal for an ongoing D&D campaign.\n\n\
+                CURRENT JOURNAL:\n{}\n\n\
+                RECENT EVENTS:\n{}\n\n\
+                Update the journal to reflect significant developments from the recent events. \
+                Track: current situation and location, active quests and unresolved threads, \
+                key NPC relationships and current status, important world state changes, \
+                faction dynamics, secrets revealed, and anything critical the DM must remember. \
+                Prune resolved or stale information. Keep it under 800 words. \
+                Return only the updated journal text, no preamble, no commentary.",
+                current_journal.as_deref().unwrap_or("(empty — this is a new campaign)"),
+                conversation
+            );
+
+            let msgs = vec![ChatMessage::user(&prompt)];
+            if let Ok(result) = llm_clone.run_agentic_loop(
+                &pool_clone, &campaign_id_clone,
+                "You are a concise narrative archivist for a D&D campaign. \
+                Return only the updated journal text.",
+                msgs,
+                &GameState::Exploration,
+            ).await {
+                let _ = campaign::update_story_journal(
+                    &pool_clone, &campaign_id_clone, &result.narrative
+                ).await;
+                tracing::info!("Story journal updated at {} messages", all_history.len());
+            }
+        });
+    }
 
     (StatusCode::OK, Json(json!({
         "type": "narrative",

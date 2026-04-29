@@ -4,6 +4,7 @@ pub fn build_system_prompt(
     player: &Player,
     time: Option<&CampaignTime>,
     session_summaries: &[String],
+    story_journal: Option<&str>,
 ) -> String {
     let time_str = time.map(|t| {
         format!("Current time: {} of Day {}, {} season.",
@@ -12,6 +13,7 @@ pub fn build_system_prompt(
 
     let recent_summaries: Vec<&String> = session_summaries.iter().rev().take(10).rev().collect();
 
+    /*  Testing out replacing summaries with a running world journal
     let summaries_str = if recent_summaries.is_empty() {
         String::new()
     } else {
@@ -23,6 +25,18 @@ pub fn build_system_prompt(
                 .join("\n\n")
         )
     };
+    */
+
+    let journal_str = match story_journal {
+        Some(j) = if !j.trim().is_empty() => format!(
+            "\n\nWORLD STORY JOURNAL - Your long term memory of this campaign \
+            Trust this above all else when recalling past events, NPC relationships, \
+            active quests, and world stateL\n{}",
+            j
+        ),
+        _ => String::new(),
+    };
+
 
     let (subject, object, possessive) = player.pronouns();
 
@@ -64,7 +78,7 @@ PLAYER CHARACTER:
 - STR {str} | DEX {dex} | CON {con} | INT {int} | WIS {wis} | CHA {cha}
 - Currency: {currency}{feat}{backstory}
 
-{time}{summaries}
+{time}{journal}
 
 PRONOUNS
 - Always refer to the player character using {subject}/{object}/{possessive}.
@@ -153,6 +167,11 @@ TOOL USAGE
 - Use query_player_state at the start of any complex scene to orient yourself with current HP, gold, and inventory.
 - Never mention tool calls, function names, or database operations in your narrative.
 - Always call create_location before move_player. Use the exact id returned, never an invented string.
+
+WORLD STORY JOURNAL
+- The journal is your long-term memory. Read it at the start of each scene.
+- The journal is updated automatically in the background — you do not need to call any tool for this.
+- When recalling past events, NPC history, or world state, trust the journal over your own training assumptions.
 "#,
         name       = player.name,
         sex        = player.sex,
@@ -181,6 +200,6 @@ TOOL USAGE
             .map(|b| format!("\n- Backstory: {}", b))
             .unwrap_or_default(),
         time       = time_str,
-        summaries  = summaries_str,
+        journal    = journal_str,
     )
 }

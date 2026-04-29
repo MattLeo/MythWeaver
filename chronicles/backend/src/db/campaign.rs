@@ -43,6 +43,30 @@ pub async fn list_campaigns(pool: &SqlitePool) -> Result<Vec<Campaign>> {
     .await?)
 }
 
+pub async fn get_story_journal(pool:&SqlitePool, campaign_id: &str) -> Result<Option<String>> {
+    Ok(sqls::query_scalar(
+        "SELECT story_journal FROM campaigns WHERE id = ?"
+    )
+    .bind(campaign_id)
+    .fetch_optional(pool)
+    .await?
+    .flatten())
+}
+
+pub async fn update_story_journal(pool: &SqlitePool, campaign_id: &str, journal: &str
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE campagins SET story_journal = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(journal)
+    .bind(campaign_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+
+
 // ─── Session ──────────────────────────────────────────────────────────────────
 
 pub async fn create_session(pool: &SqlitePool, campaign_id: &str) -> Result<Session> {
@@ -140,6 +164,17 @@ pub async fn get_session_messages(pool: &SqlitePool, session_id: &str) -> Result
     .await?;
 
     Ok(messages)
+}
+
+pub async fn get_recent_messages(pool: &SqlitePool, campaign_id: &str, limit: i64) -> Result<Vec<crate::models::Message>> {
+    Ok(sqlx::query_as::<_, crate::models::Message>(
+        "SELECT * FROM messages WHERE campaign_id = ?
+         ORDER BY created_at DESC LIMIT ?"
+    )
+    .bind(campaign_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?)
 }
 
 // ─── Session Summaries ────────────────────────────────────────────────────────

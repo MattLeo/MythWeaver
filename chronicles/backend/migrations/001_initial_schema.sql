@@ -7,10 +7,11 @@ PRAGMA foreign_keys=ON;
 -- ─── Campaign ────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS campaigns (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL DEFAULT 'MythWeaver Campaign',
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL DEFAULT 'MythWeaver Campaign',
+    story_journal   TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ─── Sessions ────────────────────────────────────────────────────────────────
