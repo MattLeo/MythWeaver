@@ -71,11 +71,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/campaigns/:id/combat/flee", post(api::flee_combat))
         .route("/api/campaigns/:id/combat/end", post(api::end_combat_handler))
         .route("/api/campaigns/:id/combat/process-start", post(api::process_initial_turns))
-        .route("/api/message", post(api::send_message))
         .route("/api/campaigns/:id/shop", get(api::get_shop_state))
         .route("/api/campaigns/:id/shop/buy", post(api::buy_item))
         .route("/api/campaigns/:id/shop/sell", post(api::sell_item))
         .route("/api/campaigns/:id/shop/close", post(api::close_shop))
+        .route("/api/campaigns/:id/inventory/equip", post(api::equip_item_handler))
+        .route("/api/campaigns/:id/inventory/unequip", post(api::unequip_item_handler))
+        .route("/api/campaigns/:id/inventory/delete", post(api::delete_item_handler))
+        .route("/api/message", post(api::send_message))
+
         .layer(cors)
         .with_state(app_state);
 

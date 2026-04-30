@@ -9,6 +9,7 @@ import DiceRollOverlay from './components/DiceRollOverlay.jsx'
 import LevelUpModal from './components/LevelUpModal.jsx'
 import CombatModal from './components/CombatModal.jsx'
 import ShopModal from './components/ShopModal.jsx'
+import InventoryModal from './components/InventoryModal.jsx'
 import {
   isLevelUpAvailable,
   getFighterFeatures,
@@ -47,6 +48,7 @@ export default function App() {
   const [showCombat, setShowCombat] = useState(false)
   const [combatInitiativeBonus, setCombatInitiativeBonus] = useState(0)
   const [showShop, setShowShop] = useState(false)
+  const [showInventory, setShowInventory] = useState(false)
 
 
   // ── Resume campaign ─────────────────────────────────────────────────────────
@@ -366,6 +368,7 @@ export default function App() {
         onNewAdventure={handleNewAdventure}
         levelUpAvailable={levelUpAvailable}
         onLevelUp={handleLevelUpClick}
+        onInventory={() => setShowInventory(true)}
       />
 
       <GameScreen
@@ -411,6 +414,16 @@ export default function App() {
           items={items}
           onShopClose={handleShopClose}
           onPlayerUpdate={() => refreshPlayerState(campaign.id)}
+        />
+      )}
+
+      {showInventory && (
+        <InventoryModal
+          campaignId={campaign.id}
+          player={player}
+          items={items}
+          onClose={() => setShowInventory(false)}
+          onUpdate={() => refreshPlayerState(campaign.id)}
         />
       )}
 

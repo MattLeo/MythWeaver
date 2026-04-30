@@ -269,3 +269,44 @@ export async function closeShop(campaignId) {
   if (!res.ok) throw new Error('Failed to close shop')
   return res.json()
 }
+
+// ─── Inventory ────────────────────────────────────────────────────────────────
+
+export async function equipItem(campaignId, itemId, slot) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/inventory/equip`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId, slot })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to equip item (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function unequipItem(campaignId, itemId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/inventory/unequip`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to unequip item (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function deleteItem(campaignId, itemId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/inventory/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to delete item (${res.status}): ${body}`)
+  }
+  return res.json()
+}

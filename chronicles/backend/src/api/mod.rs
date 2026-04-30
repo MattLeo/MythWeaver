@@ -1488,3 +1488,67 @@ pub async fn close_shop(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }
+
+// ─── Inventory handlers ───────────────────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize)]
+pub struct EquipItemRequest {
+    pub item_id: String,
+    pub slot: String,
+}
+
+pub async fn equip_item_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<EquipItemRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    if let Err(e) = items::equip_item(pool, &req.item_id, &req.slot, &p.id).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})));
+    }
+    let new_ac = items::recalculate_ac(pool, &p.id).await.unwrap_or(p.armor_class);
+    (StatusCode::OK, Json(json!({"message": "Item equipped", "new_ac": new_ac})))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UnequipItemRequest {
+    pub item_id: String,
+}
+
+pub async fn unequip_item_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<UnequipItemRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    if let Err(e) = items::unequip_item(pool, &req.item_id).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})));
+    }
+    let new_ac = items::recalculate_ac(pool, &p.id).await.unwrap_or(p.armor_class);
+    (StatusCode::OK, Json(json!({"message": "Item unequipped", "new_ac": new_ac})))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct DeleteItemRequest {
+    pub item_id: String,
+}
+
+pub async fn delete_item_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<DeleteItemRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    if let Err(e) = items::remove_item(pool, &req.item_id, 999).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})));
+    }
+    (StatusCode::OK, Json(json!({"message": "Item deleted"})))
+}

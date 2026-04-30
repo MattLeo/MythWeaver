@@ -81,7 +81,8 @@ ${STYLES}
 
 export default function Sidebar({
   player, abilities, items, companions, campaignTime,
-  isOpen, onNewAdventure, levelUpAvailable, onLevelUp
+  isOpen, onNewAdventure, levelUpAvailable, onLevelUp,
+  onInventory
 }) {
   if (!player) return null
 
@@ -221,6 +222,7 @@ export default function Sidebar({
 
         {/* Inventory */}
         <div className="sec">
+          {/*
           <div className="sec-title">Inventory</div>
           {inventory.length === 0
             ? <div className="inv-i">Empty</div>
@@ -228,14 +230,24 @@ export default function Sidebar({
               <div key={item.id} className="inv-i">
                 {item.quantity > 1 ? `${item.name} ×${item.quantity}` : item.name}
               </div>
-            ))
+            )) 
           }
+          */} 
+
           <div className="gp">
             {player.platinum > 0 && <span>⊙ {player.platinum}pp · </span>}
             {player.gold > 0 && <span>{player.gold}gp · </span>}
             {player.silver > 0 && <span>{player.silver}sp · </span>}
             <span>{player.copper}cp</span>
           </div>
+
+          <button
+            className="btn-secondary"
+            onClick={onInventory}
+            style={{ width: '100%', marginTop: '.4rem' }}
+          >
+            ⚔ Inventory
+          </button>
         </div>
 
         {/* Companions */}
