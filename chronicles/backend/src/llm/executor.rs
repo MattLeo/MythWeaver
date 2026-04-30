@@ -300,7 +300,35 @@ pub async fn execute_tool(
             Ok(json!({"equipped": equipped, "inventory": inventory}))
         }
 
+        // ── Shopping ──────────────────────────────────────────────────────────
+
+        "open_shop" => {
+            if let Ok(Some(_)) = crate::db::shop::get_active_shop(pool, campaign_id).await {
+                return Ok(json!({"error": "A shop is already open."}));
+            }
+
+            let shop_name = args["shop_name"].as_str().unwrap_or("Shop");
+            let shop_type = args["shop_type"].as_str().unwrap_or("general");
+            let merchant_npc_id = args["merchant_npc_id"].as_str();
+
+            let raw_items = match args["items"].as_array() {
+                Some(arr) => arr.clone(),
+                None => serde_json::from_str::<Vec<Value>>(
+                    args["items"].as_str().unwrap_or("[]")
+                ).unwrap_or_default(),
+            };
+
+            if raw_items.is_empty() {
+                return Ok(json!({"error": "No items provided to open_shop"}));
+            }
+
+            crate::db::shop::open_shop(
+                pool, campaign_id, shop_name, shop_type, merchant_npc_id, raw_items
+            ).await
+        }
+
         // ── Mechanical ────────────────────────────────────────────────────────
+        
         "apply_healing" => {
             let p = player::get_player_by_campaign(pool, campaign_id).await?
                 .ok_or_else(|| anyhow::anyhow!("No player found"))?;

@@ -513,6 +513,9 @@ pub async fn send_message(
     let needs_initiative = result.tool_calls_made.iter()
         .any(|t| t.tool_name == "start_combat");
 
+    let needs_shop = result.tool_calls_made.iter()
+        .any(|t| t.tool_name == "open_shop");
+
     if let Some(roll_req) = result.roll_request {
         return (StatusCode::OK, Json(json!({
             "type": "roll_request",
@@ -579,6 +582,7 @@ pub async fn send_message(
         "content": clean_narrative,
         "new_state": new_state,
         "needs_initiative": needs_initiative,
+        "needs_shop": needs_shop,
         "tools_used": result.tool_calls_made.iter().map(|t| &t.tool_name).collect::<Vec<_>>()
     })))
 }
@@ -1415,5 +1419,72 @@ async fn seed_level_up_abilities_direct(
             }
         }
         _ => {}
+    }
+}
+
+// ─── Shop handlers ────────────────────────────────────────────────────────────
+
+pub async fn get_shop_state(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    match crate::db::shop::get_active_shop(&state.pool, &campaign_id).await {
+        Ok(Some(shop)) => (StatusCode::OK, Json(shop)),
+        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "No active shop"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct BuyItemRequest {
+    pub shop_item_id: String,
+    pub quantity: Option<i64>,
+}
+
+pub async fn buy_item(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<BuyItemRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    let quantity = req.quantity.unwrap_or(1).max(1);
+    match crate::db::shop::buy_item(pool, &campaign_id, &p, &req.shop_item_id, quantity).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SellItemRequest {
+    pub player_item_id: String,
+}
+
+pub async fn sell_item(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<SellItemRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match crate::db::shop::sell_item(pool, &campaign_id, &p, &req.player_item_id).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+pub async fn close_shop(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    match crate::db::shop::close_shop(&state.pool, &campaign_id).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }

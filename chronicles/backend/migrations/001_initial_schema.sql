@@ -305,6 +305,67 @@ CREATE TABLE IF NOT EXISTS item_effects (
     target          TEXT
 );
 
+-- ─── Shop ────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS shop_sessions (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    merchant_npc_id TEXT REFERENCES npcs(id),
+    shop_name       TEXT NOT NULL,
+    shop_type       TEXT NOT NULL DEFAULT 'general'
+                    CHECK(shop_type IN ('general', 'blacksmith', 'alchemist', 'magic', 'fletcher', 'tailor', 'jeweler', 'inn', 'black_market')),
+    status          TEXT NOT NULL DEFAULT 'open'
+                    CHECK(status IN ('open', 'closed')),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS shop_items (
+    id              TEXT PRIMARY KEY,
+    shop_session_id TEXT NOT NULL REFERENCES shop_sessions(id),
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    name            TEXT NOT NULL,
+    description     TEXT NOT NULL,
+    item_type       TEXT NOT NULL
+                    CHECK(item_type IN ('weapon', 'armor', 'shield', 'consumable', 'wondrous', 'quest')),
+    -- Weapon fields
+    damage_die      TEXT,
+    damage_type     TEXT,
+    weapon_range    TEXT CHECK(weapon_range IN ('melee', 'ranged', null)),
+    weapon_type     TEXT,
+    -- Armor fields
+    base_ac         INTEGER,
+    armor_type      TEXT CHECK(armor_type IN ('light', 'medium', 'heavy', 'shield', null)),
+    -- Pricing (all denominations)
+    price_pp        INTEGER NOT NULL DEFAULT 0,
+    price_gp        INTEGER NOT NULL DEFAULT 0,
+    price_sp        INTEGER NOT NULL DEFAULT 0,
+    price_cp        INTEGER NOT NULL DEFAULT 0,
+    -- Stock
+    quantity        INTEGER NOT NULL DEFAULT 1,
+    quantity_sold   INTEGER NOT NULL DEFAULT 0,
+    rarity          TEXT NOT NULL DEFAULT 'common'
+                    CHECK(rarity IN ('common', 'uncommon', 'rare', 'very_rare', 'legendary')),
+    notes           TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS shop_transactions (
+    id              TEXT PRIMARY KEY,
+    shop_session_id TEXT NOT NULL REFERENCES shop_sessions(id),
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    transaction_type TEXT NOT NULL CHECK(transaction_type IN ('buy', 'sell')),
+    item_name       TEXT NOT NULL,
+    shop_item_id    TEXT REFERENCES shop_items(id),  -- null for sell transactions
+    player_item_id  TEXT REFERENCES items(id),        -- null for buy transactions
+    quantity        INTEGER NOT NULL DEFAULT 1,
+    price_pp        INTEGER NOT NULL DEFAULT 0,
+    price_gp        INTEGER NOT NULL DEFAULT 0,
+    price_sp        INTEGER NOT NULL DEFAULT 0,
+    price_cp        INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- ─── Companions ──────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS companions (
@@ -444,3 +505,6 @@ CREATE INDEX IF NOT EXISTS idx_active_effects_target    ON active_effects(target
 CREATE INDEX IF NOT EXISTS idx_superiority_player       ON superiority_dice(player_id);
 CREATE INDEX IF NOT EXISTS idx_known_maneuvers_player   ON known_maneuvers(player_id);
 CREATE INDEX IF NOT EXISTS idx_weapon_mastery_player    ON weapon_mastery(player_id);
+CREATE INDEX IF NOT EXISTS idx_shop_sessions_campaign ON shop_sessions(campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_shop_items_session     ON shop_items(shop_session_id);
+CREATE INDEX IF NOT EXISTS idx_shop_transactions      ON shop_transactions(shop_session_id);

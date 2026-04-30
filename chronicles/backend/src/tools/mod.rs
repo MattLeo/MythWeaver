@@ -68,6 +68,7 @@ fn shopping_tools() -> Vec<Value> {
     tools.extend(item_tools());
     tools.extend(world_mutation_tools());
     tools.extend(session_tools());
+    tools.push(open_shop_tool());
     tools
 }
 
@@ -332,6 +333,52 @@ fn item_tools() -> Vec<Value> {
             json!({ "type": "object", "properties": {} })
         ),
     ]
+}
+
+// ─── Shopping ─────────────────────────────────────────────────────────────────
+
+fn open_shop_tool() -> Value {
+    tool("open_shop",
+        "Open a shop interface for the player. Call this when the player wants to browse and buy items from a merchant. Populate with items appropriate to the shop type and location. Prices must follow D&D 5e PHB values — common goods cost copper or silver, weapons and armor cost gold. NEVER open a shop without items.",
+        json!({
+            "type": "object",
+            "properties": {
+                "shop_name": { "type": "string", "description": "Name of the shop e.g. 'Thornwall Armory', 'The Wandering Cauldron'" },
+                "shop_type": {
+                    "type": "string",
+                    "enum": ["general", "blacksmith", "alchemist", "magic", "fletcher", "tailor", "jeweler", "inn", "black_market"]
+                },
+                "merchant_npc_id": { "type": "string", "description": "ID of the merchant NPC if one exists" },
+                "items": {
+                    "type": "array",
+                    "description": "Items available for purchase. Include 6-15 items appropriate to the shop type.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "description": { "type": "string" },
+                            "item_type": { "type": "string", "enum": ["weapon", "armor", "shield", "consumable", "wondrous", "quest"] },
+                            "price_pp": { "type": "integer", "default": 0 },
+                            "price_gp": { "type": "integer", "default": 0 },
+                            "price_sp": { "type": "integer", "default": 0 },
+                            "price_cp": { "type": "integer", "default": 0 },
+                            "quantity": { "type": "integer", "default": 1 },
+                            "damage_die": { "type": "string" },
+                            "damage_type": { "type": "string" },
+                            "weapon_range": { "type": "string", "enum": ["melee", "ranged"] },
+                            "weapon_type": { "type": "string" },
+                            "base_ac": { "type": "integer" },
+                            "armor_type": { "type": "string", "enum": ["light", "medium", "heavy", "shield"] },
+                            "rarity": { "type": "string", "enum": ["common", "uncommon", "rare", "very_rare", "legendary"] },
+                            "notes": { "type": "string" }
+                        },
+                        "required": ["name", "description", "item_type", "quantity"]
+                    }
+                }
+            },
+            "required": ["shop_name", "shop_type", "items"]
+        })
+    )
 }
 
 // ─── Mechanical ───────────────────────────────────────────────────────────────
