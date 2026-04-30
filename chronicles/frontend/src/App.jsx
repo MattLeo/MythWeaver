@@ -8,6 +8,7 @@ import GameScreen from './components/GameScreen.jsx'
 import DiceRollOverlay from './components/DiceRollOverlay.jsx'
 import LevelUpModal from './components/LevelUpModal.jsx'
 import CombatModal from './components/CombatModal.jsx'
+import ShopModal from './components/ShopModal.jsx'
 import {
   isLevelUpAvailable,
   getFighterFeatures,
@@ -45,6 +46,7 @@ export default function App() {
   const [knownManeuvers, setKnownManeuvers] = useState([])
   const [showCombat, setShowCombat] = useState(false)
   const [combatInitiativeBonus, setCombatInitiativeBonus] = useState(0)
+  const [showShop, setShowShop] = useState(false)
 
 
   // ── Resume campaign ─────────────────────────────────────────────────────────
@@ -237,6 +239,11 @@ export default function App() {
           setGameState('combat')
         }
 
+        if (result.needs_shop) {
+          setShowShop(true)
+          setGameState('shopping')
+        }
+
         if (result.new_state && result.new_state !== '') setGameState(result.new_state)
         await refreshPlayerState(campaignId)
 
@@ -300,6 +307,25 @@ export default function App() {
     }
     await refreshPlayerState(campaign.id)
   }
+
+  // ── Shop Handler ───────────────────────────────────────────────────────────
+
+  const handleShopClose = async (purchased, sold) => {
+    setShowShop(false)
+    setGameState('exploration')
+    const parts = []
+    if (purchased) parts.push(`purchased: ${purchased}`)
+    if (sold) parts.push(`sold: ${sold}`)
+    const summary = parts.length > 0 ? parts.join(' / ') : 'browsed but bought nothing'
+    setLoading(true)
+    await sendToBackend(
+      campaign.id, session.id,
+      `[SHOP CLOSED — ${summary}]\n\nBriefly narrate the player leaving the shop in one sentence. Then continue the story. [STATE:exploration]`,
+      'exploration', null
+    )
+    await refreshPlayerState(campaign.id)
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
 
@@ -377,6 +403,17 @@ export default function App() {
           onPlayerUpdate={() => refreshPlayerState(campaign.id)}
         />
       )}
+
+      {showShop && (
+        <ShopModal
+          campaignId={campaign.id}
+          player={player}
+          items={items}
+          onShopClose={handleShopClose}
+          onPlayerUpdate={() => refreshPlayerState(campaign.id)}
+        />
+      )}
+
     </div>
   )
 }

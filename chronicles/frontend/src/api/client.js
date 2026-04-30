@@ -226,3 +226,46 @@ export async function processInitialTurns(campaignId) {
   }
   return res.json()
 }
+
+// ─── Shop ─────────────────────────────────────────────────────────────────────
+
+export async function getShopState(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/shop`)
+  if (!res.ok) throw new Error('Failed to get shop state')
+  return res.json()
+}
+
+export async function buyItem(campaignId, shopItemId, quantity = 1) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/shop/buy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shop_item_id: shopItemId, quantity })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to buy item (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function sellItem(campaignId, playerItemId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/shop/sell`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ player_item_id: playerItemId })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to sell item (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function closeShop(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/shop/close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error('Failed to close shop')
+  return res.json()
+}
