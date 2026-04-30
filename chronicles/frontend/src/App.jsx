@@ -10,6 +10,7 @@ import LevelUpModal from './components/LevelUpModal.jsx'
 import CombatModal from './components/CombatModal.jsx'
 import ShopModal from './components/ShopModal.jsx'
 import InventoryModal from './components/InventoryModal.jsx'
+import AbilitiesModal from './components/AbilitiesModal.jsx'
 import {
   isLevelUpAvailable,
   getFighterFeatures,
@@ -49,6 +50,7 @@ export default function App() {
   const [combatInitiativeBonus, setCombatInitiativeBonus] = useState(0)
   const [showShop, setShowShop] = useState(false)
   const [showInventory, setShowInventory] = useState(false)
+  const [showAbilities, setShowAbilities] = useState(false)
 
 
   // ── Resume campaign ─────────────────────────────────────────────────────────
@@ -369,6 +371,7 @@ export default function App() {
         levelUpAvailable={levelUpAvailable}
         onLevelUp={handleLevelUpClick}
         onInventory={() => setShowInventory(true)}
+        onAbilities={() => setShowAbilities(true)}
       />
 
       <GameScreen
@@ -424,6 +427,14 @@ export default function App() {
           items={items}
           onClose={() => setShowInventory(false)}
           onUpdate={() => refreshPlayerState(campaign.id)}
+        />
+      )}
+
+      {showAbilities && (
+        <AbilitiesModal
+          player={player}
+          abilities={abilities}
+          onClose={() => setShowAbilities(false)}
         />
       )}
 

@@ -82,7 +82,7 @@ ${STYLES}
 export default function Sidebar({
   player, abilities, items, companions, campaignTime,
   isOpen, onNewAdventure, levelUpAvailable, onLevelUp,
-  onInventory
+  onInventory, onAbilities
 }) {
   if (!player) return null
 
@@ -242,13 +242,21 @@ export default function Sidebar({
           </div>
 
           <button
-            className="btn-secondary"
+            className="btn-ghost"
             onClick={onInventory}
             style={{ width: '100%', marginTop: '.4rem' }}
           >
             ⚔ Inventory
           </button>
+          <button
+            className="btn-ghost"
+            onClick={onAbilities}
+            style={{ width: '100%', marginTop: '.4rem' }}
+          >
+            ✦ Abilities
+          </button>
         </div>
+
 
         {/* Companions */}
         {companions && companions.length > 0 && (
