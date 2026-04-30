@@ -101,7 +101,7 @@ ${STYLES}
 
 .inv-item-type {
   font-family: 'Cinzel', serif; font-size: .52rem;
-  letter-spacing: .12em; text-transform: uppercase; color: #3a3d55;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--text);
 }
 
 .inv-item-name {
@@ -115,7 +115,7 @@ ${STYLES}
 }
 
 .inv-item-stats {
-  font-size: .6rem; color: #5a5d80; font-family: 'Cinzel', serif;
+  font-size: .6rem; color: var(--text); font-family: 'Cinzel', serif;
 }
 
 .inv-rarity-dot {
@@ -132,7 +132,7 @@ ${STYLES}
   grid-column: 1 / -1; display: flex; align-items: center;
   justify-content: center; padding: 3rem;
   font-family: 'Cinzel', serif; font-size: .7rem;
-  color: #2a2d44; letter-spacing: .1em;
+  color: var(--text); letter-spacing: .1em;
 }
 
 /* ── Equipment Screen ── */
@@ -163,7 +163,7 @@ ${STYLES}
 
 .equip-slot-label {
   font-family: 'Cinzel', serif; font-size: .52rem;
-  letter-spacing: .14em; text-transform: uppercase; color: #3a3d55;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--text);
 }
 
 .equip-slot-name {
@@ -172,12 +172,12 @@ ${STYLES}
 }
 
 .equip-slot-detail {
-  font-size: .6rem; color: #5a5d80; font-family: 'Cinzel', serif;
+  font-size: .6rem; color: var(--text); font-family: 'Cinzel', serif;
 }
 
 .equip-slot-empty {
   font-family: 'Cinzel', serif; font-size: .6rem;
-  color: #2a2d44; letter-spacing: .06em; margin-top: .2rem;
+  color: var(--text); letter-spacing: .06em; margin-top: .2rem;
 }
 
 /* ── Detail Panel ── */
@@ -199,7 +199,7 @@ ${STYLES}
 
 .inv-detail-type {
   font-family: 'Cinzel', serif; font-size: .55rem;
-  letter-spacing: .14em; text-transform: uppercase; color: #3a3d55;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--text);
 }
 
 .inv-detail-body {
@@ -216,7 +216,7 @@ ${STYLES}
   padding: .18rem 0; border-bottom: 1px solid #13151f;
 }
 
-.inv-stat-label { font-family: 'Cinzel', serif; font-size: .57rem; color: #3a3d55; letter-spacing: .08em; }
+.inv-stat-label { font-family: 'Cinzel', serif; font-size: .57rem; color: var(--dim); letter-spacing: .08em; }
 .inv-stat-value { font-family: 'Cinzel', serif; font-size: .62rem; color: var(--text); }
 
 .inv-detail-footer {
@@ -234,8 +234,8 @@ ${STYLES}
 .inv-action-btn:hover { border-color: var(--gold); color: var(--goldl); background: rgba(200,150,42,.05); }
 .inv-action-btn:disabled { opacity: .3; cursor: not-allowed; }
 
-.inv-action-btn.equip-btn { border-color: #1a3a2a; color: #50a070; }
-.inv-action-btn.equip-btn:hover { border-color: var(--grn); color: #80c090; background: rgba(50,180,80,.06); }
+.inv-action-btn.equip-btn { border-color: var(--gold); color: var(--gold); }
+.inv-action-btn.equip-btn:hover { border-color: var(--goldl); color: var(--goldl); background: rgba(50,180,80,.06); }
 
 .inv-action-btn.unequip-btn { border-color: #2a2a1a; color: #a09050; }
 .inv-action-btn.unequip-btn:hover { border-color: var(--amber); color: var(--amber); background: rgba(180,140,50,.06); }
@@ -246,7 +246,7 @@ ${STYLES}
 .inv-detail-empty {
   display: flex; align-items: center; justify-content: center;
   flex: 1; padding: 1rem; font-family: 'Cinzel', serif;
-  font-size: .65rem; color: #2a2d44; text-align: center;
+  font-size: .65rem; color: var(--text); text-align: center;
   line-height: 1.8; letter-spacing: .06em;
 }
 
