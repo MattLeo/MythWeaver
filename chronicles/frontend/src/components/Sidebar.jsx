@@ -187,26 +187,10 @@ export default function Sidebar({
           ))}
         </div>
 
+        
         {/* Class Abilities */}
-        {abilities && abilities.length > 0 && (
-          <div className="sec">
-            <div className="sec-title">Class Abilities</div>
-            {abilities
-              .filter(ab => ab.name && ab.name.trim().length > 0)
-              .map(ab => (
-                <div key={ab.id} className="ability-row">
-                  <span className="ability-name">{ab.name}</span>
-                  <span
-                    className="ability-uses"
-                    style={{ color: ab.current_uses === 0 ? 'var(--red)' : 'var(--gold)' }}
-                  >
-                    {ab.refresh_type === 'per_turn' ? '∞' : `${ab.current_uses}/${ab.max_uses}`}
-                  </span>
-                </div>
-              ))
-            }
-          </div>
-        )}
+      
+        
 
         {/* Equipped */}
         {equipped.length > 0 && (
