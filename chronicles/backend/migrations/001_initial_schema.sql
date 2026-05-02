@@ -487,6 +487,99 @@ CREATE TABLE IF NOT EXISTS event_entries (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ─── Spells Reference Table ───────────────────────────────────────────────────
+
+CCREATE TABLE IF NOT EXISTS spells (
+    id                  TEXT PRIMARY KEY,
+    name                TEXT NOT NULL UNIQUE,
+    level               INTEGER NOT NULL DEFAULT 0,
+    school              TEXT NOT NULL CHECK(school IN (
+                            'abjuration','conjuration','divination','enchantment',
+                            'evocation','illusion','necromancy','transmutation'
+                        )),
+    casting_time        TEXT NOT NULL DEFAULT 'action',
+    range_type          TEXT NOT NULL DEFAULT 'self',
+    range_feet          INTEGER,
+    has_verbal          INTEGER NOT NULL DEFAULT 1,
+    has_somatic         INTEGER NOT NULL DEFAULT 1,
+    has_material        INTEGER NOT NULL DEFAULT 0,
+    material_component  TEXT,
+    duration            TEXT NOT NULL DEFAULT 'instantaneous',
+    concentration       INTEGER NOT NULL DEFAULT 0,
+    ritual              INTEGER NOT NULL DEFAULT 0,
+    description         TEXT NOT NULL,
+    damage_die          TEXT,
+    damage_die_count    INTEGER DEFAULT 1,
+    damage_type         TEXT,
+    scales_with_level   INTEGER NOT NULL DEFAULT 0,
+    cantrip_dice_5      INTEGER,
+    cantrip_dice_11     INTEGER,
+    cantrip_dice_17     INTEGER,
+    slot_scale_dice     INTEGER,
+    save_type           TEXT,
+    attack_type         TEXT,
+    target_type         TEXT NOT NULL DEFAULT 'single'
+                        CHECK(target_type IN ('self','single','area','multiple')),
+    area_shape          TEXT,
+    area_size_feet      INTEGER,
+    has_backend_resolver INTEGER NOT NULL DEFAULT 0,
+    is_wizard_spell     INTEGER NOT NULL DEFAULT 1,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ─── Player Spell Slots ───────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS spell_slots (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    slot_level      INTEGER NOT NULL CHECK(slot_level BETWEEN 1 AND 9),
+    current_slots   INTEGER NOT NULL DEFAULT 0,
+    max_slots       INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(player_id, slot_level)
+);
+
+-- ─── Known / Prepared Spells ─────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS known_spells (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    spell_id        TEXT NOT NULL REFERENCES spells(id),
+    spell_type      TEXT NOT NULL DEFAULT 'prepared'
+                    CHECK(spell_type IN ('cantrip', 'prepared', 'ritual', 'always_prepared')),
+    source          TEXT NOT NULL DEFAULT 'eldritch_knight',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(player_id, spell_id)
+);
+
+-- ─── War Bond ─────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS war_bonds (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    item_id         TEXT NOT NULL REFERENCES items(id),
+    is_summoned     INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(player_id, item_id)
+);
+
+-- ─── Concentration Tracking ───────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS concentration (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id),
+    player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    spell_id        TEXT NOT NULL REFERENCES spells(id),
+    spell_name      TEXT NOT NULL,
+    started_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at      TEXT,
+    UNIQUE(player_id)  -- can only concentrate on one spell at a time
+);
+
 -- ─── Indexes ─────────────────────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_messages_session         ON messages(session_id);
@@ -505,6 +598,9 @@ CREATE INDEX IF NOT EXISTS idx_active_effects_target    ON active_effects(target
 CREATE INDEX IF NOT EXISTS idx_superiority_player       ON superiority_dice(player_id);
 CREATE INDEX IF NOT EXISTS idx_known_maneuvers_player   ON known_maneuvers(player_id);
 CREATE INDEX IF NOT EXISTS idx_weapon_mastery_player    ON weapon_mastery(player_id);
-CREATE INDEX IF NOT EXISTS idx_shop_sessions_campaign ON shop_sessions(campaign_id, status);
-CREATE INDEX IF NOT EXISTS idx_shop_items_session     ON shop_items(shop_session_id);
-CREATE INDEX IF NOT EXISTS idx_shop_transactions      ON shop_transactions(shop_session_id);
+CREATE INDEX IF NOT EXISTS idx_shop_sessions_campaign   ON shop_sessions(campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_shop_items_session       ON shop_items(shop_session_id);
+CREATE INDEX IF NOT EXISTS idx_shop_transactions        ON shop_transactions(shop_session_id);
+CREATE INDEX IF NOT EXISTS idx_spells_level             ON spells(level);
+CREATE INDEX IF NOT EXISTS idx_spells_school            ON spells(school);
+CREATE INDEX IF NOT EXISTS idx_spells_name              ON spells(name);

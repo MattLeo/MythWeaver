@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
-use crate::db::{campaign, player, world, items, companions, time, fighter};
+use crate::db::{campaign, player, world, items, companions, time, fighter, spells as spells_db};
 use crate::models::Player;
 
 fn parse_i64(v: &Value) -> i64 {
@@ -431,6 +431,8 @@ pub async fn execute_tool(
             if rest_type == "long" {
                 player::update_player_hp(pool, &p.id, p.max_hp).await?;
                 player::update_death_saves(pool, &p.id, 0, 0, true, false).await?;
+                spells_db::restore_all_spell_slots(pool, &p.id).await?;
+                let _ = spells_db::drop_concentration(pool, &p.id).await;
                 if p.indomitable_max > 0 {
                     sqlx::query(
                         "UPDATE players SET indomitable_uses = indomitable_max WHERE id = ?"

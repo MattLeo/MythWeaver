@@ -6,7 +6,7 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::db::{campaign, player, world, items, companions, time, fighter};
+use crate::db::{campaign, player, world, items, companions, time, fighter, spells as spells_db};
 use crate::llm::{ChatMessage, prompt};
 use crate::models::*;
 use crate::AppState;
@@ -162,6 +162,11 @@ pub async fn get_player_state(
         fighter::get_superiority_dice(pool, &p.id, sc).await.unwrap_or(None)
     } else { None };
 
+    let spell_slots = spells_db::get_spell_slots(pool, &p.id).await.unwrap_or_default();
+    let known_spells = spells_db::get_known_spells(pool, &p.id).await.unwrap_or_default();
+    let war_bonds = spells_db::get_war_bonds(pool, &p.id).await.unwrap_or_default();
+    let concentration = spells_db::get_concentration(pool, &p.id).await.unwrap_or(None);
+ 
     (StatusCode::OK, Json(json!({
         "player": p,
         "abilities": abilities,
@@ -172,7 +177,12 @@ pub async fn get_player_state(
         "weapon_masteries": weapon_masteries,
         "known_maneuvers": known_maneuvers,
         "superiority_dice": superiority_dice,
+        "spell_slots": spell_slots,
+        "known_spells": known_spells,
+        "war_bonds": war_bonds,
+        "concentration": concentration,
     })))
+
 }
 
 pub async fn list_campaigns(
@@ -1418,6 +1428,60 @@ async fn seed_level_up_abilities_direct(
                 _ => {}
             }
         }
+
+        Some("Eldritch Knight") => {
+            // Seed/update spell slots for this fighter level
+            if let Err(e) = spells_db::seed_ek_spell_slots(
+                pool, campaign_id, player_id, new_level
+            ).await {
+                tracing::warn!("Failed to seed EK spell slots at level {}: {}", new_level, e);
+            }
+ 
+            match new_level {
+                3 => {
+                    if !has("War Bond") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "War Bond",
+                            Some("Bond with up to 2 weapons (ritual, 1 hour). Bonded weapons can't be disarmed. As a Bonus Action, summon a bonded weapon to your hand from any distance."),
+                            1, "manual").await;
+                    }
+                }
+                7 => {
+                    if !has("War Magic") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "War Magic",
+                            Some("When you take the Attack action, replace one attack with a cantrip that has a casting time of an Action."),
+                            1, "manual").await;
+                    }
+                }
+                10 => {
+                    if !has("Eldritch Strike") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Eldritch Strike",
+                            Some("When you hit a creature with a weapon, that creature has Disadvantage on the next saving throw it makes against a spell you cast before the end of your next turn."),
+                            1, "manual").await;
+                    }
+                }
+                15 => {
+                    if !has("Arcane Charge") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Arcane Charge",
+                            Some("When you use Action Surge, you can teleport up to 30 feet to an unoccupied space you can see before or after the additional action."),
+                            1, "manual").await;
+                    }
+                }
+                18 => {
+                    if !has("Improved War Magic") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Improved War Magic",
+                            Some("When you take the Attack action, you can replace two of your attacks with casting a spell of level 1 or 2 that has a casting time of an Action."),
+                            1, "manual").await;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         _ => {}
     }
 }
@@ -1551,4 +1615,434 @@ pub async fn delete_item_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})));
     }
     (StatusCode::OK, Json(json!({"message": "Item deleted"})))
+}
+
+// ─── Spell handlers ───────────────────────────────────────────────────────────
+ 
+pub async fn get_spell_slots_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::get_spell_slots(pool, &p.id).await {
+        Ok(slots) => (StatusCode::OK, Json(json!({"spell_slots": slots}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+pub async fn get_known_spells_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::get_known_spells(pool, &p.id).await {
+        Ok(known) => (StatusCode::OK, Json(json!({"known_spells": known}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+pub async fn get_castable_spells_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::get_castable_spells(pool, &p.id).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+#[derive(Debug, serde::Deserialize)]
+pub struct LearnSpellRequest {
+    pub spell_id: String,
+    pub spell_type: Option<String>, // defaults to "prepared"
+}
+ 
+pub async fn learn_spell_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<LearnSpellRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+ 
+    // Verify spell exists
+    let spell = match spells_db::get_spell(pool, &req.spell_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "Spell not found"}))),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    };
+ 
+    let spell_level = spell["level"].as_i64().unwrap_or(0);
+    let spell_type = if spell_level == 0 {
+        "cantrip".to_string()
+    } else {
+        req.spell_type.unwrap_or_else(|| "prepared".to_string())
+    };
+ 
+    // Enforce EK restrictions: only abjuration/evocation unless replacing
+    // (This is advisory — the frontend should enforce; backend just records)
+    let fighter_level = p.level;
+    let max_prepared = spells_db::ek_spells_prepared(fighter_level);
+ 
+    // Count current prepared (non-cantrip) spells
+    let known = spells_db::get_known_spells(pool, &p.id).await.unwrap_or_default();
+    let prepared_count = known.iter()
+        .filter(|s| s["spell_type"].as_str() != Some("cantrip"))
+        .count() as i64;
+ 
+    if spell_type != "cantrip" && prepared_count >= max_prepared {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "error": format!(
+                "Already know {} spells (max {} at fighter level {}).",
+                prepared_count, max_prepared, fighter_level
+            )
+        })));
+    }
+ 
+    match spells_db::learn_spell(pool, &campaign_id, &p.id, &req.spell_id, &spell_type, "eldritch_knight").await {
+        Ok(status) if status == "already_known" => {
+            (StatusCode::OK, Json(json!({"message": "Already know this spell", "spell": spell})))
+        }
+        Ok(_) => {
+            let updated = spells_db::get_known_spells(pool, &p.id).await.unwrap_or_default();
+            (StatusCode::OK, Json(json!({
+                "message": format!("Learned {}", spell["name"]),
+                "spell": spell,
+                "known_spells": updated,
+            })))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+#[derive(Debug, serde::Deserialize)]
+pub struct ForgetSpellRequest {
+    pub spell_id: String,
+}
+ 
+pub async fn forget_spell_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<ForgetSpellRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::forget_spell(pool, &p.id, &req.spell_id).await {
+        Ok(true) => {
+            let updated = spells_db::get_known_spells(pool, &p.id).await.unwrap_or_default();
+            (StatusCode::OK, Json(json!({"message": "Spell forgotten", "known_spells": updated})))
+        }
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "Spell not in known list"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+#[derive(Debug, serde::Deserialize)]
+pub struct CastSpellRequest {
+    pub spell_id: String,
+    pub slot_level: Option<i64>, // None for cantrips
+    pub target_id: Option<String>,
+    pub drop_concentration: Option<bool>,
+}
+ 
+pub async fn cast_spell_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<CastSpellRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+ 
+    let spell = match spells_db::get_spell(pool, &req.spell_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "Spell not found"}))),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    };
+ 
+    let spell_level = spell["level"].as_i64().unwrap_or(0);
+    let cast_at = req.slot_level.unwrap_or(spell_level);
+ 
+    // Validate
+    let validation = match spells_db::validate_cast(pool, &p.id, &req.spell_id, cast_at).await {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    };
+ 
+    if validation["valid"].as_bool() != Some(true) {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "error": validation["reason"],
+        })));
+    }
+ 
+    // Handle concentration drop
+    if validation["concentration_warning"].as_bool() == Some(true) {
+        if req.drop_concentration != Some(true) {
+            // Ask frontend to confirm
+            return (StatusCode::OK, Json(json!({
+                "requires_confirmation": true,
+                "message": format!(
+                    "Casting this will drop concentration on {}. Confirm?",
+                    validation["will_drop"]
+                ),
+                "will_drop": validation["will_drop"],
+            })));
+        }
+        // Drop it
+        let _ = spells_db::drop_concentration(pool, &p.id).await;
+    }
+ 
+    // Expend slot if leveled
+    let slots_remaining = if spell_level > 0 {
+        match spells_db::expend_spell_slot(pool, &p.id, cast_at).await {
+            Ok(remaining) => Some(remaining),
+            Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))),
+        }
+    } else {
+        None
+    };
+ 
+    // Set concentration if needed
+    if spell["concentration"].as_i64() == Some(1) {
+        let _ = spells_db::set_concentration(
+            pool, &campaign_id, &p.id,
+            &req.spell_id,
+            spell["name"].as_str().unwrap_or("Unknown"),
+            None,
+        ).await;
+    }
+ 
+    // Calculate damage for backend-resolved spells
+    let damage_info = if spell["has_backend_resolver"].as_i64() == Some(1) {
+        build_spell_damage_info(&spell, cast_at, p.level)
+    } else {
+        json!(null)
+    };
+ 
+    let updated_slots = spells_db::get_spell_slots(pool, &p.id).await.unwrap_or_default();
+    let concentration = spells_db::get_concentration(pool, &p.id).await.unwrap_or(None);
+ 
+    (StatusCode::OK, Json(json!({
+        "message": format!("Cast {} at level {}!", spell["name"], cast_at),
+        "spell": spell,
+        "cast_at_level": cast_at,
+        "slot_level_expended": if spell_level > 0 { Some(cast_at) } else { None },
+        "slots_remaining_at_level": slots_remaining,
+        "spell_slots": updated_slots,
+        "concentration": concentration,
+        "damage_info": damage_info,
+        "target_id": req.target_id,
+    })))
+}
+ 
+/// Build damage rolling info for the frontend to roll against.
+fn build_spell_damage_info(spell: &Value, cast_at: i64, char_level: i64) -> Value {
+    let spell_level = spell["level"].as_i64().unwrap_or(0);
+    let base_dice = spell["damage_die_count"].as_i64().unwrap_or(0);
+    let die = spell["damage_die"].as_str().unwrap_or("d6");
+    let damage_type = spell["damage_type"].as_str().unwrap_or("unknown");
+    let save_type = spell["save_type"].as_str();
+    let attack_type = spell["attack_type"].as_str();
+ 
+    let dice_count = if spell_level == 0 {
+        // Cantrip scaling
+        spells_db::cantrip_dice_at_level(
+            base_dice,
+            spell["cantrip_dice_5"].as_i64(),
+            spell["cantrip_dice_11"].as_i64(),
+            spell["cantrip_dice_17"].as_i64(),
+            char_level,
+        )
+    } else {
+        // Leveled spell — upcast scaling
+        spells_db::upcast_dice(
+            base_dice,
+            spell["slot_scale_dice"].as_i64(),
+            spell_level,
+            cast_at,
+        )
+    };
+ 
+    json!({
+        "dice_count": dice_count,
+        "die": die,
+        "damage_type": damage_type,
+        "save_type": save_type,
+        "attack_type": attack_type,
+        "rolls_needed": dice_count,
+        "description": format!("Roll {}{}!", dice_count, die),
+    })
+}
+ 
+// ─── Concentration handlers ────────────────────────────────────────────────────
+ 
+pub async fn get_concentration_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::get_concentration(pool, &p.id).await {
+        Ok(c) => (StatusCode::OK, Json(json!({"concentration": c}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+pub async fn drop_concentration_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::drop_concentration(pool, &p.id).await {
+        Ok(Some(name)) => (StatusCode::OK, Json(json!({"message": format!("Dropped concentration on {}", name)}))),
+        Ok(None) => (StatusCode::OK, Json(json!({"message": "Not concentrating on anything"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+// ─── War Bond handlers ────────────────────────────────────────────────────────
+ 
+pub async fn get_war_bonds_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::get_war_bonds(pool, &p.id).await {
+        Ok(bonds) => (StatusCode::OK, Json(json!({"war_bonds": bonds}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+#[derive(Debug, serde::Deserialize)]
+pub struct WarBondRequest {
+    pub item_id: String,
+}
+ 
+pub async fn create_war_bond_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<WarBondRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::create_war_bond(pool, &campaign_id, &p.id, &req.item_id).await {
+        Ok(_) => {
+            let bonds = spells_db::get_war_bonds(pool, &p.id).await.unwrap_or_default();
+            (StatusCode::OK, Json(json!({"message": "War Bond created", "war_bonds": bonds})))
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+pub async fn break_war_bond_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<WarBondRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::break_war_bond(pool, &p.id, &req.item_id).await {
+        Ok(true) => {
+            let bonds = spells_db::get_war_bonds(pool, &p.id).await.unwrap_or_default();
+            (StatusCode::OK, Json(json!({"message": "War Bond broken", "war_bonds": bonds})))
+        }
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "No bond found for that item"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+pub async fn summon_bonded_weapon_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<WarBondRequest>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match spells_db::summon_bonded_weapon(pool, &p.id, &req.item_id).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+// ─── Spell search ─────────────────────────────────────────────────────────────
+ 
+#[derive(Debug, serde::Deserialize)]
+pub struct SpellSearchRequest {
+    pub query: String,
+    pub wizard_only: Option<bool>,
+}
+ 
+pub async fn search_spells_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SpellSearchRequest>,
+) -> impl IntoResponse {
+    let wizard_only = req.wizard_only.unwrap_or(false);
+    match spells_db::search_spells(&state.pool, &req.query, wizard_only).await {
+        Ok(results) => (StatusCode::OK, Json(json!({"spells": results}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+pub async fn seed_ek_slots_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+ 
+    if p.subclass.as_deref() != Some("Eldritch Knight") {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Player is not an Eldritch Knight"})));
+    }
+ 
+    match spells_db::seed_ek_spell_slots(pool, &campaign_id, &p.id, p.level).await {
+        Ok(_) => {
+            let slots = spells_db::get_spell_slots(pool, &p.id).await.unwrap_or_default();
+            (StatusCode::OK, Json(json!({"message": "Spell slots seeded", "spell_slots": slots})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
 }
