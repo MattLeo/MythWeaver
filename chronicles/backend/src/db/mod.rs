@@ -13,6 +13,7 @@ pub mod time;
 pub mod events;
 pub mod fighter;
 pub mod shop;
+pub mod spells;
 
 pub async fn connect(database_url: &str) -> Result<SqlitePool> {
     std::fs::create_dir_all("data")?;
