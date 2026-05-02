@@ -310,3 +310,165 @@ export async function deleteItem(campaignId, itemId) {
   }
   return res.json()
 }
+
+// ─── Spells ───────────────────────────────────────────────────────────────────
+
+export async function getKnownSpells(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells`)
+  if (!res.ok) throw new Error('Failed to get known spells')
+  return res.json()
+}
+
+export async function getCastableSpells(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/castable`)
+  if (!res.ok) throw new Error('Failed to get castable spells')
+  return res.json()
+}
+
+export async function getSpellSlots(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/slots`)
+  if (!res.ok) throw new Error('Failed to get spell slots')
+  return res.json()
+}
+
+export async function seedEkSlots(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/slots/seed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to seed EK spell slots (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function learnSpell(campaignId, spellId, spellType = 'prepared') {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/learn`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spell_id: spellId, spell_type: spellType })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to learn spell (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function forgetSpell(campaignId, spellId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/forget`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spell_id: spellId })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to forget spell (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+/**
+ * Cast a spell.
+ * @param {string} campaignId
+ * @param {string} spellId
+ * @param {object} options
+ * @param {number|null} options.slotLevel - null for cantrips
+ * @param {string|null} options.targetId
+ * @param {boolean} options.dropConcentration - true to confirm dropping current concentration
+ */
+export async function castSpell(campaignId, spellId, options = {}) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/cast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      spell_id: spellId,
+      slot_level: options.slotLevel ?? null,
+      target_id: options.targetId ?? null,
+      drop_concentration: options.dropConcentration ?? false,
+    })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to cast spell (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function searchSpells(campaignId, query, wizardOnly = false) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, wizard_only: wizardOnly })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to search spells (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+// ─── Concentration ────────────────────────────────────────────────────────────
+
+export async function getConcentration(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/concentration`)
+  if (!res.ok) throw new Error('Failed to get concentration')
+  return res.json()
+}
+
+export async function dropConcentration(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/concentration/drop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error('Failed to drop concentration')
+  return res.json()
+}
+
+// ─── War Bond ─────────────────────────────────────────────────────────────────
+
+export async function getWarBonds(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/war-bonds`)
+  if (!res.ok) throw new Error('Failed to get war bonds')
+  return res.json()
+}
+
+export async function createWarBond(campaignId, itemId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/war-bonds/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to create war bond (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function breakWarBond(campaignId, itemId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/war-bonds/break`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to break war bond (${res.status}): ${body}`)
+  }
+  return res.json()
+}
+
+export async function summonBondedWeapon(campaignId, itemId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/war-bonds/summon`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId })
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Failed to summon bonded weapon (${res.status}): ${body}`)
+  }
+  return res.json()
+}
