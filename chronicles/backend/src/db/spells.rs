@@ -82,30 +82,19 @@ pub async fn get_spell_by_name(pool: &SqlitePool, name: &str) -> Result<Option<V
 
 pub async fn search_spells(pool: &SqlitePool, query: &str, wizard_only: bool) -> Result<Vec<Value>> {
     let pattern = format!("%{}%", query);
-    let rows = if wizard_only {
-        sqlx::query!(
-            "SELECT id, name, level, school, casting_time, duration, concentration, description
-             FROM spells
-             WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?))
-               AND is_wizard_spell = 1
-             ORDER BY level, name
-             LIMIT 20",
-            pattern, pattern
-        )
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query!(
-            "SELECT id, name, level, school, casting_time, duration, concentration, description
-             FROM spells
-             WHERE LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?)
-             ORDER BY level, name
-             LIMIT 20",
-            pattern, pattern
-        )
-        .fetch_all(pool)
-        .await?
-    };
+    let wizard_filter: i64 = if wizard_only { 1 } else { 0 };
+
+    let rows = sqlx::query!(
+        "SELECT id, name, level, school, casting_time, duration, concentration, description
+         FROM spells
+         WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?))
+           AND (? = 0 OR is_wizard_spell = 1)
+         ORDER BY level, name
+         LIMIT 20",
+        pattern, pattern, wizard_filter
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows.iter().map(|r| json!({
         "id": r.id,

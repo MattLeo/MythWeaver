@@ -187,10 +187,10 @@ export default function Sidebar({
           ))}
         </div>
 
-        
+
         {/* Class Abilities */}
-      
-        
+
+
 
         {/* Equipped */}
         {equipped.length > 0 && (
@@ -216,7 +216,7 @@ export default function Sidebar({
               </div>
             )) 
           }
-          */} 
+          */}
 
           <div className="gp">
             {player.platinum > 0 && <span>⊙ {player.platinum}pp · </span>}
@@ -228,22 +228,25 @@ export default function Sidebar({
           <button
             className="btn-ghost"
             onClick={onInventory}
-            style={{ width: '100%', marginTop: '.4rem' }}
+            style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
           >
             ⚔ Inventory
           </button>
           <button
             className="btn-ghost"
             onClick={onAbilities}
-            style={{ width: '100%', marginTop: '.4rem' }}
+            style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
           >
             ✦ Abilities
           </button>
           {player?.subclass === 'Eldritch Knight' && (
-            <button 
-              className="btn-ghost" 
+            <button
+              className="btn-ghost"
               onClick={onSpells}
-            >✦ Spells</button>
+              style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
+            >
+              ✦ Spells
+            </button>
           )}
         </div>
 

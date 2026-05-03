@@ -197,13 +197,13 @@ export default function App() {
       if (result.known_maneuvers) setKnownManeuvers(result.known_maneuvers)
       if (result.time) setCampaignTime(result.time)
       for (const spellId of choices.ek_cantrips || []) {
-        await learnSpell(campaignId, spellId, 'cantrip')
+        await api.learnSpell(campaign.id, spellId, 'cantrip')
       }
       for (const spellId of choices.ek_prepared || []) {
-        await learnSpell(campaignId, spellId, 'prepared')
+        await api.learnSpell(campaign.id, spellId, 'prepared')
       }
       if (choices.ek_cantrips || choices.ek_prepared) {
-        await seedEkSlots(campaignId)
+        await api.seedEkSlots(campaign.id)
       }
 
       await refreshPlayerState(campaign.id)
@@ -453,10 +453,10 @@ export default function App() {
 
       {showSpells && (
         <SpellsModal
-          campaignId={campaignId}
+          campaignId={campaign.id}
           player={player}
           onClose={() => setShowSpells(false)}
-          onCastInCombat={inCombat ? handleSpellCastInCombat : null}
+          onCastInCombat={showCombat ? () => {} : null}
         />
       )}
 

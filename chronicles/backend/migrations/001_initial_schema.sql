@@ -489,7 +489,7 @@ CREATE TABLE IF NOT EXISTS event_entries (
 
 -- ─── Spells Reference Table ───────────────────────────────────────────────────
 
-CCREATE TABLE IF NOT EXISTS spells (
+CREATE TABLE IF NOT EXISTS spells (
     id                  TEXT PRIMARY KEY,
     name                TEXT NOT NULL UNIQUE,
     level               INTEGER NOT NULL DEFAULT 0,
