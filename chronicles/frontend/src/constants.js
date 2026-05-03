@@ -419,6 +419,108 @@ export const MASTERY_PROPERTIES = [
     'cleave', 'graze', 'nick', 'push', 'sap', 'slow', 'topple', 'vex'
 ]
 
+// ─── Barbarian ────────────────────────────────────────────────────────────────
+ 
+export const BARBARIAN_SUBCLASSES = [
+    {
+        name: 'Path of the Berserker',
+        desc: 'Channel Rage into violent fury. Frenzy adds bonus d6 damage while raging, and Retaliation lets you strike back instantly when hit.',
+    },
+    {
+        name: 'Path of the Wild Heart',
+        desc: 'Walk in community with the animal world. Choose a beast aspect on each Rage — Bear for broad resistance, Eagle for mobility, Wolf to support allies.',
+    },
+    {
+        name: 'Path of the World Tree',
+        desc: 'Trace the roots and branches of Yggdrasil. Surge with temporary hit points, teleport enemies, and eventually travel vast distances in an instant.',
+    },
+    {
+        name: 'Path of the Zealot',
+        desc: 'Rage in ecstatic union with a god. Channel divine fury into your strikes and carry a personal healing pool that keeps you in the fight.',
+    },
+]
+ 
+export const BARBARIAN_BASE_FEATURES = {
+    1:  ['Rage', 'Unarmored Defense', 'Weapon Mastery'],
+    2:  ['Danger Sense', 'Reckless Attack'],
+    3:  ['Barbarian Subclass', 'Primal Knowledge'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Extra Attack', 'Fast Movement'],
+    6:  ['Subclass Feature'],
+    7:  ['Feral Instinct', 'Instinctive Pounce'],
+    8:  ['Ability Score Improvement'],
+    9:  ['Brutal Strike'],
+    10: ['Subclass Feature'],
+    11: ['Relentless Rage'],
+    12: ['Ability Score Improvement'],
+    13: ['Improved Brutal Strike'],
+    14: ['Subclass Feature'],
+    15: ['Persistent Rage'],
+    16: ['Ability Score Improvement'],
+    17: ['Improved Brutal Strike (upgrade)'],
+    18: ['Indomitable Might'],
+    19: ['Epic Boon'],
+    20: ['Primal Champion'],
+}
+ 
+export const BARBARIAN_SUBCLASS_FEATURES = {
+    'Path of the Berserker': {
+        3:  ['Frenzy'],
+        6:  ['Mindless Rage'],
+        10: ['Retaliation'],
+        14: ['Intimidating Presence'],
+    },
+    'Path of the Wild Heart': {
+        3:  ['Animal Speaker', 'Rage of the Wilds'],
+        6:  ['Aspect of the Wilds'],
+        10: ['Nature Speaker'],
+        14: ['Power of the Wilds'],
+    },
+    'Path of the World Tree': {
+        3:  ['Vitality of the Tree'],
+        6:  ['Branches of the Tree'],
+        10: ['Battering Roots'],
+        14: ['Travel along the Tree'],
+    },
+    'Path of the Zealot': {
+        3:  ['Divine Fury', 'Warrior of the Gods'],
+        6:  ['Fanatical Focus'],
+        10: ['Zealous Presence'],
+        14: ['Rage of the Gods'],
+    },
+}
+ 
+export const BARBARIAN_ASI_LEVELS = [4, 8, 12, 16, 19]
+ 
+export function getBarbarianFeatures(player, newLevel) {
+    const base = BARBARIAN_BASE_FEATURES[newLevel] || []
+    const subFeatures = player.subclass
+        ? (BARBARIAN_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+export function barbarianRageUses(level) {
+    if (level >= 17) return 6
+    if (level >= 12) return 5
+    if (level >= 6)  return 4
+    if (level >= 3)  return 3
+    return 2
+}
+ 
+export function barbarianRageDamage(level) {
+    if (level >= 16) return 4
+    if (level >= 9)  return 3
+    return 2
+}
+ 
+export function barbarianWeaponMastery(level) {
+    if (level >= 10) return 4
+    if (level >= 4)  return 3
+    return 2
+}
+
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function xpToNextLevel(level) {

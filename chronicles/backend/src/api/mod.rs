@@ -1234,8 +1234,24 @@ async fn seed_class_abilities(
 ) {
     let abilities: Vec<(&str, Option<&str>, i64, &str)> = match class {
         "Barbarian" => vec![
-            ("Rage", Some("Bonus Action: enter a rage. Advantage on STR checks/saves, +2 damage on STR attacks, resistance to physical damage. Lasts 1 minute."), 2, "long_rest"),
-            ("Unarmored Defense", Some("AC = 10 + DEX mod + CON mod when not wearing armor."), 1, "manual"),
+            ("Rage",
+             Some("Bonus Action: enter a Rage. While raging: Resistance to Bludgeoning/Piercing/Slashing; \
+                   +2 damage on STR-based attacks and Unarmed Strikes; Advantage on STR checks and saves. \
+                   Can't maintain Concentration or cast spells. Lasts until end of next turn — extend each \
+                   round by attacking, forcing a save, or using a Bonus Action (max 10 min). \
+                   Regain 1 use on Short Rest, all uses on Long Rest."),
+             2, "long_rest"),
+            ("Unarmored Defense",
+             Some("While not wearing armor, AC = 10 + DEX modifier + CON modifier. You may still use a Shield."),
+             1, "manual"),
+            ("Weapon Mastery",
+             Some("Use the Mastery property of 2 Simple or Martial Melee weapons you are proficient with. \
+                   Change choices after each Long Rest. Count increases to 3 at level 4, and 4 at level 10."),
+             1, "manual"),
+            ("Reckless Attack",
+             Some("On your first attack roll of the turn, you may attack recklessly: you have Advantage on all \
+                   STR-based attack rolls this turn, but attack rolls against you also have Advantage until your next turn."),
+             1, "per_turn"),
         ],
         "Fighter" => vec![
             ("Second Wind", Some("Bonus Action: regain 1d10 + Fighter level HP. Also usable for Tactical Mind (level 2+)."), 2, "short_rest"),
@@ -1298,10 +1314,24 @@ async fn seed_level_up_abilities_direct(
     new_level: i64,
     subclass: Option<&str>,
 ) {
-    if class != "Fighter" { return; }
+    match class {
+        "Fighter"   => seed_level_up_abilities_fighter(pool, campaign_id, player_id, new_level, subclass).await,
+        "Barbarian" => seed_level_up_abilities_barbarian(pool, campaign_id, player_id, new_level, subclass).await,
+        _           => {}
+    }
+}
 
+async fn seed_level_up_abilities_fighter(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
     let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
     let has = |name: &str| existing.iter().any(|a| a.name == name);
+
+    // ── Base class features ───────────────────────────────────────────────────
 
     match new_level {
         2 => {
@@ -1350,6 +1380,8 @@ async fn seed_level_up_abilities_direct(
         }
         _ => {}
     }
+
+    // ── Subclass features ─────────────────────────────────────────────────────
 
     match subclass {
         Some("Champion") => match new_level {
@@ -1482,6 +1514,406 @@ async fn seed_level_up_abilities_direct(
             }
         }
 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_barbarian(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            if !has("Danger Sense") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Danger Sense",
+                    Some("You have Advantage on Dexterity saving throws unless you have the \
+                          Incapacitated condition."),
+                    1, "manual").await;
+            }
+            // Reckless Attack was seeded at character creation; no duplicate needed.
+        }
+        3 => {
+            if !has("Primal Knowledge") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Primal Knowledge",
+                    Some("You gain proficiency in one additional skill from the Barbarian list \
+                          (Animal Handling, Athletics, Intimidation, Nature, Perception, Survival). \
+                          While your Rage is active, you can make Acrobatics, Intimidation, \
+                          Perception, Stealth, or Survival checks as Strength checks."),
+                    1, "manual").await;
+            }
+        }
+        5 => {
+            if !has("Fast Movement") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Fast Movement",
+                    Some("Your Speed increases by 10 feet while you aren't wearing Heavy armor."),
+                    1, "manual").await;
+            }
+        }
+        7 => {
+            if !has("Feral Instinct") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Feral Instinct",
+                    Some("You have Advantage on Initiative rolls."),
+                    1, "manual").await;
+            }
+            if !has("Instinctive Pounce") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Instinctive Pounce",
+                    Some("As part of the Bonus Action you take to enter your Rage, \
+                          you can move up to half your Speed."),
+                    1, "manual").await;
+            }
+        }
+        9 => {
+            if !has("Brutal Strike") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Brutal Strike",
+                    Some("When using Reckless Attack, forgo Advantage on one STR-based attack roll \
+                          (it must not have Disadvantage). If it hits: deal +1d10 damage of the \
+                          weapon's type and apply one Brutal Strike effect. \
+                          Forceful Blow: push target 15 ft straight away, then move up to half your \
+                          Speed straight toward them (no Opportunity Attacks). \
+                          Hamstring Blow: reduce target Speed by 15 ft until start of your next turn \
+                          (only one Hamstring Blow at a time — most recent wins)."),
+                    1, "manual").await;
+            }
+        }
+        11 => {
+            if !has("Relentless Rage") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Relentless Rage",
+                    Some("If you drop to 0 HP while raging and don't die outright, make a DC 10 CON \
+                          save. On success, your HP instead change to twice your Barbarian level. \
+                          DC increases by 5 each subsequent use; resets to 10 on Short or Long Rest."),
+                    1, "manual").await;
+            }
+        }
+        13 => {
+            // Add Staggering Blow and Sundering Blow; update the Brutal Strike description.
+            if let Some(a) = existing.iter().find(|a| a.name == "Brutal Strike") {
+                let _ = sqlx::query("UPDATE abilities SET description = ? WHERE id = ?")
+                    .bind("Forgo Reckless Attack advantage on one STR attack → hit deals +1d10 damage \
+                           and you apply ONE Brutal Strike effect: \
+                           Forceful Blow (push 15 ft + move half Speed toward target), \
+                           Hamstring Blow (reduce Speed by 15 ft until your next turn), \
+                           NEW — Staggering Blow (target has Disadvantage on its next saving throw \
+                           and can't make Opportunity Attacks until your next turn), \
+                           NEW — Sundering Blow (next attack by another creature against the target \
+                           before your next turn gains +5 to hit).")
+                    .bind(&a.id)
+                    .execute(pool)
+                    .await;
+            }
+        }
+        15 => {
+            if !has("Persistent Rage") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Persistent Rage",
+                    Some("When you roll Initiative, you can regain all expended Rage uses \
+                          (once per Long Rest). \
+                          Your Rage now lasts 10 minutes automatically — no action needed each \
+                          round to extend it. Rage ends early only if you have the Unconscious \
+                          condition or don Heavy armor."),
+                    1, "long_rest").await;
+            }
+        }
+        17 => {
+            // Improved Brutal Strike upgrade: damage becomes 2d10, can apply TWO effects.
+            if let Some(a) = existing.iter().find(|a| a.name == "Brutal Strike") {
+                let _ = sqlx::query("UPDATE abilities SET description = ? WHERE id = ?")
+                    .bind("Forgo Reckless Attack advantage on one STR attack → hit deals +2d10 damage \
+                           and you apply TWO different Brutal Strike effects. \
+                           Effects: Forceful Blow, Hamstring Blow, Staggering Blow, Sundering Blow.")
+                    .bind(&a.id)
+                    .execute(pool)
+                    .await;
+            }
+        }
+        18 => {
+            if !has("Indomitable Might") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Indomitable Might",
+                    Some("If your total for a Strength check or Strength saving throw is less than \
+                          your Strength score, you can use your Strength score in place of the total."),
+                    1, "manual").await;
+            }
+        }
+        20 => {
+            if !has("Primal Champion") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Primal Champion",
+                    Some("Your Strength and Constitution scores each increase by 4, to a maximum of 25. \
+                          (Applied automatically to your stats.)"),
+                    1, "manual").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Path of the Berserker") => match new_level {
+            3 => {
+                if !has("Frenzy") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Frenzy",
+                        Some("While raging, if you use Reckless Attack, you deal extra damage to the \
+                              first target you hit that turn with a STR-based attack. Roll a number of \
+                              d6s equal to your Rage Damage bonus (+2 = 2d6, +3 = 3d6, +4 = 4d6) and \
+                              add them together. Damage type matches the weapon or Unarmed Strike."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Mindless Rage") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Mindless Rage",
+                        Some("You have Immunity to the Charmed and Frightened conditions while your \
+                              Rage is active. If you are Charmed or Frightened when you enter your \
+                              Rage, those conditions end on you immediately."),
+                        1, "manual").await;
+                }
+            }
+            10 => {
+                if !has("Retaliation") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Retaliation",
+                        Some("When you take damage from a creature within 5 feet of you, you can use \
+                              your Reaction to make one melee weapon attack or Unarmed Strike against \
+                              that creature."),
+                        1, "per_turn").await;
+                }
+            }
+            14 => {
+                if !has("Intimidating Presence") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Intimidating Presence",
+                        Some("Bonus Action: each creature of your choice in a 30-foot Emanation must \
+                              make a WIS save (DC 8 + STR modifier + Proficiency Bonus) or have the \
+                              Frightened condition for 1 minute. A Frightened creature repeats the \
+                              save at the end of each of its turns, ending the effect on a success. \
+                              Recharges on Long Rest, or expend a Rage use (no action required) to \
+                              restore immediately."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Path of the Wild Heart") => match new_level {
+            3 => {
+                if !has("Animal Speaker") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Animal Speaker",
+                        Some("You can cast Beast Sense and Speak with Animals, but only as Rituals. \
+                              Wisdom is your spellcasting ability for them."),
+                        1, "manual").await;
+                }
+                if !has("Rage of the Wilds") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Rage of the Wilds",
+                        Some("When you activate your Rage, choose one option: \
+                              Bear — Resistance to every damage type except Force, Necrotic, Psychic, \
+                                and Radiant. \
+                              Eagle — On activation, take Disengage and Dash as part of the Bonus \
+                                Action; while raging, use a Bonus Action to take both again. \
+                              Wolf — While raging, your allies have Advantage on attack rolls against \
+                                any enemy of yours within 5 feet of you."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Aspect of the Wilds") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Aspect of the Wilds",
+                        Some("Gain one passive aspect (change after a Long Rest): \
+                              Owl — Darkvision 60 ft, or +60 ft if you already have it. \
+                              Panther — Climb Speed equal to your Speed. \
+                              Salmon — Swim Speed equal to your Speed."),
+                        1, "manual").await;
+                }
+            }
+            10 => {
+                if !has("Nature Speaker") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Nature Speaker",
+                        Some("You can cast Commune with Nature, but only as a Ritual. \
+                              Wisdom is your spellcasting ability for it."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Power of the Wilds") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Power of the Wilds",
+                        Some("When you activate your Rage, choose one additional option: \
+                              Falcon — Fly Speed equal to your Speed (requires no armor). \
+                              Lion — Enemies within 5 ft of you have Disadvantage on attack rolls \
+                                against any target other than you or another Barbarian with this option. \
+                              Ram — When you hit a creature with a melee attack, you can knock it Prone."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Path of the World Tree") => match new_level {
+            3 => {
+                if !has("Vitality of the Tree") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Vitality of the Tree",
+                        Some("Vitality Surge: when you activate Rage, gain Temporary HP equal to your \
+                              Barbarian level. \
+                              Life-Giving Force: at the start of each of your turns while raging, \
+                              choose a creature within 10 ft — it gains Temporary HP equal to a roll \
+                              of d6s equal to your Rage Damage bonus. These temp HP vanish when \
+                              your Rage ends."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Branches of the Tree") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Branches of the Tree",
+                        Some("Reaction: when a creature you can see starts its turn within 30 ft \
+                              while your Rage is active, summon spectral branches. Target makes a \
+                              STR save (DC 8 + STR mod + Prof Bonus) or is teleported to an \
+                              unoccupied space within 5 ft of you (or the nearest unoccupied space \
+                              you can see). After teleporting, you can reduce its Speed to 0 until \
+                              the end of the current turn."),
+                        1, "manual").await;
+                }
+            }
+            10 => {
+                if !has("Battering Roots") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Battering Roots",
+                        Some("During your turn, your reach is 10 ft greater with any Melee weapon \
+                              that has the Heavy or Versatile property. When you hit with such a \
+                              weapon on your turn, you can activate the Push or Topple mastery \
+                              property in addition to a different mastery property you're already \
+                              using with that weapon."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Travel along the Tree") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Travel along the Tree",
+                        Some("When you activate your Rage, and as a Bonus Action while raging, \
+                              you can teleport up to 60 ft to an unoccupied space you can see. \
+                              Once per Rage, you can extend that range to 150 ft and bring up to \
+                              6 willing creatures within 10 ft — each appears within 10 ft of \
+                              your destination."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Path of the Zealot") => match new_level {
+            3 => {
+                if !has("Divine Fury") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Divine Fury",
+                        Some("While raging, the first creature you hit on each of your turns with \
+                              a weapon or Unarmed Strike takes extra damage equal to 1d6 + half your \
+                              Barbarian level (round down). Choose Necrotic or Radiant each time \
+                              you deal this damage."),
+                        1, "manual").await;
+                }
+                if !has("Warrior of the Gods") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Warrior of the Gods",
+                        Some("You have a pool of four d12s. Bonus Action: expend any number of \
+                              these dice, roll them, and regain that many Hit Points. The pool \
+                              fully restores on Long Rest. Pool grows to 5 dice at level 6, \
+                              6 dice at level 12, and 7 dice at level 17."),
+                        4, "long_rest").await;
+                }
+            }
+            6 => {
+                if !has("Fanatical Focus") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Fanatical Focus",
+                        Some("Once per active Rage, when you fail a saving throw, you can reroll \
+                              it with a bonus equal to your Rage Damage bonus. You must use the \
+                              new roll."),
+                        1, "manual").await;
+                }
+                // Warrior of the Gods grows to 5 dice at level 6
+                if let Some(a) = existing.iter().find(|a| a.name == "Warrior of the Gods") {
+                    let _ = sqlx::query(
+                        "UPDATE abilities SET max_uses = 5, current_uses = 5 WHERE id = ?"
+                    )
+                    .bind(&a.id)
+                    .execute(pool)
+                    .await;
+                }
+            }
+            10 => {
+                if !has("Zealous Presence") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Zealous Presence",
+                        Some("Bonus Action: up to 10 other creatures of your choice within 60 ft \
+                              gain Advantage on attack rolls and saving throws until the start of \
+                              your next turn. Recharges on Long Rest, or expend a Rage use (no \
+                              action required) to restore immediately."),
+                        1, "long_rest").await;
+                }
+            }
+            12 => {
+                // Warrior of the Gods grows to 6 dice at level 12
+                if let Some(a) = existing.iter().find(|a| a.name == "Warrior of the Gods") {
+                    let _ = sqlx::query(
+                        "UPDATE abilities SET max_uses = 6, current_uses = 6 WHERE id = ?"
+                    )
+                    .bind(&a.id)
+                    .execute(pool)
+                    .await;
+                }
+            }
+            14 => {
+                if !has("Rage of the Gods") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Rage of the Gods",
+                        Some("When you activate your Rage, you can assume a divine warrior form \
+                              (lasts 1 minute or until 0 HP). Once per Long Rest. While in this form: \
+                              Flight — Fly Speed equal to your Speed, can hover. \
+                              Resistance — Resistance to Necrotic, Psychic, and Radiant damage. \
+                              Revivification — Reaction: when a creature within 30 ft would drop \
+                              to 0 HP, expend a Rage use to change its HP to your Barbarian level \
+                              instead."),
+                        1, "long_rest").await;
+                }
+            }
+            17 => {
+                // Warrior of the Gods grows to 7 dice at level 17
+                if let Some(a) = existing.iter().find(|a| a.name == "Warrior of the Gods") {
+                    let _ = sqlx::query(
+                        "UPDATE abilities SET max_uses = 7, current_uses = 7 WHERE id = ?"
+                    )
+                    .bind(&a.id)
+                    .execute(pool)
+                    .await;
+                }
+            }
+            _ => {}
+        },
+ 
         _ => {}
     }
 }

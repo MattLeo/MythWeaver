@@ -168,6 +168,8 @@ pub struct LevelUpResult {
     pub extra_attacks: i64,
     pub indomitable_max: i64,
     pub action_surge_uses: i64,
+    pub rage_uses: i64,
+    pub rage_damage: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

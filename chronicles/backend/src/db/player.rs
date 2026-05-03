@@ -245,32 +245,41 @@ pub async fn level_up_player(
     player: &Player,
 ) -> Result<LevelUpResult> {
     let new_level = player.level + 1;
-    let con_mod = Player::modifier(player.con);
+    let con_mod   = Player::modifier(player.con);
     let hp_gained = hp_gained_on_level(&player.class, con_mod);
     let new_max_hp = player.max_hp + hp_gained;
-    let new_prof = Player::proficiency_for_level(new_level);
-
-    let (extra_attacks, indomitable_max, action_surge_uses,
-         second_wind_uses, weapon_mastery_count) = if player.class == "Fighter" {
-        (
-            fighter_extra_attacks(new_level),
-            fighter_indomitable_max(new_level),
-            fighter_action_surge_uses(new_level),
-            fighter_second_wind_uses(new_level),
-            fighter_weapon_mastery_count(new_level),
-        )
-    } else {
-        (player.extra_attacks, player.indomitable_max, 0, 2, 0)
+    let new_prof  = Player::proficiency_for_level(new_level);
+ 
+    let (extra_attacks, indomitable_max, action_surge_uses, second_wind_uses, weapon_mastery_count) =
+        match player.class.as_str() {
+            "Fighter" => (
+                fighter_extra_attacks(new_level),
+                fighter_indomitable_max(new_level),
+                fighter_action_surge_uses(new_level),
+                fighter_second_wind_uses(new_level),
+                fighter_weapon_mastery_count(new_level),
+            ),
+            "Barbarian" => (
+                barbarian_extra_attacks(new_level),
+                0i64,
+                0i64,
+                0i64,
+                barbarian_weapon_mastery(new_level),
+            ),
+            _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
+        };
+ 
+    let rage_uses   = if player.class == "Barbarian" { barbarian_rage_uses(new_level)   } else { 0 };
+    let rage_damage = if player.class == "Barbarian" { barbarian_rage_damage(new_level) } else { 0 };
+ 
+    let asi_available = match player.class.as_str() {
+        "Fighter"   => matches!(new_level, 4 | 6 | 8 | 12 | 14 | 16),
+        "Barbarian" => matches!(new_level, 4 | 8 | 12 | 16 | 19),
+        _           => Player::is_asi_level(new_level),
     };
-
-    let asi_available = if player.class == "Fighter" {
-        matches!(new_level, 4 | 6 | 8 | 12 | 14 | 16)
-    } else {
-        Player::is_asi_level(new_level)
-    };
-
+ 
     let subclass_choice_required = new_level == 3 && player.subclass.is_none();
-
+ 
     sqlx::query(
         "UPDATE players SET
             level = ?, max_hp = ?, current_hp = ?,
@@ -289,7 +298,8 @@ pub async fn level_up_player(
     .bind(player_id)
     .execute(pool)
     .await?;
-
+ 
+    // ── Fighter-specific DB updates ───────────────────────────────────────────
     if player.class == "Fighter" {
         sqlx::query(
             "UPDATE abilities SET max_uses = ?, current_uses = ?
@@ -300,7 +310,7 @@ pub async fn level_up_player(
         .bind(player_id)
         .execute(pool)
         .await?;
-
+ 
         if action_surge_uses > 0 {
             sqlx::query(
                 "UPDATE abilities SET max_uses = ?, current_uses = ?
@@ -312,7 +322,7 @@ pub async fn level_up_player(
             .execute(pool)
             .await?;
         }
-
+ 
         if player.subclass.as_deref() == Some("Battle Master") {
             let (dice_count, die_size) = battle_master_superiority_dice(new_level);
             sqlx::query(
@@ -326,7 +336,7 @@ pub async fn level_up_player(
             .execute(pool)
             .await?;
         }
-
+ 
         if player.subclass.as_deref() == Some("Psi Warrior") {
             let (dice_count, die_size) = psi_warrior_energy_dice(new_level);
             sqlx::query(
@@ -340,27 +350,63 @@ pub async fn level_up_player(
             .execute(pool)
             .await?;
         }
-
+ 
         if player.subclass.as_deref() == Some("Champion") {
             let crit_range = match new_level {
                 3..=14 => 19,
                 15..=20 => 18,
                 _ => 20,
             };
+            sqlx::query("UPDATE players SET crit_range_min = ? WHERE id = ?")
+                .bind(crit_range)
+                .bind(player_id)
+                .execute(pool)
+                .await?;
+        }
+    }
+ 
+    // ── Barbarian-specific DB updates ─────────────────────────────────────────
+    if player.class == "Barbarian" {
+        let rage_desc = format!(
+            "Bonus Action: enter a Rage (lasts 1 min). While raging: Resistance to \
+             Bludgeoning/Piercing/Slashing; +{} damage on STR-based attacks and Unarmed \
+             Strikes; Advantage on STR checks and saves. Can't concentrate or cast spells. \
+             Regain 1 use on Short Rest, all on Long Rest.",
+            rage_damage
+        );
+        sqlx::query(
+            "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
+             WHERE owner_id = ? AND name = 'Rage'"
+        )
+        .bind(rage_uses)
+        .bind(rage_uses)
+        .bind(&rage_desc)
+        .bind(player_id)
+        .execute(pool)
+        .await?;
+ 
+        // Primal Champion (level 20): +4 STR and +4 CON, max 25 per PHB
+        if new_level == 20 {
             sqlx::query(
-                "UPDATE players SET crit_range_min = ? WHERE id = ?"
+                "UPDATE players SET
+                   str = MIN(str + 4, 25),
+                   con = MIN(con + 4, 25),
+                   updated_at = datetime('now')
+                 WHERE id = ?"
             )
-            .bind(crit_range)
             .bind(player_id)
             .execute(pool)
             .await?;
         }
     }
-
-    let new_features = fighter_features_at_level(
-        &player.class, new_level, player.subclass.as_deref()
-    );
-
+ 
+    // ── Feature list ──────────────────────────────────────────────────────────
+    let new_features = match player.class.as_str() {
+        "Fighter"   => fighter_features_at_level(&player.class, new_level, player.subclass.as_deref()),
+        "Barbarian" => barbarian_features_at_level(new_level, player.subclass.as_deref()),
+        _           => class_features_generic(&player.class, new_level),
+    };
+ 
     Ok(LevelUpResult {
         new_level,
         hp_gained,
@@ -375,6 +421,8 @@ pub async fn level_up_player(
         extra_attacks,
         indomitable_max,
         action_surge_uses,
+        rage_uses,
+        rage_damage,
     })
 }
 
@@ -469,6 +517,39 @@ fn stat_to_column(stat: &str) -> Result<&'static str> {
     }
 }
 
+// ─── Barbarian progression ────────────────────────────────────────────────────
+ 
+pub fn barbarian_rage_uses(level: i64) -> i64 {
+    // PHB table: 2/2/3/3/3/4/4/4/4/4/4/5/5/5/5/5/6/6/6/6
+    match level {
+        1..=2   => 2,
+        3..=5   => 3,
+        6..=11  => 4,
+        12..=16 => 5,
+        _       => 6,  // 17–20
+    }
+}
+ 
+pub fn barbarian_rage_damage(level: i64) -> i64 {
+    match level {
+        1..=8   => 2,
+        9..=15  => 3,
+        _       => 4,
+    }
+}
+ 
+pub fn barbarian_weapon_mastery(level: i64) -> i64 {
+    match level {
+        1..=3  => 2,
+        4..=9  => 3,
+        _      => 4,
+    }
+}
+ 
+pub fn barbarian_extra_attacks(level: i64) -> i64 {
+    if level >= 5 { 2 } else { 1 }
+}
+
 // ─── Feature tables ───────────────────────────────────────────────────────────
 
 fn fighter_features_at_level(class: &str, level: i64, subclass: Option<&str>) -> Vec<String> {
@@ -529,15 +610,90 @@ fn fighter_features_at_level(class: &str, level: i64, subclass: Option<&str>) ->
     features
 }
 
+fn barbarian_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Rage".to_string(), "Unarmored Defense".to_string(), "Weapon Mastery".to_string()]),
+        2  => features.extend(["Danger Sense".to_string(), "Reckless Attack".to_string()]),
+        3  => features.extend(["Barbarian Subclass".to_string(), "Primal Knowledge".to_string()]),
+        4  => features.push("Ability Score Improvement".to_string()),
+        5  => features.extend(["Extra Attack".to_string(), "Fast Movement".to_string()]),
+        6  => features.push("Subclass Feature".to_string()),
+        7  => features.extend(["Feral Instinct".to_string(), "Instinctive Pounce".to_string()]),
+        8  => features.push("Ability Score Improvement".to_string()),
+        9  => features.push("Brutal Strike".to_string()),
+        10 => features.push("Subclass Feature".to_string()),
+        11 => features.push("Relentless Rage".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        13 => features.push("Improved Brutal Strike".to_string()),
+        14 => features.push("Subclass Feature".to_string()),
+        15 => features.push("Persistent Rage".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        17 => features.push("Improved Brutal Strike (upgrade)".to_string()),
+        18 => features.push("Indomitable Might".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Primal Champion".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("Path of the Berserker") => match level {
+            3  => features.push("Frenzy".to_string()),
+            6  => features.push("Mindless Rage".to_string()),
+            10 => features.push("Retaliation".to_string()),
+            14 => features.push("Intimidating Presence".to_string()),
+            _  => {}
+        },
+        Some("Path of the Wild Heart") => match level {
+            3  => features.extend(["Animal Speaker".to_string(), "Rage of the Wilds".to_string()]),
+            6  => features.push("Aspect of the Wilds".to_string()),
+            10 => features.push("Nature Speaker".to_string()),
+            14 => features.push("Power of the Wilds".to_string()),
+            _  => {}
+        },
+        Some("Path of the World Tree") => match level {
+            3  => features.push("Vitality of the Tree".to_string()),
+            6  => features.push("Branches of the Tree".to_string()),
+            10 => features.push("Battering Roots".to_string()),
+            14 => features.push("Travel along the Tree".to_string()),
+            _  => {}
+        },
+        Some("Path of the Zealot") => match level {
+            3  => features.extend(["Divine Fury".to_string(), "Warrior of the Gods".to_string()]),
+            6  => features.push("Fanatical Focus".to_string()),
+            10 => features.push("Zealous Presence".to_string()),
+            14 => features.push("Rage of the Gods".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
+}
+
 fn class_features_generic(class: &str, level: i64) -> Vec<String> {
     let mut features = vec![];
     match class {
         "Barbarian" => match level {
-            2 => features.push("Reckless Attack, Danger Sense".to_string()),
-            3 => features.push("Primal Path".to_string()),
-            5 => features.push("Extra Attack, Fast Movement".to_string()),
-            7 => features.push("Feral Instinct".to_string()),
-            _ => {}
+            1  => features.extend(["Rage".to_string(), "Unarmored Defense".to_string(), "Weapon Mastery".to_string()]),
+            2  => features.extend(["Danger Sense".to_string(), "Reckless Attack".to_string()]),
+            3  => features.extend(["Barbarian Subclass".to_string(), "Primal Knowledge".to_string()]),
+            4  => features.push("Ability Score Improvement".to_string()),
+            5  => features.extend(["Extra Attack".to_string(), "Fast Movement".to_string()]),
+            6  => features.push("Subclass Feature".to_string()),
+            7  => features.extend(["Feral Instinct".to_string(), "Instinctive Pounce".to_string()]),
+            8  => features.push("Ability Score Improvement".to_string()),
+            9  => features.push("Brutal Strike".to_string()),
+            10 => features.push("Subclass Feature".to_string()),
+            11 => features.push("Relentless Rage".to_string()),
+            12 => features.push("Ability Score Improvement".to_string()),
+            13 => features.push("Improved Brutal Strike".to_string()),
+            14 => features.push("Subclass Feature".to_string()),
+            15 => features.push("Persistent Rage".to_string()),
+            16 => features.push("Ability Score Improvement".to_string()),
+            17 => features.push("Improved Brutal Strike (upgrade)".to_string()),
+            18 => features.push("Indomitable Might".to_string()),
+            19 => features.push("Epic Boon".to_string()),
+            20 => features.push("Primal Champion".to_string()),
+            _  => {}
         },
         "Rogue" => match level {
             2 => features.push("Cunning Action".to_string()),

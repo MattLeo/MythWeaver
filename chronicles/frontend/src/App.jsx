@@ -15,10 +15,16 @@ import SpellsModal from './components/SpellsModal'
 import {
   isLevelUpAvailable,
   getFighterFeatures,
+  getBarbarianFeatures,
   hitDieForClass,
   proficiencyForLevel,
   FIGHTER_ASI_LEVELS,
+  BARBARIAN_ASI_LEVELS,
+  barbarianRageUses,
+  barbarianRageDamage,
+  barbarianWeaponMastery,
 } from './constants.js'
+
 
 const PHASE = {
   TITLE: 'title',
@@ -157,14 +163,42 @@ export default function App() {
     const newMaxHp = p.max_hp + hpGained
     const newProf = proficiencyForLevel(newLevel)
     const isFighter = p.class === 'Fighter'
+    const isBarbarian = p.class === 'Barbarian'
 
     const secondWindUses = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
-    const weaponMasteryCount = isFighter ? (newLevel >= 16 ? 6 : newLevel >= 4 ? 4 : 3) : 0
-    const extraAttacks = isFighter ? (newLevel >= 20 ? 4 : newLevel >= 11 ? 3 : newLevel >= 5 ? 2 : 1) : 1
+
+    const weaponMasteryCount = isFighter
+      ? (newLevel >= 16 ? 6 : newLevel >= 4 ? 4 : 3)
+      : isBarbarian
+        ? barbarianWeaponMastery(newLevel) 
+        : 0
+
+    const extraAttacks = isFighter
+      ? (newLevel >= 20 ? 4 : newLevel >= 11 ? 3 : newLevel >= 5 ? 2 : 1)
+      : isBarbarian
+        ? (newLevel >= 5 ? 2 : 1)
+        : 1
+
     const actionSurgeUses = isFighter ? (newLevel >= 17 ? 2 : newLevel >= 2 ? 1 : 0) : 0
     const indomitableMax = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
-    const asiAvailable = isFighter ? FIGHTER_ASI_LEVELS.includes(newLevel) : [4, 8, 12, 16, 19].includes(newLevel)
+
+    const asiAvailable = isFighter
+      ? FIGHTER_ASI_LEVELS.includes(newLevel)
+      : isBarbarian
+        ? BARBARIAN_ASI_LEVELS.includes(newLevel)
+        : [4, 8, 12, 16, 19].includes(newLevel)
+
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
+
+    // Barbarian-specific scalars
+    const rageUses = isBarbarian ? barbarianRageUses(newLevel) : 0
+    const rageDamage = isBarbarian ? barbarianRageDamage(newLevel) : 0
+
+    const newFeatures = isFighter
+      ? getFighterFeatures(p, newLevel)
+      : isBarbarian
+        ? getBarbarianFeatures(p, newLevel)
+        : []
 
     return {
       new_level: newLevel,
@@ -173,14 +207,17 @@ export default function App() {
       new_proficiency_bonus: newProf,
       asi_available: asiAvailable,
       subclass_choice_required: subclassChoiceRequired,
-      new_features: getFighterFeatures(p, newLevel),
+      new_features: newFeatures,
       second_wind_uses: secondWindUses,
       weapon_mastery_count: weaponMasteryCount,
       extra_attacks: extraAttacks,
       action_surge_uses: actionSurgeUses,
       indomitable_max: indomitableMax,
+      rage_uses: rageUses,
+      rage_damage: rageDamage,
     }
   }
+
 
   const handleLevelUpComplete = async (choices) => {
     setShowLevelUp(false)
@@ -456,7 +493,7 @@ export default function App() {
           campaignId={campaign.id}
           player={player}
           onClose={() => setShowSpells(false)}
-          onCastInCombat={showCombat ? () => {} : null}
+          onCastInCombat={showCombat ? () => { } : null}
         />
       )}
 
