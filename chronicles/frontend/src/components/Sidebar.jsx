@@ -82,7 +82,7 @@ ${STYLES}
 export default function Sidebar({
   player, abilities, items, companions, campaignTime,
   isOpen, onNewAdventure, levelUpAvailable, onLevelUp,
-  onInventory, onAbilities
+  onInventory, onAbilities, onSpells
 }) {
   if (!player) return null
 
@@ -239,6 +239,12 @@ export default function Sidebar({
           >
             ✦ Abilities
           </button>
+          {player?.subclass === 'Eldritch Knight' && (
+            <button 
+              className="btn-ghost" 
+              onClick={onSpells}
+            >✦ Spells</button>
+          )}
         </div>
 
 

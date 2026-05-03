@@ -11,6 +11,7 @@ import CombatModal from './components/CombatModal.jsx'
 import ShopModal from './components/ShopModal.jsx'
 import InventoryModal from './components/InventoryModal.jsx'
 import AbilitiesModal from './components/AbilitiesModal.jsx'
+import SpellsModal from './components/SpellsModal'
 import {
   isLevelUpAvailable,
   getFighterFeatures,
@@ -51,6 +52,7 @@ export default function App() {
   const [showShop, setShowShop] = useState(false)
   const [showInventory, setShowInventory] = useState(false)
   const [showAbilities, setShowAbilities] = useState(false)
+  const [showSpells, setShowSpells] = useState(false)
 
 
   // ── Resume campaign ─────────────────────────────────────────────────────────
@@ -194,6 +196,15 @@ export default function App() {
       if (result.companions) setCompanions(result.companions)
       if (result.known_maneuvers) setKnownManeuvers(result.known_maneuvers)
       if (result.time) setCampaignTime(result.time)
+      for (const spellId of choices.ek_cantrips || []) {
+        await learnSpell(campaignId, spellId, 'cantrip')
+      }
+      for (const spellId of choices.ek_prepared || []) {
+        await learnSpell(campaignId, spellId, 'prepared')
+      }
+      if (choices.ek_cantrips || choices.ek_prepared) {
+        await seedEkSlots(campaignId)
+      }
 
       await refreshPlayerState(campaign.id)
 
@@ -372,6 +383,7 @@ export default function App() {
         onLevelUp={handleLevelUpClick}
         onInventory={() => setShowInventory(true)}
         onAbilities={() => setShowAbilities(true)}
+        onSpells={() => setShowSpells(true)}
       />
 
       <GameScreen
@@ -391,6 +403,7 @@ export default function App() {
 
       {showLevelUp && levelUpResult && (
         <LevelUpModal
+          campaignId={campaign.id}
           player={{ ...player, known_maneuvers: knownManeuvers }}
           levelUpResult={levelUpResult}
           onComplete={handleLevelUpComplete}
@@ -435,6 +448,15 @@ export default function App() {
           player={player}
           abilities={abilities}
           onClose={() => setShowAbilities(false)}
+        />
+      )}
+
+      {showSpells && (
+        <SpellsModal
+          campaignId={campaignId}
+          player={player}
+          onClose={() => setShowSpells(false)}
+          onCastInCombat={inCombat ? handleSpellCastInCombat : null}
         />
       )}
 

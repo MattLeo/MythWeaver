@@ -1,9 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { STYLES } from '../styles.js'
 import {
     FIGHTER_SUBCLASSES, ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
     FIGHTER_ASI_LEVELS, getFighterFeatures
 } from '../constants.js'
+import { searchSpells, learnSpell, seedEkSlots } from '../api/client.js'
+
+const MANEUVERS = ALL_MANEUVERS
 
 const MODAL_STYLES = `
 ${STYLES}
@@ -83,10 +86,14 @@ ${STYLES}
 .lu-subclass:hover, .lu-subclass.sel {
   border-color: var(--gold); background: rgba(200,150,42,.08);
 }
+.lu-subclass.ek-card:hover, .lu-subclass.ek-card.sel {
+  border-color: #b5a9f5; background: rgba(181,169,245,.08);
+}
 .lu-subclass-name {
   font-family: 'Cinzel', serif; font-size: .82rem;
   color: var(--goldl); margin-bottom: .3rem;
 }
+.lu-subclass.ek-card .lu-subclass-name { color: #b5a9f5; }
 .lu-subclass-desc { font-size: .74rem; color: var(--dim); line-height: 1.55; }
 .lu-maneuver-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: .4rem;
@@ -145,19 +152,108 @@ ${STYLES}
   border-color: var(--gold); color: var(--goldl);
   background: rgba(200,150,42,.07);
 }
+
+/* ── EK Spell Picker ── */
+.ek-tabs {
+  display: flex; gap: .4rem; margin-bottom: .8rem;
+}
+.ek-tab {
+  flex: 1; background: var(--elev); border: 1px solid var(--bord);
+  border-radius: 2px; padding: .35rem; cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: .62rem;
+  letter-spacing: .08em; color: var(--dim); transition: all .15s;
+  text-align: center;
+}
+.ek-tab.active {
+  border-color: #b5a9f5; color: #b5a9f5;
+  background: rgba(181,169,245,.08);
+}
+.ek-search-bar {
+  display: flex; align-items: center; gap: .5rem;
+  background: var(--elev); border: 1px solid var(--bord);
+  border-radius: 2px; padding: .4rem .6rem; margin-bottom: .6rem;
+}
+.ek-search-input {
+  background: none; border: none; outline: none;
+  color: var(--text); font-size: .8rem; flex: 1;
+  font-family: inherit;
+}
+.ek-spell-list {
+  display: flex; flex-direction: column; gap: .3rem;
+  max-height: 240px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #b5a9f5 var(--surf);
+}
+.ek-spell-row {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .4rem .6rem; border-radius: 2px;
+  border: 1px solid transparent;
+  cursor: pointer; transition: all .12s;
+}
+.ek-spell-row:hover { background: rgba(181,169,245,.06); border-color: rgba(181,169,245,.2); }
+.ek-spell-row.selected { background: rgba(181,169,245,.1); border-color: #b5a9f5; }
+.ek-spell-row.learned { opacity: .4; cursor: not-allowed; }
+.ek-spell-name { font-family: 'Cinzel', serif; font-size: .72rem; color: var(--text); flex: 1; }
+.ek-spell-school { font-size: .62rem; color: #b5a9f5; }
+.ek-spell-check { font-size: .72rem; color: #b5a9f5; }
+.ek-school-badge {
+  font-size: .58rem; padding: .1rem .35rem;
+  border-radius: 2px; background: rgba(181,169,245,.12);
+  color: #b5a9f5; border: 1px solid rgba(181,169,245,.2);
+  white-space: nowrap;
+}
+.ek-school-badge.recommended { background: rgba(126,200,227,.12); color: #7ec8e3; border-color: rgba(126,200,227,.2); }
+.ek-selected-pills {
+  display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .6rem;
+}
+.ek-pill {
+  display: flex; align-items: center; gap: .3rem;
+  background: rgba(181,169,245,.1); border: 1px solid rgba(181,169,245,.25);
+  border-radius: 10px; padding: .2rem .5rem;
+  font-size: .68rem; color: #b5a9f5;
+}
+.ek-pill-remove {
+  cursor: pointer; opacity: .6; font-size: .8rem; line-height: 1;
+}
+.ek-pill-remove:hover { opacity: 1; }
+.ek-hint {
+  font-size: .72rem; color: var(--dim); line-height: 1.6;
+  margin-bottom: .8rem; background: rgba(181,169,245,.04);
+  border: 1px solid rgba(181,169,245,.1); border-radius: 2px;
+  padding: .6rem .8rem;
+}
 `
+
+const SCHOOL_COLORS = {
+  abjuration: '#7ec8e3', evocation: '#f5a96a', divination: '#f5e87e',
+  conjuration: '#b5a9f5', enchantment: '#f5a9c8', illusion: '#a9f5d0',
+  necromancy: '#b0f5a9', transmutation: '#f5cfa9',
+}
 
 const mod = v => Math.floor((v - 10) / 2)
 const fmt = v => { const m = mod(v); return (m >= 0 ? '+' : '') + m }
 
 function maneuversToGainAtLevel(level) {
-    // Returns how many NEW maneuvers to pick at this level
     if (level === 3) return 3
     if (level === 7 || level === 10 || level === 15) return 2
     return 0
 }
 
-export default function LevelUpModal({ player, levelUpResult, onComplete, onClose }) {
+// EK: how many new cantrips to pick at this level
+function ekNewCantrips(level) {
+    if (level === 3) return 2   // initial
+    if (level === 10) return 1  // Eldritch Strike bonus cantrip
+    return 0
+}
+
+// EK: how many new prepared spells to pick at this level
+function ekNewPrepared(level) {
+    const table = { 3: 3, 4: 1, 7: 1, 10: 2, 13: 2, 16: 2, 19: 1 }
+    return table[level] || 0
+}
+
+const RECOMMENDED_SCHOOLS = ['abjuration', 'evocation']
+
+export default function LevelUpModal({ player, levelUpResult, campaignId, onComplete, onClose }) {
     const {
         new_level, hp_gained, new_max_hp, new_proficiency_bonus,
         asi_available, subclass_choice_required, new_features,
@@ -170,45 +266,95 @@ export default function LevelUpModal({ player, levelUpResult, onComplete, onClos
     const maneuversToGain = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
     const canReplaceManeuver = isBattleMaster && new_level >= 7
 
-    // Build steps
-    const steps = ['summary']
-    if (subclass_choice_required) steps.push('subclass')
-    if (asi_available) steps.push('asi')
-    if (maneuversToGain > 0) steps.push('maneuvers')
+    // EK detection
+    const [subclass, setSubclass] = useState(null)
+    const isEKChosen = subclass === 'Eldritch Knight'
+    const isExistingEK = player.subclass === 'Eldritch Knight'
+    const isEK = isEKChosen || isExistingEK
+    const needsEKSpells = isEK && (ekNewCantrips(new_level) > 0 || ekNewPrepared(new_level) > 0)
+
+    // Steps
+    const steps = useMemo(() => {
+        const s = ['summary']
+        if (subclass_choice_required) s.push('subclass')
+        if (asi_available) s.push('asi')
+        if (maneuversToGain > 0) s.push('maneuvers')
+        if (needsEKSpells) s.push('ek_spells')
+        return s
+    }, [subclass_choice_required, asi_available, maneuversToGain, needsEKSpells])
 
     const [stepIndex, setStepIndex] = useState(0)
-    const [subclass, setSubclass] = useState(null)
-    const [asiMode, setAsiMode] = useState('+2') // '+2' or '+1+1'
+    const [asiMode, setAsiMode] = useState('+2')
     const [asi1, setAsi1] = useState(null)
     const [asi2, setAsi2] = useState(null)
     const [selectedManeuvers, setSelectedManeuvers] = useState([])
     const [replacedManeuver, setReplacedManeuver] = useState(null)
     const [replaceMode, setReplaceMode] = useState(false)
 
+    // EK Spell state
+    const [ekSpellTab, setEkSpellTab] = useState('cantrip')
+    const [spellSearch, setSpellSearch] = useState('')
+    const [spellResults, setSpellResults] = useState([])
+    const [searching, setSearching] = useState(false)
+    const [selectedCantrips, setSelectedCantrips] = useState([]) // [{id, name, school}]
+    const [selectedPrepared, setSelectedPrepared] = useState([]) // [{id, name, school}]
+
+    const cantripSlots = ekNewCantrips(new_level)
+    const preparedSlots = ekNewPrepared(new_level)
+
+    // Spell search
+    useEffect(() => {
+        if (spellSearch.trim().length < 2) { setSpellResults([]); return }
+        const timer = setTimeout(async () => {
+            setSearching(true)
+            try {
+                const res = await searchSpells(campaignId, spellSearch, true)
+                setSpellResults(res.spells || [])
+            } catch (e) { /* ignore */ }
+            finally { setSearching(false) }
+        }, 300)
+        return () => clearTimeout(timer)
+    }, [spellSearch, campaignId])
+
+    // Reset search when tab changes
+    useEffect(() => { setSpellSearch(''); setSpellResults([]) }, [ekSpellTab])
+
     const currentStep = steps[stepIndex]
     const isLast = stepIndex === steps.length - 1
 
     const canAdvance = () => {
         if (currentStep === 'summary') return true
-        if (currentStep === 'subclass') return subclass !== null && subclass !== 'Eldritch Knight'
+        if (currentStep === 'subclass') return subclass !== null
         if (currentStep === 'asi') {
             if (asiMode === '+2') return asi1 !== null
             return asi1 !== null && asi2 !== null && asi1 !== asi2
         }
         if (currentStep === 'maneuvers') return selectedManeuvers.length === maneuversToGain
+        if (currentStep === 'ek_spells') {
+            const cantripOk = cantripSlots === 0 || selectedCantrips.length === cantripSlots
+            const preparedOk = preparedSlots === 0 || selectedPrepared.length === preparedSlots
+            return cantripOk && preparedOk
+        }
         return true
     }
 
-    const handleConfirm = () => {
+    const handleConfirm = async () => {
         const choices = {}
         if (subclass) choices.subclass = subclass
         if (asi_available && asi1) {
             choices.asi_stat1 = asi1
             if (asiMode === '+1+1' && asi2) choices.asi_stat2 = asi2
-            else choices.asi_stat2 = asi1 // same stat = +2
+            else choices.asi_stat2 = asi1
         }
         if (selectedManeuvers.length > 0) choices.new_maneuvers = selectedManeuvers
         if (replacedManeuver) choices.replaced_maneuver = replacedManeuver
+
+        // EK spell learning (do it here, then pass choices)
+        if (isEK && campaignId) {
+            choices.ek_cantrips = selectedCantrips.map(s => s.id)
+            choices.ek_prepared = selectedPrepared.map(s => s.id)
+        }
+
         onComplete(choices)
     }
 
@@ -220,6 +366,36 @@ export default function LevelUpModal({ player, levelUpResult, onComplete, onClos
         }
     }
 
+    // EK spell selection helpers
+    const isAlreadyKnown = (spellId) =>
+        (player.known_spells || []).some(s => s.spell_id === spellId)
+
+    const toggleCantrip = (spell) => {
+        if (selectedCantrips.some(s => s.id === spell.id)) {
+            setSelectedCantrips(s => s.filter(x => x.id !== spell.id))
+        } else if (selectedCantrips.length < cantripSlots) {
+            setSelectedCantrips(s => [...s, spell])
+        }
+    }
+
+    const togglePrepared = (spell) => {
+        if (selectedPrepared.some(s => s.id === spell.id)) {
+            setSelectedPrepared(s => s.filter(x => x.id !== spell.id))
+        } else if (selectedPrepared.length < preparedSlots) {
+            setSelectedPrepared(s => [...s, spell])
+        }
+    }
+
+    const activeList = ekSpellTab === 'cantrip' ? selectedCantrips : selectedPrepared
+    const activeToggle = ekSpellTab === 'cantrip' ? toggleCantrip : togglePrepared
+    const activeMax = ekSpellTab === 'cantrip' ? cantripSlots : preparedSlots
+    const activeResults = ekSpellTab === 'cantrip'
+        ? spellResults.filter(s => s.level === 0)
+        : spellResults.filter(s => s.level > 0 && s.level <= 2) // EK max slot level 2 at start
+
+    const isRecommended = (school) => RECOMMENDED_SCHOOLS.includes(school)
+
+    // ────────────────────────────────────────────────────────────────────────
     return (
         <>
             <style dangerouslySetInnerHTML={{ __html: MODAL_STYLES }} />
@@ -230,7 +406,7 @@ export default function LevelUpModal({ player, levelUpResult, onComplete, onClos
                         <div className="lu-title">Level {new_level}!</div>
                         <div className="lu-subtitle">
                             {player.name} — {player.race} {player.class}
-                            {player.subclass ? ` · ${player.subclass}` : ''}
+                            {(player.subclass || subclass) ? ` · ${player.subclass || subclass}` : ''}
                         </div>
                     </div>
 
@@ -277,6 +453,17 @@ export default function LevelUpModal({ player, levelUpResult, onComplete, onClos
                                                     <span className="lu-info-val">{indomitable_max}</span>
                                                 </div>
                                             )}
+                                            {isEK && (
+                                                <div className="lu-info-row">
+                                                    <span>Spell Slots</span>
+                                                    <span className="lu-info-val" style={{ color: '#b5a9f5' }}>
+                                                        {(() => {
+                                                            const ek = { 3:'2×L1', 4:'3×L1', 7:'4L1 2L2', 10:'4L1 3L2', 13:'4L1 3L2 2L3', 16:'4L1 3L2 3L3', 19:'4L1 3L2 3L3 1L4' }
+                                                            return ek[new_level] || 'Updated'
+                                                        })()}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </>
                                     )}
                                 </div>
@@ -304,15 +491,22 @@ export default function LevelUpModal({ player, levelUpResult, onComplete, onClos
                                     {FIGHTER_SUBCLASSES.map(sc => (
                                         <div
                                             key={sc.name}
-                                            className={`lu-subclass${subclass === sc.name ? ' sel' : ''}${sc.name === 'Eldritch Knight' ? ' disabled' : ''}`}
-                                            onClick={() => sc.name !== 'Eldritch Knight' && setSubclass(sc.name)}
-                                            style={sc.name === 'Eldritch Knight' ? { opacity: .4, cursor: 'not-allowed' } : {}}
+                                            className={`lu-subclass${sc.name === 'Eldritch Knight' ? ' ek-card' : ''}${subclass === sc.name ? ' sel' : ''}`}
+                                            onClick={() => setSubclass(sc.name)}
                                         >
-                                            <div className="lu-subclass-name">{sc.name}</div>
+                                            <div className="lu-subclass-name">
+                                                {sc.name === 'Eldritch Knight' ? '✦ ' : ''}{sc.name}
+                                            </div>
                                             <div className="lu-subclass-desc">{sc.desc}</div>
                                         </div>
                                     ))}
                                 </div>
+                                {subclass === 'Eldritch Knight' && (
+                                    <div style={{ fontSize: '.72rem', color: '#b5a9f5', marginTop: '.6rem', lineHeight: 1.6 }}>
+                                        You'll choose 2 cantrips and 3 prepared spells (abjuration and evocation recommended) in the next step.
+                                        You gain spell slots that refresh on a Long Rest, and can bond up to 2 weapons via War Bond.
+                                    </div>
+                                )}
                             </>
                         )}
 
@@ -447,6 +641,122 @@ export default function LevelUpModal({ player, levelUpResult, onComplete, onClos
                                             </div>
                                         )
                                     })}
+                                </div>
+                            </>
+                        )}
+
+                        {/* ── EK Spells ── */}
+                        {currentStep === 'ek_spells' && (
+                            <>
+                                <div className="lu-step-label">
+                                    {new_level === 3 ? 'Eldritch Knight — Choose Starting Spells' : 'Learn New Spells'}
+                                </div>
+
+                                <div className="ek-hint">
+                                    As an Eldritch Knight, you specialize in <span style={{ color: '#7ec8e3' }}>Abjuration</span> and{' '}
+                                    <span style={{ color: '#f5a96a' }}>Evocation</span> spells.
+                                    You may choose one spell from any school at levels 3, 8, 14, and 20.
+                                    All other spells must be from those two schools.
+                                </div>
+
+                                {/* Tabs */}
+                                <div className="ek-tabs">
+                                    {cantripSlots > 0 && (
+                                        <button
+                                            className={`ek-tab${ekSpellTab === 'cantrip' ? ' active' : ''}`}
+                                            onClick={() => setEkSpellTab('cantrip')}
+                                        >
+                                            Cantrips ({selectedCantrips.length}/{cantripSlots})
+                                        </button>
+                                    )}
+                                    {preparedSlots > 0 && (
+                                        <button
+                                            className={`ek-tab${ekSpellTab === 'prepared' ? ' active' : ''}`}
+                                            onClick={() => setEkSpellTab('prepared')}
+                                        >
+                                            Spells ({selectedPrepared.length}/{preparedSlots})
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Search */}
+                                <div className="ek-search-bar">
+                                    <span style={{ opacity: .5 }}>🔍</span>
+                                    <input
+                                        className="ek-search-input"
+                                        placeholder={ekSpellTab === 'cantrip' ? 'Search cantrips...' : 'Search spells...'}
+                                        value={spellSearch}
+                                        onChange={e => setSpellSearch(e.target.value)}
+                                        autoFocus
+                                    />
+                                    {searching && <span style={{ fontSize: '.7rem', color: 'var(--dim)' }}>...</span>}
+                                </div>
+
+                                {/* Spell results */}
+                                <div className="ek-spell-list">
+                                    {spellSearch.trim().length < 2 && activeList.length === 0 && (
+                                        <div style={{ padding: '.5rem', fontSize: '.72rem', color: 'var(--dim)', textAlign: 'center' }}>
+                                            Type at least 2 characters to search
+                                        </div>
+                                    )}
+                                    {activeResults.map(spell => {
+                                        const known = isAlreadyKnown(spell.id)
+                                        const isSel = activeList.some(s => s.id === spell.id)
+                                        const atMax = activeList.length >= activeMax && !isSel
+                                        const recommended = isRecommended(spell.school)
+                                        return (
+                                            <div
+                                                key={spell.id}
+                                                className={`ek-spell-row${isSel ? ' selected' : ''}${known || atMax ? ' learned' : ''}`}
+                                                onClick={() => !known && !atMax && activeToggle({ id: spell.id, name: spell.name, school: spell.school })}
+                                            >
+                                                <span style={{ fontSize: '.9rem', color: SCHOOL_COLORS[spell.school] || '#b5a9f5' }}>
+                                                    {spell.level === 0 ? '⊕' : spell.level}
+                                                </span>
+                                                <span className="ek-spell-name">{spell.name}</span>
+                                                <span className={`ek-school-badge${recommended ? ' recommended' : ''}`}>
+                                                    {spell.school}
+                                                </span>
+                                                {isSel && <span className="ek-spell-check">✓</span>}
+                                                {known && <span style={{ fontSize: '.6rem', color: 'var(--dim)' }}>known</span>}
+                                            </div>
+                                        )
+                                    })}
+                                    {spellSearch.trim().length >= 2 && !searching && activeResults.length === 0 && (
+                                        <div style={{ padding: '.5rem', fontSize: '.72rem', color: 'var(--dim)', textAlign: 'center' }}>
+                                            No {ekSpellTab === 'cantrip' ? 'cantrips' : 'spells'} found
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Selected pills */}
+                                {activeList.length > 0 && (
+                                    <div className="ek-selected-pills">
+                                        {activeList.map(s => (
+                                            <div key={s.id} className="ek-pill">
+                                                <span>{s.name}</span>
+                                                <span
+                                                    className="ek-pill-remove"
+                                                    onClick={() => activeToggle(s)}
+                                                >×</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Progress summary */}
+                                <div style={{ marginTop: '.8rem', fontSize: '.72rem', color: 'var(--dim)' }}>
+                                    {cantripSlots > 0 && (
+                                        <span style={{ color: selectedCantrips.length === cantripSlots ? '#7ef5a9' : 'var(--dim)' }}>
+                                            Cantrips: {selectedCantrips.length}/{cantripSlots}
+                                        </span>
+                                    )}
+                                    {cantripSlots > 0 && preparedSlots > 0 && ' · '}
+                                    {preparedSlots > 0 && (
+                                        <span style={{ color: selectedPrepared.length === preparedSlots ? '#7ef5a9' : 'var(--dim)' }}>
+                                            Spells: {selectedPrepared.length}/{preparedSlots}
+                                        </span>
+                                    )}
                                 </div>
                             </>
                         )}
