@@ -1502,8 +1502,26 @@ async fn seed_class_abilities(
             ("Favored Enemy", Some("Advantage on Survival to track, INT checks to recall info about favored enemy type."), 1, "manual"),
         ],
         "Monk" => vec![
-            ("Ki", Some("Ki points for Flurry of Blows, Patient Defense, Step of the Wind, and other monk features."), 1, "short_rest"),
-            ("Unarmored Defense", Some("AC = 10 + DEX mod + WIS mod when not wearing armor or a shield."), 1, "manual"),
+            ("Focus Points",
+             Some("You have 0 Focus Points at level 1 (gained at level 2, equals Monk level). \
+                   Restore on Short or Long Rest. Focus save DC = 8 + WIS mod + Prof Bonus. \
+                   At level 2 — Flurry of Blows (1 FP): two Unarmed Strikes as Bonus Action. \
+                   Patient Defense (1 FP): Disengage + Dodge as Bonus Action. \
+                   Step of the Wind (1 FP): Disengage + Dash as Bonus Action, jump distance doubled."),
+             0, "short_rest"),  // 0 uses until level 2; updated on first level-up
+            ("Unarmored Defense",
+             Some("While not wearing armor or wielding a Shield, your base AC equals \
+                   10 + DEX modifier + WIS modifier."),
+             1, "manual"),
+            ("Martial Arts",
+             Some("While unarmed or wielding only Monk weapons (Simple Melee or Light Martial Melee) \
+                   and not wearing armor or a Shield: \
+                   Bonus Unarmed Strike — make one Unarmed Strike as a Bonus Action. \
+                   Martial Arts Die — roll 1d6 in place of Unarmed Strike or Monk weapon damage \
+                   (d6 at L1-4, d8 at L5-10, d10 at L11-16, d12 at L17-20). \
+                   Dexterous Attacks — use DEX for attack and damage rolls of Unarmed Strikes \
+                   and Monk weapons; use DEX for Grapple/Shove DCs."),
+             1, "manual"),
         ],
         "Bard" => vec![
             ("Bardic Inspiration",
@@ -1555,6 +1573,7 @@ async fn seed_level_up_abilities_direct(
         "Bard"      => seed_level_up_abilities_bard(pool, campaign_id, player_id, new_level, subclass).await,
         "Cleric"    => seed_level_up_abilities_cleric(pool, campaign_id, player_id, new_level, subclass).await,
         "Druid"     => seed_level_up_abilities_druid(pool, campaign_id, player_id, new_level, subclass).await,
+        "Monk"      => seed_level_up_abilities_monk(pool, campaign_id, player_id, new_level, subclass).await,
         _           => {}
     }
 }
@@ -3200,6 +3219,446 @@ async fn seed_level_up_abilities_druid(
                         "Full of Stars",
                         Some("While in your Starry Form, you become partially incorporeal, giving \
                               you Resistance to Bludgeoning, Piercing, and Slashing damage."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_monk(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    let player = match player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let wis_mod = crate::models::Player::modifier(player.wis).max(1);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            // Focus Points unlock at level 2 — updated already by level_up_player.
+            // Seed the three core Focus Point features as reference abilities.
+            if !has("Uncanny Metabolism") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Uncanny Metabolism",
+                    Some("When you roll Initiative, you can regain all expended Focus Points. \
+                          When you do so, roll your Martial Arts die and regain that many HP \
+                          plus your Monk level. Once per Long Rest."),
+                    1, "long_rest").await;
+            }
+        }
+        3 => {
+            if !has("Deflect Attacks") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Deflect Attacks",
+                    Some("Reaction: when an attack hits you dealing Bludgeoning, Piercing, or \
+                          Slashing damage, reduce the total damage by 1d10 + DEX modifier + \
+                          Monk level. If you reduce the damage to 0, expend 1 Focus Point to \
+                          redirect the force: target a creature within 5 ft (melee attack) or \
+                          60 ft (ranged attack) — DEX save or take damage equal to 2× Martial \
+                          Arts die + DEX modifier of the same type. \
+                          Level 13 (Deflect Energy): also works against any damage type."),
+                    1, "per_turn").await;
+            }
+        }
+        4 => {
+            if !has("Slow Fall") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Slow Fall",
+                    Some("Reaction: when you fall, reduce any falling damage you take by an \
+                          amount equal to five times your Monk level."),
+                    1, "per_turn").await;
+            }
+        }
+        5 => {
+            if !has("Stunning Strike") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Stunning Strike",
+                    Some("Once per turn when you hit a creature with a Monk weapon or Unarmed \
+                          Strike, expend 1 Focus Point to attempt a stunning strike. Target makes \
+                          a CON save (DC = 8 + WIS mod + Prof Bonus). \
+                          Fail: Stunned until start of your next turn. \
+                          Success: Speed halved until start of your next turn, and the next attack \
+                          against the target before then has Advantage."),
+                    1, "per_turn").await;
+            }
+        }
+        6 => {
+            if !has("Empowered Strikes") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Empowered Strikes",
+                    Some("Whenever you deal damage with your Unarmed Strike, you can choose to \
+                          deal Force damage instead of its normal damage type."),
+                    1, "manual").await;
+            }
+        }
+        7 => {
+            if !has("Evasion") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Evasion",
+                    Some("When subjected to an effect that allows a DEX save to take half damage, \
+                          you take no damage on a success and only half damage on a failure. \
+                          Unavailable if Incapacitated."),
+                    1, "manual").await;
+            }
+        }
+        9 => {
+            if !has("Acrobatic Movement") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Acrobatic Movement",
+                    Some("While not wearing armor or wielding a Shield, you can move along \
+                          vertical surfaces and across liquids on your turn without falling \
+                          during the movement."),
+                    1, "manual").await;
+            }
+        }
+        10 => {
+            if !has("Heightened Focus") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Heightened Focus",
+                    Some("Your Focus Point abilities improve: \
+                          Flurry of Blows (1 FP): now makes THREE Unarmed Strikes instead of two. \
+                          Patient Defense (1 FP): also gain Temporary HP equal to 2× Martial Arts die roll. \
+                          Step of the Wind (1 FP): also choose a willing Large-or-smaller creature \
+                            within 5 ft — it moves with you until end of your turn without \
+                            provoking Opportunity Attacks."),
+                    1, "manual").await;
+            }
+            if !has("Self-Restoration") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Self-Restoration",
+                    Some("At the end of each of your turns, you can remove one of the following \
+                          conditions from yourself: Charmed, Frightened, or Poisoned. \
+                          In addition, forgoing food and drink doesn't give you levels of Exhaustion."),
+                    1, "manual").await;
+            }
+        }
+        13 => {
+            // Deflect Energy: update Deflect Attacks description
+            if let Some(a) = existing.iter().find(|a| a.name == "Deflect Attacks") {
+                let _ = sqlx::query("UPDATE abilities SET description = ? WHERE id = ?")
+                    .bind("Deflect Attacks: Reaction to reduce Bludgeoning/Piercing/Slashing \
+                           attack damage by 1d10 + DEX mod + Monk level. Reduce to 0 to redirect \
+                           the damage (1 FP): DEX save or 2× Martial Arts die + DEX mod of same type. \
+                           Deflect Energy (level 13): now works against any damage type, not just \
+                           Bludgeoning/Piercing/Slashing.")
+                    .bind(&a.id)
+                    .execute(pool)
+                    .await;
+            }
+        }
+        14 => {
+            if !has("Disciplined Survivor") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Disciplined Survivor",
+                    Some("You gain proficiency in all saving throws. \
+                          Additionally, whenever you make a saving throw and fail, you can expend \
+                          1 Focus Point to reroll it, and you must use the new roll."),
+                    1, "manual").await;
+            }
+        }
+        15 => {
+            if !has("Perfect Focus") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Perfect Focus",
+                    Some("When you roll Initiative and don't use Uncanny Metabolism, you regain \
+                          expended Focus Points until you have 4 if you currently have 3 or fewer."),
+                    1, "manual").await;
+            }
+        }
+        18 => {
+            if !has("Superior Defense") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Superior Defense",
+                    Some("At the start of your turn, you can expend 3 Focus Points to bolster \
+                          yourself against harm for 1 minute (or until Incapacitated). During \
+                          that time, you have Resistance to all damage except Force damage."),
+                    1, "manual").await;
+            }
+        }
+        20 => {
+            if !has("Body and Mind") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Body and Mind",
+                    Some("Your Dexterity and Wisdom scores each increase by 4, to a maximum of 25. \
+                          (Applied automatically to your stats.)"),
+                    1, "manual").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Warrior of Mercy") => match new_level {
+            3 => {
+                if !has("Hand of Harm") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Hand of Harm",
+                        Some("Once per turn when you hit a creature with an Unarmed Strike and \
+                              deal damage, expend 1 Focus Point to deal extra Necrotic damage \
+                              equal to one roll of your Martial Arts die + WIS modifier. \
+                              Level 6 (Physician's Touch): also give the target the Poisoned \
+                              condition until end of your next turn."),
+                        1, "per_turn").await;
+                }
+                if !has("Hand of Healing") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Hand of Healing",
+                        Some("Magic action: expend 1 Focus Point to touch a creature and restore \
+                              HP equal to one roll of your Martial Arts die + WIS modifier. \
+                              When you use Flurry of Blows, you can replace one Unarmed Strike \
+                              with a use of this feature at no Focus Point cost. \
+                              Level 6 (Physician's Touch): also end one of Blinded, Deafened, \
+                              Paralyzed, Poisoned, or Stunned on the creature you heal."),
+                        1, "manual").await;
+                }
+                if !has("Implements of Mercy") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Implements of Mercy",
+                        Some("You gain proficiency in the Insight and Medicine skills and \
+                              proficiency with the Herbalism Kit."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Physician's Touch") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Physician's Touch",
+                        Some("Hand of Harm improved: when used, also give the target the Poisoned \
+                              condition until end of your next turn. \
+                              Hand of Healing improved: when used, also end one condition on the \
+                              creature: Blinded, Deafened, Paralyzed, Poisoned, or Stunned. \
+                              (These upgrades are included in the existing Hand of Harm and \
+                              Hand of Healing ability descriptions.)"),
+                        1, "manual").await;
+                }
+            }
+            11 => {
+                if !has("Flurry of Healing and Harm") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Flurry of Healing and Harm",
+                        Some("When you use Flurry of Blows, you can replace each Unarmed Strike \
+                              with a Hand of Healing use at no Focus Point cost. \
+                              Additionally, when you make an Unarmed Strike with Flurry of Blows \
+                              and deal damage, you can use Hand of Harm with that strike at no \
+                              Focus Point cost (still only once per turn). \
+                              These benefits can be used a total number of times equal to your WIS \
+                              modifier (min 1). Recharges on Long Rest."),
+                        wis_mod, "long_rest").await;
+                }
+            }
+            17 => {
+                if !has("Hand of Ultimate Mercy") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Hand of Ultimate Mercy",
+                        Some("Magic action: touch the corpse of a creature that died within the \
+                              past 24 hours and expend 5 Focus Points. The creature returns to \
+                              life with HP equal to 4d10 + WIS modifier. The following conditions \
+                              are removed on revival: Blinded, Deafened, Paralyzed, Poisoned, \
+                              and Stunned. Once per Long Rest."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Warrior of Shadow") => match new_level {
+            3 => {
+                if !has("Shadow Arts") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Shadow Arts",
+                        Some("You gain three benefits from the Shadowfell: \
+                              Darkness (1 FP): cast Darkness without components. You can see within \
+                                the spell's area. While it persists, move its area to within 60 ft \
+                                of you at the start of each of your turns. \
+                              Darkvision: 60-foot Darkvision (or +60 ft if you already have it). \
+                              Shadowy Figments: you know the Minor Illusion spell. WIS is your \
+                                spellcasting ability for it."),
+                        1, "manual").await;
+                }
+                // Learn Minor Illusion as always-prepared
+                if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Minor Illusion").await {
+                    if let Some(id) = spell["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "cantrip", "warrior_of_shadow").await;
+                    }
+                }
+            }
+            6 => {
+                if !has("Shadow Step") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Shadow Step",
+                        Some("Bonus Action: while entirely within Dim Light or Darkness, teleport \
+                              up to 60 ft to an unoccupied space you can see that is also in Dim \
+                              Light or Darkness. You then have Advantage on the next melee attack \
+                              you make before the end of the current turn. \
+                              Level 11 (Improved Shadow Step): expend 1 FP to remove the \
+                              Dim Light/Darkness requirement for one use; also make an Unarmed \
+                              Strike immediately after teleporting."),
+                        1, "per_turn").await;
+                }
+            }
+            11 => {
+                if !has("Improved Shadow Step") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Improved Shadow Step",
+                        Some("When you use Shadow Step, you can expend 1 Focus Point to remove \
+                              the requirement that you must start and end in Dim Light or Darkness. \
+                              As part of this Bonus Action, you can make one Unarmed Strike \
+                              immediately after teleporting."),
+                        1, "manual").await;
+                }
+            }
+            17 => {
+                if !has("Cloak of Shadows") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Cloak of Shadows",
+                        Some("Magic action: while entirely in Dim Light or Darkness, expend 3 \
+                              Focus Points to shroud yourself with shadows for 1 minute (until \
+                              Incapacitated or until you end your turn in Bright Light). \
+                              While shrouded: Invisibility — you have the Invisible condition. \
+                              Partially Incorporeal — move through occupied spaces as if Difficult \
+                                Terrain (shunted to last unoccupied space if you end turn there). \
+                              Shadow Flurry — use Flurry of Blows without expending Focus Points."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Warrior of the Elements") => match new_level {
+            3 => {
+                if !has("Elemental Attunement") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Elemental Attunement",
+                        Some("At the start of your turn, expend 1 Focus Point to imbue yourself \
+                              with elemental energy for 10 minutes (until Incapacitated). \
+                              Reach: Unarmed Strike reach is 10 feet greater than normal. \
+                              Elemental Strikes: Unarmed Strikes deal Acid, Cold, Fire, Lightning, \
+                                or Thunder (your choice each hit) instead of normal damage. \
+                                On a hit, force a STR save — fail: move the target up to 10 ft \
+                                toward or away from you. \
+                              Level 11 (Stride of Elements): also gain Fly Speed and Swim Speed \
+                                equal to your Speed while active. \
+                              Level 17 (Elemental Epitome): also gain damage Resistance (one type, \
+                                changeable each turn), Destructive Stride on Step of Wind, and \
+                                extra Martial Arts die damage on Unarmed Strikes."),
+                        1, "manual").await;
+                }
+                if !has("Manipulate Elements") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Manipulate Elements",
+                        Some("You know the Elementalism spell. WIS is your spellcasting ability."),
+                        1, "manual").await;
+                }
+                // Learn Elementalism cantrip
+                if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Elementalism").await {
+                    if let Some(id) = spell["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "cantrip", "warrior_of_elements").await;
+                    }
+                }
+            }
+            6 => {
+                if !has("Elemental Burst") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Elemental Burst",
+                        Some("Magic action: expend 2 Focus Points to cause elemental energy to \
+                              burst in a 20-foot Sphere centered on a point within 120 ft of you. \
+                              Choose a damage type: Acid, Cold, Fire, Lightning, or Thunder. \
+                              Each creature in the Sphere makes a DEX save (DC = Focus save DC): \
+                              Fail: damage equal to three rolls of Martial Arts die. \
+                              Success: half damage."),
+                        1, "manual").await;
+                }
+            }
+            11 => {
+                if !has("Stride of the Elements") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Stride of the Elements",
+                        Some("While your Elemental Attunement is active, you also gain a Fly Speed \
+                              and a Swim Speed equal to your Speed."),
+                        1, "manual").await;
+                }
+            }
+            17 => {
+                if !has("Elemental Epitome") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Elemental Epitome",
+                        Some("While Elemental Attunement is active, you also gain: \
+                              Damage Resistance: Resistance to one damage type (Acid, Cold, Fire, \
+                                Lightning, or Thunder) — change your choice at the start of each turn. \
+                              Destructive Stride: when you use Step of the Wind, Speed increases by \
+                                20 ft until end of turn; creatures of your choice take Martial Arts \
+                                die damage when you enter a space within 5 ft of them (once per turn). \
+                              Empowered Strikes: once per turn, deal extra Martial Arts die damage \
+                                of the same type when you hit with an Unarmed Strike."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Warrior of the Open Hand") => match new_level {
+            3 => {
+                if !has("Open Hand Technique") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Open Hand Technique",
+                        Some("Whenever you hit a creature with an attack granted by Flurry of \
+                              Blows, you can impose one of the following effects on that target: \
+                              Addle — the target can't make Opportunity Attacks until start of \
+                                its next turn. \
+                              Push — STR save or be pushed up to 15 ft away from you. \
+                              Topple — DEX save or have the Prone condition."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Wholeness of Body") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Wholeness of Body",
+                        Some("Bonus Action: roll your Martial Arts die and regain HP equal to the \
+                              roll + WIS modifier (minimum 1 HP regained). \
+                              Uses = WIS modifier (min 1). Recharges on Long Rest."),
+                        wis_mod, "long_rest").await;
+                }
+            }
+            11 => {
+                if !has("Fleet Step") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Fleet Step",
+                        Some("When you take a Bonus Action other than Step of the Wind, you can \
+                              also use Step of the Wind immediately after that Bonus Action."),
+                        1, "manual").await;
+                }
+            }
+            17 => {
+                if !has("Quivering Palm") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Quivering Palm",
+                        Some("When you hit a creature with an Unarmed Strike, expend 4 Focus \
+                              Points to start imperceptible lethal vibrations. They last for a \
+                              number of days equal to your Monk level and are harmless unless \
+                              you choose to end them. \
+                              To end them: take an Action while on the same plane as the target \
+                              (or forgo one attack on your turn). Target makes a CON save: \
+                              Fail: 10d12 Force damage. Success: half. \
+                              You can have only one creature under this effect at a time. \
+                              You can end the vibrations harmlessly (no action required)."),
                         1, "manual").await;
                 }
             }

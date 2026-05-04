@@ -261,17 +261,14 @@ pub async fn level_up_player(
                 fighter_second_wind_uses(new_level),
                 fighter_weapon_mastery_count(new_level),
             ),
-            "Barbarian" => (
-                barbarian_extra_attacks(new_level),
-                0i64, 0i64, 0i64,
-                barbarian_weapon_mastery(new_level),
-            ),
+            "Barbarian" => (barbarian_extra_attacks(new_level), 0i64, 0i64, 0i64, barbarian_weapon_mastery(new_level)),
             "Bard" => {
-                let valor_extra = if player.subclass.as_deref() == Some("College of Valor") && new_level >= 6 { 2 } else { 1 };
-                (valor_extra, 0i64, 0i64, 0i64, 0i64)
+                let valor = if player.subclass.as_deref() == Some("College of Valor") && new_level >= 6 { 2 } else { 1 };
+                (valor, 0i64, 0i64, 0i64, 0i64)
             },
             "Cleric" => (1i64, 0i64, 0i64, 0i64, 0i64),
             "Druid"  => (1i64, 0i64, 0i64, 0i64, 0i64),
+            "Monk"   => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
             _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
         };
  
@@ -288,9 +285,13 @@ pub async fn level_up_player(
     let cleric_cantrips_n        = if player.class == "Cleric" { cleric_cantrips(new_level) } else { 0 };
     let cleric_prepared_spells_n = if player.class == "Cleric" { cleric_prepared_spells(new_level) } else { 0 };
  
-    let wild_shape_uses_n      = if player.class == "Druid" { druid_wild_shape_uses(new_level) } else { 0 };
-    let druid_cantrips_n       = if player.class == "Druid" { druid_cantrips(new_level) } else { 0 };
-    let druid_prepared_n       = if player.class == "Druid" { druid_prepared_spells(new_level) } else { 0 };
+    let wild_shape_uses_n  = if player.class == "Druid" { druid_wild_shape_uses(new_level) } else { 0 };
+    let druid_cantrips_n   = if player.class == "Druid" { druid_cantrips(new_level) } else { 0 };
+    let druid_prepared_n   = if player.class == "Druid" { druid_prepared_spells(new_level) } else { 0 };
+ 
+    let focus_points_n      = if player.class == "Monk" { monk_focus_points(new_level) } else { 0 };
+    let martial_arts_die_n  = if player.class == "Monk" { monk_martial_arts_die(new_level) } else { 0 };
+    let unarmored_movement_n = if player.class == "Monk" { monk_unarmored_movement(new_level) } else { 0 };
  
     // ── ASI availability ─────────────────────────────────────────────────────
     let asi_available = match player.class.as_str() {
@@ -299,6 +300,7 @@ pub async fn level_up_player(
         "Bard"      => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Cleric"    => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Druid"     => matches!(new_level, 4 | 8 | 12 | 16 | 19),
+        "Monk"      => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         _           => Player::is_asi_level(new_level),
     };
  
@@ -317,8 +319,7 @@ pub async fn level_up_player(
     .bind((player.current_hp + hp_gained).min(new_max_hp))
     .bind(new_prof).bind(extra_attacks)
     .bind(indomitable_max).bind(indomitable_max)
-    .bind(player_id)
-    .execute(pool).await?;
+    .bind(player_id).execute(pool).await?;
  
     // ── Fighter ───────────────────────────────────────────────────────────────
     if player.class == "Fighter" {
@@ -329,33 +330,32 @@ pub async fn level_up_player(
                 .bind(action_surge_uses).bind(action_surge_uses).bind(player_id).execute(pool).await?;
         }
         if player.subclass.as_deref() == Some("Battle Master") {
-            let (dice_count, die_size) = battle_master_superiority_dice(new_level);
+            let (dc, ds) = battle_master_superiority_dice(new_level);
             sqlx::query("UPDATE superiority_dice SET max_dice = ?, current_dice = ?, die_size = ? WHERE player_id = ? AND pool_name = 'Battle Master'")
-                .bind(dice_count).bind(dice_count).bind(die_size).bind(player_id).execute(pool).await?;
+                .bind(dc).bind(dc).bind(ds).bind(player_id).execute(pool).await?;
         }
         if player.subclass.as_deref() == Some("Psi Warrior") {
-            let (dice_count, die_size) = psi_warrior_energy_dice(new_level);
+            let (dc, ds) = psi_warrior_energy_dice(new_level);
             sqlx::query("UPDATE superiority_dice SET max_dice = ?, current_dice = ?, die_size = ? WHERE player_id = ? AND pool_name = 'Psi Warrior'")
-                .bind(dice_count).bind(dice_count).bind(die_size).bind(player_id).execute(pool).await?;
+                .bind(dc).bind(dc).bind(ds).bind(player_id).execute(pool).await?;
         }
         if player.subclass.as_deref() == Some("Champion") {
-            let crit_range = match new_level { 3..=14 => 19, 15..=20 => 18, _ => 20 };
+            let crit = match new_level { 3..=14 => 19, 15..=20 => 18, _ => 20 };
             sqlx::query("UPDATE players SET crit_range_min = ? WHERE id = ?")
-                .bind(crit_range).bind(player_id).execute(pool).await?;
+                .bind(crit).bind(player_id).execute(pool).await?;
         }
     }
  
     // ── Barbarian ─────────────────────────────────────────────────────────────
     if player.class == "Barbarian" {
-        let rage_desc = format!(
+        let rd = format!(
             "Bonus Action: enter a Rage (lasts 1 min). While raging: Resistance to \
-             Bludgeoning/Piercing/Slashing; +{} damage on STR-based attacks and Unarmed \
-             Strikes; Advantage on STR checks and saves. Can't concentrate or cast spells. \
-             Regain 1 use on Short Rest, all on Long Rest.",
-            rage_damage
+             Bludgeoning/Piercing/Slashing; +{} damage on STR-based attacks; Advantage on \
+             STR checks and saves. Can't concentrate or cast spells. \
+             Regain 1 use on Short Rest, all on Long Rest.", rage_damage
         );
         sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ?, description = ? WHERE owner_id = ? AND name = 'Rage'")
-            .bind(rage_uses).bind(rage_uses).bind(&rage_desc).bind(player_id).execute(pool).await?;
+            .bind(rage_uses).bind(rage_uses).bind(&rd).bind(player_id).execute(pool).await?;
         if new_level == 20 {
             sqlx::query("UPDATE players SET str = MIN(str + 4, 25), con = MIN(con + 4, 25), updated_at = datetime('now') WHERE id = ?")
                 .bind(player_id).execute(pool).await?;
@@ -364,15 +364,13 @@ pub async fn level_up_player(
  
     // ── Bard ──────────────────────────────────────────────────────────────────
     if player.class == "Bard" {
-        let insp_desc = format!(
+        let bd = format!(
             "Bonus Action: grant one Bardic Inspiration die (d{}) to a creature within 60 ft. \
-             They can add it to one failed D20 Test within the next hour. \
              Refreshes on Long Rest{}.",
-            bardic_die,
-            if new_level >= 5 { " (Short Rest from level 5)" } else { "" }
+            bardic_die, if new_level >= 5 { " (Short Rest from level 5)" } else { "" }
         );
         sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ?, description = ? WHERE owner_id = ? AND name = 'Bardic Inspiration'")
-            .bind(bardic_inspiration_uses).bind(bardic_inspiration_uses).bind(&insp_desc).bind(player_id).execute(pool).await?;
+            .bind(bardic_inspiration_uses).bind(bardic_inspiration_uses).bind(&bd).bind(player_id).execute(pool).await?;
         if new_level == 5 {
             sqlx::query("UPDATE abilities SET refresh_type = 'short_rest' WHERE owner_id = ? AND name = 'Bardic Inspiration'")
                 .bind(player_id).execute(pool).await?;
@@ -383,65 +381,74 @@ pub async fn level_up_player(
     if player.class == "Cleric" {
         if matches!(new_level, 2 | 6 | 18) {
             let dice = match new_level { 2..=6 => 1, 7..=12 => 2, 13..=17 => 3, _ => 4 };
-            let cd_desc = format!(
-                "Use Channel Divinity {} time{} per rest (regain 1 on Short Rest, all on Long Rest). \
-                 Effects: Divine Spark (heal or deal {}d8+WIS Necrotic/Radiant to a target within 30 ft; \
-                 CON save for half on damage), Turn Undead (WIS save or Frightened+Incapacitated 1 min), \
-                 plus your domain feature.",
-                channel_divinity_uses,
-                if channel_divinity_uses == 1 { "" } else { "s" },
-                dice
+            let cd = format!(
+                "Channel Divinity {} time{} per rest (Short Rest: regain 1; Long Rest: all). \
+                 Divine Spark: heal or deal {}d8+WIS Necrotic/Radiant. \
+                 Turn Undead: WIS save or Frightened+Incapacitated. Plus domain feature.",
+                channel_divinity_uses, if channel_divinity_uses == 1 { "" } else { "s" }, dice
             );
             sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ?, description = ? WHERE owner_id = ? AND name = 'Channel Divinity'")
-                .bind(channel_divinity_uses).bind(channel_divinity_uses).bind(&cd_desc).bind(player_id).execute(pool).await?;
+                .bind(channel_divinity_uses).bind(channel_divinity_uses).bind(&cd).bind(player_id).execute(pool).await?;
         }
         if matches!(new_level, 7 | 13) {
             let dice = if new_level >= 13 { 3 } else { 2 };
-            let cd_desc = format!(
-                "Use Channel Divinity {} times per rest (regain 1 on Short Rest, all on Long Rest). \
-                 Effects: Divine Spark (heal or deal {}d8+WIS), Turn Undead (WIS save or Frightened+Incapacitated), \
-                 plus your domain feature.",
+            let cd = format!(
+                "Channel Divinity {} times per rest. Divine Spark: heal or deal {}d8+WIS. Turn Undead. Plus domain feature.",
                 channel_divinity_uses, dice
             );
             sqlx::query("UPDATE abilities SET description = ? WHERE owner_id = ? AND name = 'Channel Divinity'")
-                .bind(&cd_desc).bind(player_id).execute(pool).await?;
+                .bind(&cd).bind(player_id).execute(pool).await?;
         }
     }
  
     // ── Druid ─────────────────────────────────────────────────────────────────
     if player.class == "Druid" {
-        // Update Wild Shape uses at milestone levels
-        if matches!(new_level, 2 | 6 | 17) {
-            let ws_desc = format!(
+        if matches!(new_level, 2 | 4 | 6 | 8 | 17) {
+            let cr = match new_level { 2..=3 => "1/4", 4..=7 => "1/2", _ => "1" };
+            let fly = if new_level >= 8 { ", Fly Speed available" } else { "" };
+            let ws = format!(
                 "Bonus Action: shapeshift into a known Beast form (CR {} max{}). \
-                 You retain your HP, hit dice, INT/WIS/CHA, class features, languages, feats, \
-                 and skill/saving throw proficiencies. Gain Temporary HP equal to your Druid level \
-                 when shifting. You can't cast spells while shifted. \
+                 Retain HP, hit dice, INT/WIS/CHA, class features. \
+                 Gain Temp HP = Druid level when shifting. Can't cast spells while shifted. \
                  Uses: {}. Regain 1 on Short Rest, all on Long Rest.",
-                match new_level {
-                    2..=3  => "1/4",
-                    4..=7  => "1/2",
-                    _      => "1",
-                },
-                if new_level >= 8 { ", Fly Speed available" } else { "" },
-                wild_shape_uses_n
+                cr, fly, wild_shape_uses_n
             );
             sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ?, description = ? WHERE owner_id = ? AND name = 'Wild Shape'")
-                .bind(wild_shape_uses_n).bind(wild_shape_uses_n).bind(&ws_desc).bind(player_id).execute(pool).await?;
+                .bind(wild_shape_uses_n).bind(wild_shape_uses_n).bind(&ws).bind(player_id).execute(pool).await?;
         }
-        // Update Wild Shape CR description at levels 4 and 8
-        if matches!(new_level, 4 | 8) {
-            let ws_desc = format!(
-                "Bonus Action: shapeshift into a known Beast form (CR {} max{}). \
-                 Retain HP, hit dice, INT/WIS/CHA, class features, languages, feats, proficiencies. \
-                 Gain Temporary HP equal to Druid level when shifting. Can't cast spells while shifted. \
-                 Uses: {}. Regain 1 on Short Rest, all on Long Rest.",
-                if new_level >= 8 { "1" } else { "1/2" },
-                if new_level >= 8 { ", Fly Speed available" } else { "" },
-                wild_shape_uses_n
+    }
+ 
+    // ── Monk ──────────────────────────────────────────────────────────────────
+    if player.class == "Monk" {
+        // Update Focus Points on every level (equals monk level from level 2)
+        if new_level >= 2 {
+            let fp_desc = format!(
+                "You have {} Focus Points, which restore on a Short or Long Rest. \
+                 Focus save DC = 8 + WIS modifier + Proficiency Bonus. \
+                 Flurry of Blows (1 FP): two Unarmed Strikes as Bonus Action. \
+                 Patient Defense (1 FP): Disengage + Dodge as Bonus Action. \
+                 Step of the Wind (1 FP): Disengage + Dash as Bonus Action, jump distance doubled. \
+                 Martial Arts die: d{}.",
+                focus_points_n, martial_arts_die_n
             );
-            sqlx::query("UPDATE abilities SET description = ? WHERE owner_id = ? AND name = 'Wild Shape'")
-                .bind(&ws_desc).bind(player_id).execute(pool).await?;
+            sqlx::query(
+                "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
+                 WHERE owner_id = ? AND name = 'Focus Points'"
+            )
+            .bind(focus_points_n).bind(focus_points_n).bind(&fp_desc).bind(player_id)
+            .execute(pool).await?;
+        }
+ 
+        // Body and Mind at level 20: +4 DEX and +4 WIS, max 25
+        if new_level == 20 {
+            sqlx::query(
+                "UPDATE players SET
+                   dex = MIN(dex + 4, 25),
+                   wis = MIN(wis + 4, 25),
+                   updated_at = datetime('now')
+                 WHERE id = ?"
+            )
+            .bind(player_id).execute(pool).await?;
         }
     }
  
@@ -452,6 +459,7 @@ pub async fn level_up_player(
         "Bard"      => bard_features_at_level(new_level, player.subclass.as_deref()),
         "Cleric"    => cleric_features_at_level(new_level, player.subclass.as_deref()),
         "Druid"     => druid_features_at_level(new_level, player.subclass.as_deref()),
+        "Monk"      => monk_features_at_level(new_level, player.subclass.as_deref()),
         _           => class_features_generic(&player.class, new_level),
     };
  
@@ -459,28 +467,17 @@ pub async fn level_up_player(
     let spell_slots = match player.class.as_str() {
         "Bard"   => bard_spell_slots(new_level),
         "Cleric" => cleric_spell_slots(new_level),
-        "Druid"  => cleric_spell_slots(new_level), // identical full-caster table
+        "Druid"  => cleric_spell_slots(new_level),
         _        => eldritch_knight_spell_slots(player.subclass.as_deref(), new_level),
     };
  
     Ok(LevelUpResult {
-        new_level,
-        hp_gained,
-        new_max_hp,
+        new_level, hp_gained, new_max_hp,
         new_proficiency_bonus: new_prof,
-        asi_available,
-        subclass_choice_required,
-        new_features,
-        spell_slots,
-        second_wind_uses,
-        weapon_mastery_count,
-        extra_attacks,
-        indomitable_max,
-        action_surge_uses,
-        rage_uses,
-        rage_damage,
-        bardic_die,
-        bardic_inspiration_uses,
+        asi_available, subclass_choice_required, new_features, spell_slots,
+        second_wind_uses, weapon_mastery_count, extra_attacks, indomitable_max, action_surge_uses,
+        rage_uses, rage_damage,
+        bardic_die, bardic_inspiration_uses,
         bard_prepared_spells: bard_prepared_spells_n,
         bard_cantrips: bard_cantrips_n,
         channel_divinity_uses,
@@ -489,6 +486,9 @@ pub async fn level_up_player(
         wild_shape_uses: wild_shape_uses_n,
         druid_cantrips: druid_cantrips_n,
         druid_prepared_spells: druid_prepared_n,
+        focus_points: focus_points_n,
+        martial_arts_die: martial_arts_die_n,
+        unarmored_movement: unarmored_movement_n,
     })
 }
 
@@ -1100,6 +1100,29 @@ fn class_features_generic(class: &str, level: i64) -> Vec<String> {
             20 => features.push("Archdruid".to_string()),
             _  => {}
         },
+        "Monk" => match level {
+            1  => features.extend(["Martial Arts".to_string(), "Unarmored Defense".to_string()]),
+            2  => features.extend(["Monk's Focus".to_string(), "Unarmored Movement".to_string(), "Uncanny Metabolism".to_string()]),
+            3  => features.extend(["Deflect Attacks".to_string(), "Monk Subclass".to_string()]),
+            4  => features.extend(["Ability Score Improvement".to_string(), "Slow Fall".to_string()]),
+            5  => features.extend(["Extra Attack".to_string(), "Stunning Strike".to_string()]),
+            6  => features.extend(["Empowered Strikes".to_string(), "Subclass Feature".to_string()]),
+            7  => features.push("Evasion".to_string()),
+            8  => features.push("Ability Score Improvement".to_string()),
+            9  => features.push("Acrobatic Movement".to_string()),
+            10 => features.extend(["Heightened Focus".to_string(), "Self-Restoration".to_string()]),
+            11 => features.push("Subclass Feature".to_string()),
+            12 => features.push("Ability Score Improvement".to_string()),
+            13 => features.push("Deflect Energy".to_string()),
+            14 => features.push("Disciplined Survivor".to_string()),
+            15 => features.push("Perfect Focus".to_string()),
+            16 => features.push("Ability Score Improvement".to_string()),
+            17 => features.push("Subclass Feature".to_string()),
+            18 => features.push("Superior Defense".to_string()),
+            19 => features.push("Epic Boon".to_string()),
+            20 => features.push("Body and Mind".to_string()),
+            _  => {}
+        },
         _ => {}
     }
     features
@@ -1197,4 +1220,92 @@ ub async fn seed_full_caster_spell_slots(
     }
  
     Ok(())
+}
+
+// ─── Monk progression ─────────────────────────────────────────────────────────
+ 
+/// Focus Points equal Monk level (0 at level 1, gained at level 2).
+pub fn monk_focus_points(level: i64) -> i64 {
+    if level >= 2 { level } else { 0 }
+}
+ 
+/// Martial Arts die by level.
+pub fn monk_martial_arts_die(level: i64) -> i64 {
+    match level {
+        1..=4   => 6,
+        5..=10  => 8,
+        11..=16 => 10,
+        _       => 12,
+    }
+}
+ 
+/// Unarmored Movement speed bonus in feet.
+pub fn monk_unarmored_movement(level: i64) -> i64 {
+    match level {
+        1     => 0,
+        2..=5  => 10,
+        6..=9  => 15,
+        10..=13 => 20,
+        14..=17 => 25,
+        _      => 30,
+    }
+}
+ 
+fn monk_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Martial Arts".to_string(), "Unarmored Defense".to_string()]),
+        2  => features.extend(["Monk's Focus".to_string(), "Unarmored Movement".to_string(), "Uncanny Metabolism".to_string()]),
+        3  => features.extend(["Deflect Attacks".to_string(), "Monk Subclass".to_string()]),
+        4  => features.extend(["Ability Score Improvement".to_string(), "Slow Fall".to_string()]),
+        5  => features.extend(["Extra Attack".to_string(), "Stunning Strike".to_string()]),
+        6  => features.extend(["Empowered Strikes".to_string(), "Subclass Feature".to_string()]),
+        7  => features.push("Evasion".to_string()),
+        8  => features.push("Ability Score Improvement".to_string()),
+        9  => features.push("Acrobatic Movement".to_string()),
+        10 => features.extend(["Heightened Focus".to_string(), "Self-Restoration".to_string()]),
+        11 => features.push("Subclass Feature".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        13 => features.push("Deflect Energy".to_string()),
+        14 => features.push("Disciplined Survivor".to_string()),
+        15 => features.push("Perfect Focus".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        17 => features.push("Subclass Feature".to_string()),
+        18 => features.push("Superior Defense".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Body and Mind".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("Warrior of Mercy") => match level {
+            3  => features.extend(["Hand of Harm".to_string(), "Hand of Healing".to_string(), "Implements of Mercy".to_string()]),
+            6  => features.push("Physician's Touch".to_string()),
+            11 => features.push("Flurry of Healing and Harm".to_string()),
+            17 => features.push("Hand of Ultimate Mercy".to_string()),
+            _  => {}
+        },
+        Some("Warrior of Shadow") => match level {
+            3  => features.push("Shadow Arts".to_string()),
+            6  => features.push("Shadow Step".to_string()),
+            11 => features.push("Improved Shadow Step".to_string()),
+            17 => features.push("Cloak of Shadows".to_string()),
+            _  => {}
+        },
+        Some("Warrior of the Elements") => match level {
+            3  => features.extend(["Elemental Attunement".to_string(), "Manipulate Elements".to_string()]),
+            6  => features.push("Elemental Burst".to_string()),
+            11 => features.push("Stride of the Elements".to_string()),
+            17 => features.push("Elemental Epitome".to_string()),
+            _  => {}
+        },
+        Some("Warrior of the Open Hand") => match level {
+            3  => features.push("Open Hand Technique".to_string()),
+            6  => features.push("Wholeness of Body".to_string()),
+            11 => features.push("Fleet Step".to_string()),
+            17 => features.push("Quivering Palm".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
 }

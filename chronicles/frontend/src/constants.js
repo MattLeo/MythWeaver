@@ -889,6 +889,110 @@ export function druidSlotSummary(level) {
     return (slots[level] || slots[20]).filter(s => s > 0).join('/')
 }
 
+// ─── Monk ─────────────────────────────────────────────────────────────────────
+ 
+export const MONK_SUBCLASSES = [
+    {
+        name: 'Warrior of Mercy',
+        desc: 'Manipulate forces of life and death. Hand of Harm deals necrotic damage, Hand of Healing restores HP, and Hand of Ultimate Mercy revives the dead.',
+    },
+    {
+        name: 'Warrior of Shadow',
+        desc: 'Harness shadow power for stealth and subterfuge. Cast Darkness, teleport between shadows, and eventually shroud yourself in invisibility.',
+    },
+    {
+        name: 'Warrior of the Elements',
+        desc: 'Wield strikes and bursts of elemental power. Imbue attacks with acid, cold, fire, lightning, or thunder, and burst with elemental energy.',
+    },
+    {
+        name: 'Warrior of the Open Hand',
+        desc: 'Master unarmed combat techniques. Addle, push, or topple foes with Flurry of Blows, and set up lethal vibrations with Quivering Palm.',
+    },
+]
+ 
+export const MONK_BASE_FEATURES = {
+    1:  ['Martial Arts', 'Unarmored Defense'],
+    2:  ["Monk's Focus", 'Unarmored Movement', 'Uncanny Metabolism'],
+    3:  ['Deflect Attacks', 'Monk Subclass'],
+    4:  ['Ability Score Improvement', 'Slow Fall'],
+    5:  ['Extra Attack', 'Stunning Strike'],
+    6:  ['Empowered Strikes', 'Subclass Feature'],
+    7:  ['Evasion'],
+    8:  ['Ability Score Improvement'],
+    9:  ['Acrobatic Movement'],
+    10: ['Heightened Focus', 'Self-Restoration'],
+    11: ['Subclass Feature'],
+    12: ['Ability Score Improvement'],
+    13: ['Deflect Energy'],
+    14: ['Disciplined Survivor'],
+    15: ['Perfect Focus'],
+    16: ['Ability Score Improvement'],
+    17: ['Subclass Feature'],
+    18: ['Superior Defense'],
+    19: ['Epic Boon'],
+    20: ['Body and Mind'],
+}
+ 
+export const MONK_SUBCLASS_FEATURES = {
+    'Warrior of Mercy': {
+        3:  ['Hand of Harm', 'Hand of Healing', 'Implements of Mercy'],
+        6:  ["Physician's Touch"],
+        11: ['Flurry of Healing and Harm'],
+        17: ['Hand of Ultimate Mercy'],
+    },
+    'Warrior of Shadow': {
+        3:  ['Shadow Arts'],
+        6:  ['Shadow Step'],
+        11: ['Improved Shadow Step'],
+        17: ['Cloak of Shadows'],
+    },
+    'Warrior of the Elements': {
+        3:  ['Elemental Attunement', 'Manipulate Elements'],
+        6:  ['Elemental Burst'],
+        11: ['Stride of the Elements'],
+        17: ['Elemental Epitome'],
+    },
+    'Warrior of the Open Hand': {
+        3:  ['Open Hand Technique'],
+        6:  ['Wholeness of Body'],
+        11: ['Fleet Step'],
+        17: ['Quivering Palm'],
+    },
+}
+ 
+export const MONK_ASI_LEVELS = [4, 8, 12, 16, 19]
+ 
+export function getMonkFeatures(player, newLevel) {
+    const base = MONK_BASE_FEATURES[newLevel] || []
+    const subFeatures = player.subclass
+        ? (MONK_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+// Focus Points = Monk level (0 at level 1, gained at level 2)
+export function monkFocusPoints(level) {
+    return level >= 2 ? level : 0
+}
+ 
+// Martial Arts die by level
+export function monkMartialArtsDie(level) {
+    if (level >= 17) return 12
+    if (level >= 11) return 10
+    if (level >= 5)  return 8
+    return 6
+}
+ 
+// Unarmored Movement bonus in feet
+export function monkUnarmoredMovement(level) {
+    if (level < 2)   return 0
+    if (level < 6)   return 10
+    if (level < 10)  return 15
+    if (level < 14)  return 20
+    if (level < 18)  return 25
+    return 30
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function xpToNextLevel(level) {

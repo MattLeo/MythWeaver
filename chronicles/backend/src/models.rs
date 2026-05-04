@@ -185,8 +185,11 @@ pub struct LevelUpResult {
     pub wild_shape_uses: i64,
     pub druid_cantrips: i64,
     pub druid_prepared_spells: i64,
+    // Monk
+    pub focus_points: i64,
+    pub martial_arts_die: i64,
+    pub unarmored_movement: i64,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpellSlots {

@@ -13,14 +13,41 @@ import InventoryModal from './components/InventoryModal.jsx'
 import AbilitiesModal from './components/AbilitiesModal.jsx'
 import SpellsModal from './components/SpellsModal'
 import {
-  isLevelUpAvailable, getFighterFeatures, getBarbarianFeatures, getBardFeatures, getClericFeatures,
-  getDruidFeatures, hitDieForClass, proficiencyForLevel, FIGHTER_ASI_LEVELS, BARBARIAN_ASI_LEVELS,
-  BARD_ASI_LEVELS, CLERIC_ASI_LEVELS, DRUID_ASI_LEVELS, barbarianRageUses, barbarianRageDamage,
-  barbarianWeaponMastery, bardInspirationDie, bardPreparedSpells, bardCantrips, bardSlotSummary,
-  clericChannelDivinityUses, clericCantrips, clericPreparedSpells, clericSlotSummary, druidWildShapeUses,
-  druidWildShapeCR, druidCantrips, druidPreparedSpells, druidSlotSummary,
+  isLevelUpAvailable,
+  getFighterFeatures,
+  getBarbarianFeatures,
+  getBardFeatures,
+  getClericFeatures,
+  getDruidFeatures,
+  getMonkFeatures,
+  hitDieForClass,
+  proficiencyForLevel,
+  FIGHTER_ASI_LEVELS,
+  BARBARIAN_ASI_LEVELS,
+  BARD_ASI_LEVELS,
+  CLERIC_ASI_LEVELS,
+  DRUID_ASI_LEVELS,
+  MONK_ASI_LEVELS,
+  barbarianRageUses,
+  barbarianRageDamage,
+  barbarianWeaponMastery,
+  bardInspirationDie,
+  bardPreparedSpells,
+  bardCantrips,
+  bardSlotSummary,
+  clericChannelDivinityUses,
+  clericCantrips,
+  clericPreparedSpells,
+  clericSlotSummary,
+  druidWildShapeUses,
+  druidWildShapeCR,
+  druidCantrips,
+  druidPreparedSpells,
+  druidSlotSummary,
+  monkFocusPoints,
+  monkMartialArtsDie,
+  monkUnarmoredMovement,
 } from './constants.js'
-
 
 const PHASE = {
   TITLE: 'title',
@@ -165,6 +192,7 @@ export default function App() {
     const isBard      = p.class === 'Bard'
     const isCleric    = p.class === 'Cleric'
     const isDruid     = p.class === 'Druid'
+    const isMonk      = p.class === 'Monk'
  
     // ── Fighter scalars ─────────────────────────────────────────────────────
     const secondWindUses  = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
@@ -181,7 +209,9 @@ export default function App() {
       ? (newLevel >= 20 ? 4 : newLevel >= 11 ? 3 : newLevel >= 5 ? 2 : 1)
       : isBarbarian
         ? (newLevel >= 5 ? 2 : 1)
-        : (isBard && p.subclass === 'College of Valor' && newLevel >= 6) ? 2 : 1
+        : (isBard && p.subclass === 'College of Valor' && newLevel >= 6) ? 2
+        : (isMonk && newLevel >= 5) ? 2
+        : 1
  
     // ── Barbarian scalars ───────────────────────────────────────────────────
     const rageUses   = isBarbarian ? barbarianRageUses(newLevel)   : 0
@@ -201,11 +231,16 @@ export default function App() {
     const clericSlots           = isCleric ? clericSlotSummary(newLevel)         : ''
  
     // ── Druid scalars ───────────────────────────────────────────────────────
-    const wildShapeUses         = isDruid ? druidWildShapeUses(newLevel)   : 0
-    const wildShapeCR           = isDruid ? druidWildShapeCR(newLevel)     : ''
-    const druidKnownCantrips    = isDruid ? druidCantrips(newLevel)        : 0
-    const druidPrepared         = isDruid ? druidPreparedSpells(newLevel)  : 0
-    const druidSlots            = isDruid ? druidSlotSummary(newLevel)     : ''
+    const wildShapeUses      = isDruid ? druidWildShapeUses(newLevel)   : 0
+    const wildShapeCR        = isDruid ? druidWildShapeCR(newLevel)     : ''
+    const druidKnownCantrips = isDruid ? druidCantrips(newLevel)        : 0
+    const druidPrepared      = isDruid ? druidPreparedSpells(newLevel)  : 0
+    const druidSlots         = isDruid ? druidSlotSummary(newLevel)     : ''
+ 
+    // ── Monk scalars ────────────────────────────────────────────────────────
+    const focusPoints          = isMonk ? monkFocusPoints(newLevel)        : 0
+    const martialArtsDie       = isMonk ? monkMartialArtsDie(newLevel)     : 0
+    const unarmoredMovement    = isMonk ? monkUnarmoredMovement(newLevel)   : 0
  
     // ── ASI ─────────────────────────────────────────────────────────────────
     const asiAvailable = isFighter
@@ -218,7 +253,9 @@ export default function App() {
             ? CLERIC_ASI_LEVELS.includes(newLevel)
             : isDruid
               ? DRUID_ASI_LEVELS.includes(newLevel)
-              : [4, 8, 12, 16, 19].includes(newLevel)
+              : isMonk
+                ? MONK_ASI_LEVELS.includes(newLevel)
+                : [4, 8, 12, 16, 19].includes(newLevel)
  
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
  
@@ -233,7 +270,9 @@ export default function App() {
             ? getClericFeatures(p, newLevel)
             : isDruid
               ? getDruidFeatures(p, newLevel)
-              : []
+              : isMonk
+                ? getMonkFeatures(p, newLevel)
+                : []
  
     return {
       new_level:              newLevel,
@@ -269,9 +308,12 @@ export default function App() {
       druid_cantrips:         druidKnownCantrips,
       druid_prepared_spells:  druidPrepared,
       druid_slot_summary:     druidSlots,
+      // Monk
+      focus_points:           focusPoints,
+      martial_arts_die:       martialArtsDie,
+      unarmored_movement:     unarmoredMovement,
     }
   }
-
 
   const handleLevelUpComplete = async (choices) => {
     setShowLevelUp(false)
