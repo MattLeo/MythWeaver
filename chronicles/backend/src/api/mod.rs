@@ -64,6 +64,19 @@ pub async fn create_campaign(
         }
     }
 
+    if p.class == "Bard" {
+        let cha_mod = Player::modifier(p.cha).max(1);
+        let _ = sqlx::query(
+            "UPDATE abilities SET max_uses = ?, current_uses = ?
+             WHERE owner_id = ? AND name = 'Bardic Inspiration'"
+        )
+        .bind(cha_mod)
+        .bind(cha_mod)
+        .bind(&p.id)
+        .execute(pool)
+        .await;
+    }
+
     if let Err(e) = player::seed_background_proficiencies(
         pool, &camp.id, &p.id,
         &req.player_background_skill_1,
@@ -1279,8 +1292,16 @@ async fn seed_class_abilities(
             ("Unarmored Defense", Some("AC = 10 + DEX mod + WIS mod when not wearing armor or a shield."), 1, "manual"),
         ],
         "Bard" => vec![
-            ("Bardic Inspiration", Some("Bonus Action: grant a creature a d6 inspiration die to add to one ability check, attack roll, or saving throw."), 3, "short_rest"),
-            ("Spell Slots (1st)", Some("1st level spell slots."), 2, "long_rest"),
+            ("Bardic Inspiration",
+             Some("Bonus Action: grant a Bardic Inspiration die (d6) to a creature within 60 ft \
+                   that can see or hear you. They can add it to one failed D20 Test in the next hour. \
+                   One die per creature at a time. Uses = CHA modifier (min 1). Refreshes on Long Rest."),
+             1,   // actual max set from CHA mod after creation; seeded at 1 as placeholder
+             "long_rest"),
+            ("Jack of All Trades",
+             Some("Add half your Proficiency Bonus (round down) to any ability check that uses a \
+                   skill in which you lack proficiency and that doesn't already use your Proficiency Bonus."),
+             1, "manual"),
         ],
         "Warlock" => vec![
             ("Spell Slots", Some("Warlock spell slots — recover on short rest."), 1, "short_rest"),
@@ -1317,6 +1338,7 @@ async fn seed_level_up_abilities_direct(
     match class {
         "Fighter"   => seed_level_up_abilities_fighter(pool, campaign_id, player_id, new_level, subclass).await,
         "Barbarian" => seed_level_up_abilities_barbarian(pool, campaign_id, player_id, new_level, subclass).await,
+        "Bard"      => seed_level_up_abilities_bard(pool, campaign_id, player_id, new_level, subclass).await,
         _           => {}
     }
 }
@@ -1909,6 +1931,275 @@ async fn seed_level_up_abilities_barbarian(
                     .bind(&a.id)
                     .execute(pool)
                     .await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_bard(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            if !has("Expertise") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Expertise",
+                    Some("Choose 2 skill proficiencies you have (Performance and Persuasion recommended). \
+                          You gain Expertise in those skills, doubling your Proficiency Bonus for checks \
+                          with them. At level 9 you gain Expertise in 2 more skills."),
+                    1, "manual").await;
+            }
+        }
+        5 => {
+            if !has("Font of Inspiration") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Font of Inspiration",
+                    Some("You now regain all expended uses of Bardic Inspiration when you finish a \
+                          Short or Long Rest. In addition, you can expend a spell slot (no action \
+                          required) to regain one expended use of Bardic Inspiration."),
+                    1, "manual").await;
+            }
+            // Already handled in level_up_player: Bardic Inspiration refresh_type → short_rest
+        }
+        7 => {
+            if !has("Countercharm") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Countercharm",
+                    Some("Reaction: when you or a creature within 30 ft fails a saving throw against \
+                          an effect that applies the Charmed or Frightened condition, cause the save \
+                          to be rerolled with Advantage."),
+                    1, "per_turn").await;
+            }
+        }
+        10 => {
+            if !has("Magical Secrets") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Magical Secrets",
+                    Some("Whenever the Prepared Spells number increases, you can choose any new \
+                          prepared spells from the Bard, Cleric, Druid, or Wizard spell lists — \
+                          they count as Bard spells. You can also replace prepared spells with \
+                          spells from those lists."),
+                    1, "manual").await;
+            }
+        }
+        18 => {
+            if !has("Superior Inspiration") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Superior Inspiration",
+                    Some("When you roll Initiative, if you have fewer than 2 uses of Bardic \
+                          Inspiration remaining, you regain uses until you have 2."),
+                    1, "manual").await;
+            }
+        }
+        20 => {
+            if !has("Words of Creation") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Words of Creation",
+                    Some("You always have Power Word Heal and Power Word Kill prepared. When you cast \
+                          either spell, you can target a second creature within 10 ft of the first target."),
+                    1, "manual").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("College of Dance") => match new_level {
+            3 => {
+                if !has("Dazzling Footwork") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Dazzling Footwork",
+                        Some("While not wearing armor or wielding a Shield: \
+                              Unarmored Defense — AC = 10 + DEX mod + CHA mod. \
+                              Dance Virtuoso — Advantage on CHA (Performance) checks involving dancing. \
+                              Agile Strikes — when you expend a Bardic Inspiration die as part of an \
+                                action/bonus/reaction, you can make one Unarmed Strike as part of it. \
+                              Bardic Damage — use DEX for Unarmed Strike attack rolls; deal Bludgeoning \
+                                damage equal to a Bardic Inspiration die roll + DEX mod (die not expended)."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Inspiring Movement") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Inspiring Movement",
+                        Some("Reaction: when an enemy you can see ends its turn within 5 ft of you, \
+                              expend a Bardic Inspiration use to move up to half your Speed. Then one \
+                              ally within 30 ft can also move up to half their Speed using their Reaction. \
+                              None of this movement provokes Opportunity Attacks."),
+                        1, "per_turn").await;
+                }
+                if !has("Tandem Footwork") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Tandem Footwork",
+                        Some("When you roll Initiative (without being Incapacitated), expend a Bardic \
+                              Inspiration use: roll the die and add that number to your Initiative and \
+                              to the Initiative of each ally within 30 ft who can see or hear you."),
+                        1, "per_turn").await;
+                }
+            }
+            14 => {
+                if !has("Leading Evasion") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Leading Evasion",
+                        Some("When you are subjected to an effect requiring a DEX save to take half \
+                              damage, you take no damage on a success and only half damage on a failure. \
+                              You can share this benefit with creatures within 5 ft making the same save. \
+                              Unavailable if Incapacitated."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("College of Glamour") => match new_level {
+            3 => {
+                if !has("Beguiling Magic") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Beguiling Magic",
+                        Some("You always have Charm Person and Mirror Image prepared. \
+                              Immediately after casting an Enchantment or Illusion spell using a slot, \
+                              you can force a creature within 60 ft to make a WIS save (DC = spell save DC). \
+                              On fail: Charmed or Frightened (your choice) for 1 minute, repeating the \
+                              save at end of each of its turns. Recharges on Long Rest, or expend a \
+                              Bardic Inspiration use to restore immediately."),
+                        1, "long_rest").await;
+                }
+                if !has("Mantle of Inspiration") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Mantle of Inspiration",
+                        Some("Bonus Action: expend a Bardic Inspiration use and roll the die. Choose up \
+                              to CHA modifier creatures (min 1) within 60 ft. Each gains Temporary HP \
+                              equal to twice the roll, then can use their Reaction to move up to their \
+                              Speed without provoking Opportunity Attacks."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Mantle of Majesty") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Mantle of Majesty",
+                        Some("You always have Command prepared. Bonus Action: cast Command without \
+                              expending a slot and take on an unearthly appearance for 1 minute \
+                              (or until Concentration ends). During this time, cast Command as a \
+                              Bonus Action without a slot. Creatures Charmed by you automatically \
+                              fail saves against your Command. Recharges on Long Rest, or expend a \
+                              level 3+ spell slot to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            14 => {
+                if !has("Unbreakable Majesty") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Unbreakable Majesty",
+                        Some("Bonus Action: assume a magically majestic presence for 1 minute \
+                              (or until Incapacitated). While active, the first time any creature \
+                              hits you with an attack roll on a turn, it must succeed on a CHA save \
+                              (DC = your spell save DC) or the attack misses. \
+                              Recharges on Short or Long Rest."),
+                        1, "short_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("College of Lore") => match new_level {
+            3 => {
+                if !has("Bonus Proficiencies") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Bonus Proficiencies",
+                        Some("You gain proficiency in 3 additional skills of your choice."),
+                        1, "manual").await;
+                }
+                if !has("Cutting Words") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Cutting Words",
+                        Some("Reaction: when a creature you can see within 60 ft makes a damage roll \
+                              or succeeds on an ability check or attack roll, expend a Bardic Inspiration \
+                              use, roll the die, and subtract the result from the creature's roll — \
+                              potentially turning a success into a failure."),
+                        1, "per_turn").await;
+                }
+            }
+            6 => {
+                if !has("Magical Discoveries") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Magical Discoveries",
+                        Some("Choose 2 spells from the Cleric, Druid, or Wizard spell list (or any \
+                              combination). The chosen spells must be cantrips or spells for which you \
+                              have Bard spell slots. You always have them prepared. Whenever you gain a \
+                              Bard level, you can replace one with another spell meeting these criteria."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Peerless Skill") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Peerless Skill",
+                        Some("When you fail an ability check or attack roll, expend a Bardic Inspiration \
+                              use: roll the die and add the result to the d20, potentially turning a \
+                              failure into a success. If it still fails, the Bardic Inspiration is \
+                              not expended."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("College of Valor") => match new_level {
+            3 => {
+                if !has("Combat Inspiration") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Combat Inspiration",
+                        Some("A creature with your Bardic Inspiration die can use it for: \
+                              Defense — Reaction when hit: roll the die and add it to AC against \
+                                that attack, potentially causing a miss. \
+                              Offense — immediately after hitting a target: roll the die and add it \
+                                to the attack's damage."),
+                        1, "manual").await;
+                }
+                if !has("Martial Training") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Martial Training",
+                        Some("You gain proficiency with Martial weapons and training with Medium armor \
+                              and Shields. You can also use a Simple or Martial weapon as a Spellcasting \
+                              Focus for your Bard spells."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Extra Attack") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Extra Attack",
+                        Some("You can attack twice instead of once when you take the Attack action. \
+                              In addition, you can replace one of those attacks with a cantrip that \
+                              has a casting time of an action."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Battle Magic") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Battle Magic",
+                        Some("After you cast a spell that has a casting time of an action, you can \
+                              make one attack with a weapon as a Bonus Action."),
+                        1, "manual").await;
                 }
             }
             _ => {}

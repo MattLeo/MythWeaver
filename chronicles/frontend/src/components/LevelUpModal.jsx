@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { STYLES } from '../styles.js'
 import {
-    FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
-    FIGHTER_ASI_LEVELS, getFighterFeatures, getBarbarianFeatures,
+    FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, BARD_SUBCLASSES,
+    ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
+    FIGHTER_ASI_LEVELS, getFighterFeatures, getBarbarianFeatures, getBardFeatures,
 } from '../constants.js'
 import { searchSpells, learnSpell, seedEkSlots } from '../api/client.js'
 
@@ -63,94 +64,170 @@ ${STYLES}
 }
 .lu-stat {
   background: var(--elev); border: 1px solid var(--bord);
-  border-radius: 2px; padding: .6rem .4rem;
-  text-align: center; cursor: pointer;
-  transition: border-color .15s, background .15s;
+  border-radius: 2px; padding: .6rem; text-align: center;
+  cursor: pointer; transition: all .15s;
 }
-.lu-stat.sel { border-color: var(--gold); background: rgba(212,175,55,.08); }
-.lu-stat-key { font-family: 'Cinzel', serif; font-size: .65rem; color: var(--dim); letter-spacing: .1em; }
-.lu-stat-val { font-size: 1.1rem; color: var(--goldl); font-weight: 600; margin: .2rem 0; }
-.lu-stat-mod { font-size: .7rem; color: var(--dim); }
+.lu-stat:hover, .lu-stat.sel {
+  border-color: var(--gold); background: rgba(200,150,42,.08);
+}
+.lu-stat-label {
+  font-family: 'Cinzel', serif; font-size: .6rem;
+  letter-spacing: .1em; color: var(--dim); margin-bottom: .2rem;
+}
+.lu-stat-val { font-size: 1.4rem; color: var(--goldl); line-height: 1; }
+.lu-stat-mod { font-size: .72rem; color: var(--dim); margin-top: .1rem; }
+.lu-subclass-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin: .5rem 0;
+}
+.lu-subclass {
+  background: var(--elev); border: 1px solid var(--bord);
+  border-radius: 2px; padding: .9rem 1rem;
+  cursor: pointer; transition: all .15s; text-align: left;
+}
+.lu-subclass:hover, .lu-subclass.sel {
+  border-color: var(--gold); background: rgba(200,150,42,.08);
+}
+.lu-subclass-name {
+  font-family: 'Cinzel', serif; font-size: .82rem;
+  color: var(--goldl); margin-bottom: .3rem;
+}
+.lu-subclass-desc { font-size: .74rem; color: var(--dim); line-height: 1.55; }
+.lu-maneuver-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .4rem;
+  max-height: 280px; overflow-y: auto;
+  margin: .5rem 0;
+  scrollbar-width: thin; scrollbar-color: var(--gold) var(--surf);
+}
+.lu-maneuver {
+  background: var(--elev); border: 1px solid var(--bord);
+  border-radius: 2px; padding: .5rem .7rem;
+  cursor: pointer; transition: all .15s; font-size: .78rem;
+  color: var(--dim);
+}
+.lu-maneuver:hover, .lu-maneuver.sel {
+  border-color: var(--gold); color: var(--goldl);
+  background: rgba(200,150,42,.08);
+}
+.lu-maneuver.disabled {
+  opacity: .35; cursor: not-allowed; pointer-events: none;
+}
 .lu-hp-gained {
-  display: flex; align-items: baseline; gap: .6rem;
+  display: flex; align-items: baseline; gap: .5rem;
   margin-bottom: 1rem;
 }
-.lu-hp-num { font-family: 'Cinzel', serif; font-size: 2rem; color: #7ef5a9; }
+.lu-hp-num {
+  font-family: 'Cinzel', serif; font-size: 2rem;
+  color: var(--goldl); line-height: 1;
+}
 .lu-hp-label { font-size: .8rem; color: var(--dim); }
 .lu-info-row {
   display: flex; justify-content: space-between;
-  padding: .3rem 0; border-bottom: 1px solid var(--bord);
-  font-size: .82rem;
+  font-size: .78rem; padding: .3rem 0;
+  border-bottom: 1px solid var(--bord); color: var(--dim);
 }
-.lu-info-val { color: var(--goldl); font-weight: 600; }
-.lu-subclass-grid { display: flex; flex-direction: column; gap: .6rem; margin-bottom: .8rem; }
-.lu-subclass {
-  background: var(--elev); border: 1px solid var(--bord);
-  border-radius: 2px; padding: .8rem 1rem; cursor: pointer;
-  transition: border-color .15s;
+.lu-info-row:last-child { border-bottom: none; }
+.lu-info-val { color: var(--goldl); font-family: 'Cinzel', serif; }
+.lu-step-dots {
+  display: flex; gap: .4rem; align-items: center;
 }
-.lu-subclass.sel { border-color: var(--gold); }
-.lu-subclass-name {
-  font-family: 'Cinzel', serif; font-size: .78rem;
-  color: var(--goldl); letter-spacing: .06em; margin-bottom: .3rem;
+.lu-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--bord); transition: background .2s;
 }
-.lu-subclass-desc { font-size: .76rem; color: var(--dim); line-height: 1.5; }
-.lu-asi-mode { display: flex; gap: .5rem; margin-bottom: 1rem; }
-.lu-mode-btn {
-  flex: 1; padding: .5rem; font-size: .78rem;
-  background: var(--elev); border: 1px solid var(--bord);
-  color: var(--fg); border-radius: 2px; cursor: pointer;
-}
-.lu-mode-btn.sel { border-color: var(--gold); color: var(--goldl); }
-.lu-maneuver-grid {
-  display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem;
-}
-.lu-maneuver {
-  padding: .35rem .7rem; font-size: .75rem;
-  background: var(--elev); border: 1px solid var(--bord);
-  border-radius: 2px; cursor: pointer;
-}
-.lu-maneuver.sel { border-color: var(--gold); color: var(--goldl); }
-.lu-maneuver.disabled { opacity: .35; cursor: default; }
-.lu-step-dots { display: flex; gap: .4rem; align-items: center; }
-.lu-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bord); }
 .lu-dot.active { background: var(--gold); }
-.ek-hint {
-  font-size: .75rem; color: var(--dim); line-height: 1.6;
-  background: var(--elev); border: 1px solid var(--bord);
-  border-radius: 2px; padding: .6rem .8rem; margin-bottom: .8rem;
+.lu-asi-mode {
+  display: flex; gap: .5rem; margin-bottom: 1rem;
 }
-.ek-tabs { display: flex; gap: .5rem; margin-bottom: .8rem; }
+.lu-mode-btn {
+  flex: 1; background: var(--elev); border: 1px solid var(--bord);
+  border-radius: 2px; padding: .5rem; cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: .68rem;
+  letter-spacing: .08em; color: var(--dim); transition: all .15s;
+  text-align: center;
+}
+.lu-mode-btn:hover, .lu-mode-btn.sel {
+  border-color: var(--gold); color: var(--goldl);
+  background: rgba(200,150,42,.07);
+}
+
+/* ── EK Spell Picker ── */
+.ek-tabs {
+  display: flex; gap: .4rem; margin-bottom: .8rem;
+}
 .ek-tab {
-  padding: .4rem .9rem; font-size: .76rem;
-  background: var(--elev); border: 1px solid var(--bord);
-  color: var(--dim); border-radius: 2px; cursor: pointer;
+  flex: 1; background: var(--elev); border: 1px solid var(--bord);
+  border-radius: 2px; padding: .35rem; cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: .62rem;
+  letter-spacing: .08em; color: var(--dim); transition: all .15s;
+  text-align: center;
 }
-.ek-tab.active { border-color: var(--gold); color: var(--goldl); }
-.ek-search { width: 100%; margin-bottom: .6rem; }
-.ek-spell-list { display: flex; flex-direction: column; gap: .3rem; max-height: 220px; overflow-y: auto; }
-.ek-spell {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: .4rem .7rem; font-size: .76rem;
-  background: var(--elev); border: 1px solid var(--bord);
-  border-radius: 2px; cursor: pointer;
+.ek-tab.active {
+  border-color: #b5a9f5; color: #b5a9f5;
+  background: rgba(181,169,245,.08);
 }
-.ek-spell.sel { border-color: var(--gold); }
-.ek-spell.known { opacity: .4; cursor: default; }
-.ek-spell-school { font-size: .65rem; color: var(--dim); }
-.ek-spell-school.recommended { color: #7ec8e3; }
-.ek-selected-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .6rem; }
-.ek-selected-tag {
-  padding: .25rem .6rem; font-size: .72rem;
-  background: rgba(212,175,55,.12); border: 1px solid var(--gold);
-  border-radius: 2px; color: var(--goldl);
+.ek-search-bar {
+  display: flex; align-items: center; gap: .5rem;
+  background: var(--elev); border: 1px solid var(--bord);
+  border-radius: 2px; padding: .4rem .6rem; margin-bottom: .6rem;
+}
+.ek-search-input {
+  background: none; border: none; outline: none;
+  color: var(--text); font-size: .8rem; flex: 1;
+  font-family: inherit;
+}
+.ek-spell-list {
+  display: flex; flex-direction: column; gap: .3rem;
+  max-height: 240px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #b5a9f5 var(--surf);
+}
+.ek-spell-row {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .4rem .6rem; border-radius: 2px;
+  border: 1px solid transparent;
+  cursor: pointer; transition: all .12s;
+}
+.ek-spell-row:hover { background: rgba(181,169,245,.06); border-color: rgba(181,169,245,.2); }
+.ek-spell-row.selected { background: rgba(181,169,245,.1); border-color: #b5a9f5; }
+.ek-spell-row.learned { opacity: .4; cursor: not-allowed; }
+.ek-spell-name { font-family: 'Cinzel', serif; font-size: .72rem; color: var(--text); flex: 1; }
+.ek-spell-school { font-size: .62rem; color: #b5a9f5; }
+.ek-spell-check { font-size: .72rem; color: #b5a9f5; }
+.ek-school-badge {
+  font-size: .58rem; padding: .1rem .35rem;
+  border-radius: 2px; background: rgba(181,169,245,.12);
+  color: #b5a9f5; border: 1px solid rgba(181,169,245,.2);
+  white-space: nowrap;
+}
+.ek-school-badge.recommended { background: rgba(126,200,227,.12); color: #7ec8e3; border-color: rgba(126,200,227,.2); }
+.ek-selected-pills {
+  display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .6rem;
+}
+.ek-pill {
+  display: flex; align-items: center; gap: .3rem;
+  background: rgba(181,169,245,.1); border: 1px solid rgba(181,169,245,.25);
+  border-radius: 10px; padding: .2rem .5rem;
+  font-size: .68rem; color: #b5a9f5;
+}
+.ek-pill-remove {
+  cursor: pointer; opacity: .6; font-size: .8rem; line-height: 1;
+}
+.ek-pill-remove:hover { opacity: 1; }
+.ek-hint {
+  font-size: .72rem; color: var(--dim); line-height: 1.6;
+  margin-bottom: .8rem; background: rgba(181,169,245,.04);
+  border: 1px solid rgba(181,169,245,.1); border-radius: 2px;
+  padding: .6rem .8rem;
 }
 `
 
-function fmtMod(score) {
-    const m = Math.floor((score - 10) / 2)
-    return (m >= 0 ? '+' : '') + m
+const SCHOOL_COLORS = {
+  abjuration: '#7ec8e3', evocation: '#f5a96a', divination: '#f5e87e',
+  conjuration: '#b5a9f5', enchantment: '#f5a9c8', illusion: '#a9f5d0',
+  necromancy: '#b0f5a9', transmutation: '#f5cfa9',
 }
+
+const mod = v => Math.floor((v - 10) / 2)
+const fmt = v => { const m = mod(v); return (m >= 0 ? '+' : '') + m }
 
 function maneuversToGainAtLevel(level) {
     if (level === 3) return 3
@@ -175,22 +252,29 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const {
         new_level, hp_gained, new_max_hp, new_proficiency_bonus,
         asi_available, subclass_choice_required, new_features,
+        // Fighter
         second_wind_uses, weapon_mastery_count, extra_attacks,
         action_surge_uses, indomitable_max,
+        // Barbarian
         rage_uses, rage_damage,
+        // Bard
+        bardic_die, bardic_inspiration_uses, bard_prepared_spells,
+        bard_cantrips, bard_slot_summary,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
     const isBarbarian = player.class === 'Barbarian'
-    const isBattleMaster = player.subclass === 'Battle Master'
-    const maneuversToGain   = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
+    const isBard      = player.class === 'Bard'
+
+    const isBattleMaster     = player.subclass === 'Battle Master'
+    const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
     const canReplaceManeuver = isBattleMaster && new_level >= 7
 
-    // Subclass state (used for both Fighter and Barbarian)
+    // Subclass state (Fighter & Barbarian & Bard all choose at level 3)
     const [subclass, setSubclass] = useState(null)
-    const isEKChosen   = subclass === 'Eldritch Knight'
-    const isExistingEK = player.subclass === 'Eldritch Knight'
-    const isEK         = isEKChosen || isExistingEK
+    const isEKChosen    = subclass === 'Eldritch Knight'
+    const isExistingEK  = player.subclass === 'Eldritch Knight'
+    const isEK          = isEKChosen || isExistingEK
     const needsEKSpells = isEK && (ekNewCantrips(new_level) > 0 || ekNewPrepared(new_level) > 0)
 
     const steps = useMemo(() => {
@@ -218,7 +302,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const [selectedCantrips, setSelectedCantrips] = useState([])
     const [selectedPrepared, setSelectedPrepared] = useState([])
 
-    const cantripSlots = ekNewCantrips(new_level)
+    const cantripSlots  = ekNewCantrips(new_level)
     const preparedSlots = ekNewPrepared(new_level)
 
     useEffect(() => {
@@ -255,7 +339,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         return true
     }
 
-    const handleConfirm = () => {
+    const handleConfirm = async () => {
         const choices = {}
         if (subclass) choices.subclass = subclass
         if (asi_available && asi1) {
@@ -308,16 +392,20 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
 
     const isRecommended = (school) => RECOMMENDED_SCHOOLS.includes(school)
 
-    // EK slot labels for summary display
-    const ek = {
-        3: '2× Level 1', 4: '2× Level 1', 5: '3× Level 1', 6: '3× Level 1',
-        7: '4× L1, 2× L2', 8: '4× L1, 2× L2', 9: '4× L1, 2× L2',
-        10: '4× L1, 3× L2', 11: '4× L1, 3× L2', 12: '4× L1, 3× L2',
-        13: '4/3/2', 14: '4/3/2', 15: '4/3/2',
-        16: '4/3/3', 17: '4/3/3', 18: '4/3/3',
-        19: '4/3/3/1', 20: '4/3/3/1',
-    }
+    // Subclass options for the current class
+    const subclassOptions = isBarbarian
+        ? BARBARIAN_SUBCLASSES
+        : isBard
+            ? BARD_SUBCLASSES
+            : FIGHTER_SUBCLASSES
 
+    const subclassLabel = isBarbarian
+        ? 'Choose your Primal Path'
+        : isBard
+            ? 'Choose your Bard College'
+            : 'Choose your Fighter subclass'
+
+    // ────────────────────────────────────────────────────────────────────────
     return (
         <>
             <style dangerouslySetInnerHTML={{ __html: MODAL_STYLES }} />
@@ -351,7 +439,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         <span className="lu-info-val">+{new_proficiency_bonus}</span>
                                     </div>
 
-                                    {/* Fighter stats */}
+                                    {/* ── Fighter stats ── */}
                                     {isFighter && (
                                         <>
                                             <div className="lu-info-row">
@@ -363,8 +451,8 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                                 <span className="lu-info-val">{extra_attacks}</span>
                                             </div>
                                             <div className="lu-info-row">
-                                                <span>Weapon Mastery</span>
-                                                <span className="lu-info-val">{weapon_mastery_count} weapons</span>
+                                                <span>Weapon Masteries</span>
+                                                <span className="lu-info-val">{weapon_mastery_count}</span>
                                             </div>
                                             {action_surge_uses > 0 && (
                                                 <div className="lu-info-row">
@@ -380,16 +468,19 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                             )}
                                             {isEK && (
                                                 <div className="lu-info-row">
-                                                    <span>EK Spell Slots</span>
-                                                    <span className="lu-info-val" style={{ fontSize: '.74rem' }}>
-                                                        {ek[new_level] || 'Updated'}
+                                                    <span>Spell Slots</span>
+                                                    <span className="lu-info-val" style={{ color: '#b5a9f5' }}>
+                                                        {(() => {
+                                                            const ek = { 3:'2×L1', 4:'3×L1', 7:'4L1 2L2', 10:'4L1 3L2', 13:'4L1 3L2 2L3', 16:'4L1 3L2 3L3', 19:'4L1 3L2 3L3 1L4' }
+                                                            return ek[new_level] || 'Updated'
+                                                        })()}
                                                     </span>
                                                 </div>
                                             )}
                                         </>
                                     )}
 
-                                    {/* Barbarian stats */}
+                                    {/* ── Barbarian stats ── */}
                                     {isBarbarian && (
                                         <>
                                             <div className="lu-info-row">
@@ -418,13 +509,51 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                             )}
                                         </>
                                     )}
+
+                                    {/* ── Bard stats ── */}
+                                    {isBard && (
+                                        <>
+                                            <div className="lu-info-row">
+                                                <span>Bardic Inspiration Die</span>
+                                                <span className="lu-info-val">d{bardic_die}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Inspiration Uses</span>
+                                                <span className="lu-info-val">{bardic_inspiration_uses} / Long Rest</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Cantrips Known</span>
+                                                <span className="lu-info-val">{bard_cantrips}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Prepared Spells</span>
+                                                <span className="lu-info-val">{bard_prepared_spells}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Spell Slots</span>
+                                                <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{bard_slot_summary}</span>
+                                            </div>
+                                            {new_level === 5 && (
+                                                <div className="lu-info-row">
+                                                    <span>Font of Inspiration</span>
+                                                    <span className="lu-info-val">Short Rest restore</span>
+                                                </div>
+                                            )}
+                                            {player.subclass === 'College of Valor' && new_level >= 6 && (
+                                                <div className="lu-info-row">
+                                                    <span>Attacks per Action</span>
+                                                    <span className="lu-info-val">{extra_attacks}</span>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
                                 </div>
 
-                                {new_features.length > 0 && (
+                                {new_features.filter(f => f).length > 0 && (
                                     <>
                                         <div className="lu-step-label">New features</div>
                                         <div className="lu-feature-list">
-                                            {new_features.map(f => (
+                                            {new_features.filter(f => f).map(f => (
                                                 <div key={f} className="lu-feature">
                                                     <div className="lu-feature-name">{f}</div>
                                                 </div>
@@ -438,24 +567,20 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                         {/* ── Subclass ── */}
                         {currentStep === 'subclass' && (
                             <>
-                                <div className="lu-step-label">
-                                    Choose your {isBarbarian ? 'Primal Path' : 'Fighter subclass'}
-                                </div>
+                                <div className="lu-step-label">{subclassLabel}</div>
                                 <div className="lu-subclass-grid">
-                                    {(isBarbarian ? BARBARIAN_SUBCLASSES : FIGHTER_SUBCLASSES).map(sc => (
+                                    {subclassOptions.map(sc => (
                                         <div
                                             key={sc.name}
                                             className={`lu-subclass${subclass === sc.name ? ' sel' : ''}`}
                                             onClick={() => setSubclass(sc.name)}
                                         >
-                                            <div className="lu-subclass-name">
-                                                {sc.name}
-                                            </div>
+                                            <div className="lu-subclass-name">{sc.name}</div>
                                             <div className="lu-subclass-desc">{sc.desc}</div>
                                         </div>
                                     ))}
                                 </div>
-                                {!isBarbarian && subclass === 'Eldritch Knight' && (
+                                {isFighter && subclass === 'Eldritch Knight' && (
                                     <div style={{ fontSize: '.72rem', color: '#b5a9f5', marginTop: '.6rem', lineHeight: 1.6 }}>
                                         You'll choose 2 cantrips and 3 prepared spells (abjuration and evocation recommended) in the next step.
                                         You gain spell slots that refresh on a Long Rest, and can bond up to 2 weapons via War Bond.
@@ -495,9 +620,9 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                                     className={`lu-stat${asi1 === k ? ' sel' : ''}`}
                                                     onClick={() => setAsi1(k)}
                                                 >
-                                                    <div className="lu-stat-key">{STAT_LABELS[k]}</div>
+                                                    <div className="lu-stat-label">{STAT_LABELS[k]}</div>
                                                     <div className="lu-stat-val">{player[k]}</div>
-                                                    <div className="lu-stat-mod">{fmtMod(player[k])} → {fmtMod(Math.min(20, player[k] + 2))}</div>
+                                                    <div className="lu-stat-mod">{fmt(player[k])} → {fmt(player[k] + 2)}</div>
                                                 </div>
                                             ))}
                                         </div>
@@ -506,24 +631,29 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                     <>
                                         <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginBottom: '.6rem' }}>
                                             Choose two different stats to increase by 1 each
+                                            {asi1 && !asi2 && <span style={{ color: 'var(--gold)' }}> — now choose second stat</span>}
                                         </div>
                                         <div className="lu-stat-grid">
                                             {STAT_KEYS.map(k => {
-                                                const isSel = asi1 === k || asi2 === k
+                                                const isFirst  = asi1 === k
+                                                const isSecond = asi2 === k
+                                                const isSel    = isFirst || isSecond
                                                 return (
                                                     <div
                                                         key={k}
                                                         className={`lu-stat${isSel ? ' sel' : ''}`}
                                                         onClick={() => {
-                                                            if (asi1 === k) { setAsi1(asi2); setAsi2(null) }
-                                                            else if (asi2 === k) { setAsi2(null) }
-                                                            else if (!asi1) setAsi1(k)
-                                                            else if (!asi2) setAsi2(k)
+                                                            if (isFirst) { setAsi1(asi2); setAsi2(null) }
+                                                            else if (isSecond) { setAsi2(null) }
+                                                            else if (!asi1) { setAsi1(k) }
+                                                            else if (!asi2 && k !== asi1) { setAsi2(k) }
                                                         }}
                                                     >
-                                                        <div className="lu-stat-key">{STAT_LABELS[k]}</div>
+                                                        <div className="lu-stat-label">{STAT_LABELS[k]}</div>
                                                         <div className="lu-stat-val">{player[k]}</div>
-                                                        <div className="lu-stat-mod">{fmtMod(player[k])} → {fmtMod(Math.min(20, player[k] + (isSel ? 1 : 0)))}</div>
+                                                        <div className="lu-stat-mod">
+                                                            {isSel ? `${fmt(player[k])} → ${fmt(player[k] + 1)}` : fmt(player[k])}
+                                                        </div>
                                                     </div>
                                                 )
                                             })}
@@ -537,28 +667,30 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                         {currentStep === 'maneuvers' && (
                             <>
                                 <div className="lu-step-label">
-                                    Choose {maneuversToGain} maneuver{maneuversToGain > 1 ? 's' : ''} ({selectedManeuvers.length}/{maneuversToGain} selected)
+                                    Choose {maneuversToGain} maneuver{maneuversToGain > 1 ? 's' : ''}
+                                    {selectedManeuvers.length > 0 && ` (${selectedManeuvers.length}/${maneuversToGain} selected)`}
                                 </div>
 
                                 {canReplaceManeuver && (
                                     <div style={{ marginBottom: '.8rem' }}>
-                                        <button
-                                            className={`lu-mode-btn${replaceMode ? ' sel' : ''}`}
-                                            style={{ width: '100%' }}
-                                            onClick={() => { setReplaceMode(r => !r); setReplacedManeuver(null) }}
-                                        >
-                                            {replaceMode ? '✓ Replacing a maneuver' : 'Replace a known maneuver?'}
-                                        </button>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', cursor: 'pointer', fontSize: '.78rem', color: 'var(--dim)' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={replaceMode}
+                                                onChange={e => { setReplaceMode(e.target.checked); setReplacedManeuver(null) }}
+                                            />
+                                            Also replace one known maneuver
+                                        </label>
                                         {replaceMode && (
                                             <>
-                                                <div style={{ fontSize: '.72rem', color: 'var(--dim)', margin: '.5rem 0 .3rem' }}>
-                                                    Select one known maneuver to replace:
+                                                <div style={{ fontSize: '.72rem', color: 'var(--dim)', margin: '.4rem 0 .3rem' }}>
+                                                    Select a known maneuver to replace:
                                                 </div>
-                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.4rem' }}>
+                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.3rem', marginBottom: '.5rem' }}>
                                                     {(player.known_maneuvers || []).map(m => (
                                                         <button
                                                             key={m.maneuver_name}
-                                                            className={`lu-maneuver${replacedManeuver === m.maneuver_name ? ' sel' : ''}`}
+                                                            className={`btn-sm${replacedManeuver === m.maneuver_name ? ' active' : ''}`}
                                                             style={replacedManeuver === m.maneuver_name ? { borderColor: 'var(--gold)', color: 'var(--gold)' } : {}}
                                                             onClick={() => setReplacedManeuver(m.maneuver_name)}
                                                         >
@@ -575,7 +707,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                     {MANEUVERS.map(m => {
                                         const alreadyKnown = (player.known_maneuvers || []).some(k => k.maneuver_name === m)
                                             && m !== replacedManeuver
-                                        const isSel = selectedManeuvers.includes(m)
+                                        const isSel      = selectedManeuvers.includes(m)
                                         const isDisabled = alreadyKnown || (!isSel && selectedManeuvers.length >= maneuversToGain)
                                         return (
                                             <div
@@ -598,74 +730,93 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                 <div className="lu-step-label">
                                     {new_level === 3 ? 'Eldritch Knight — Choose Starting Spells' : 'Learn New Spells'}
                                 </div>
+
                                 <div className="ek-hint">
                                     As an Eldritch Knight, you specialize in <span style={{ color: '#7ec8e3' }}>Abjuration</span> and{' '}
                                     <span style={{ color: '#f5a96a' }}>Evocation</span> spells.
                                     You may choose one spell from any school at levels 3, 8, 14, and 20.
+                                    All other spells must be from those two schools.
                                 </div>
 
-                                {cantripSlots > 0 && preparedSlots > 0 && (
-                                    <div className="ek-tabs">
+                                <div className="ek-tabs">
+                                    {cantripSlots > 0 && (
                                         <button
                                             className={`ek-tab${ekSpellTab === 'cantrip' ? ' active' : ''}`}
                                             onClick={() => setEkSpellTab('cantrip')}
                                         >
                                             Cantrips ({selectedCantrips.length}/{cantripSlots})
                                         </button>
+                                    )}
+                                    {preparedSlots > 0 && (
                                         <button
                                             className={`ek-tab${ekSpellTab === 'prepared' ? ' active' : ''}`}
                                             onClick={() => setEkSpellTab('prepared')}
                                         >
                                             Spells ({selectedPrepared.length}/{preparedSlots})
                                         </button>
+                                    )}
+                                </div>
+
+                                <div className="ek-search-bar">
+                                    <span style={{ opacity: .5 }}>🔍</span>
+                                    <input
+                                        className="ek-search-input"
+                                        placeholder={ekSpellTab === 'cantrip' ? 'Search cantrips...' : 'Search spells...'}
+                                        value={spellSearch}
+                                        onChange={e => setSpellSearch(e.target.value)}
+                                        autoFocus
+                                    />
+                                    {searching && <span style={{ fontSize: '.7rem', color: 'var(--dim)' }}>...</span>}
+                                </div>
+
+                                <div className="ek-spell-list">
+                                    {spellSearch.trim().length < 2 && activeList.length === 0 && (
+                                        <div style={{ padding: '.5rem', fontSize: '.72rem', color: 'var(--dim)', textAlign: 'center' }}>
+                                            Type at least 2 characters to search
+                                        </div>
+                                    )}
+                                    {activeResults.map(spell => {
+                                        const known       = isAlreadyKnown(spell.id)
+                                        const isSel       = activeList.some(s => s.id === spell.id)
+                                        const atMax       = activeList.length >= activeMax && !isSel
+                                        const recommended = isRecommended(spell.school)
+                                        return (
+                                            <div
+                                                key={spell.id}
+                                                className={`ek-spell-row${isSel ? ' selected' : ''}${known || atMax ? ' learned' : ''}`}
+                                                onClick={() => !known && !atMax && activeToggle({ id: spell.id, name: spell.name, school: spell.school })}
+                                            >
+                                                <span style={{ fontSize: '.9rem', color: SCHOOL_COLORS[spell.school] || '#b5a9f5' }}>
+                                                    {spell.level === 0 ? '⊕' : spell.level}
+                                                </span>
+                                                <span className="ek-spell-name">{spell.name}</span>
+                                                <span className={`ek-school-badge${recommended ? ' recommended' : ''}`}>
+                                                    {spell.school}
+                                                </span>
+                                                {isSel  && <span className="ek-spell-check">✓</span>}
+                                                {known  && <span style={{ fontSize: '.6rem', color: 'var(--dim)' }}>known</span>}
+                                            </div>
+                                        )
+                                    })}
+                                    {spellSearch.trim().length >= 2 && !searching && activeResults.length === 0 && (
+                                        <div style={{ padding: '.5rem', fontSize: '.72rem', color: 'var(--dim)', textAlign: 'center' }}>
+                                            No {ekSpellTab === 'cantrip' ? 'cantrips' : 'spells'} found
+                                        </div>
+                                    )}
+                                </div>
+
+                                {activeList.length > 0 && (
+                                    <div className="ek-selected-pills">
+                                        {activeList.map(s => (
+                                            <div key={s.id} className="ek-pill">
+                                                <span>{s.name}</span>
+                                                <span className="ek-pill-remove" onClick={() => activeToggle(s)}>×</span>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
 
-                                <input
-                                    className="inp ek-search"
-                                    placeholder={ekSpellTab === 'cantrip' ? 'Search cantrips…' : 'Search spells…'}
-                                    value={spellSearch}
-                                    onChange={e => setSpellSearch(e.target.value)}
-                                />
-
-                                {searching && <div style={{ fontSize: '.75rem', color: 'var(--dim)' }}>Searching…</div>}
-
-                                {activeResults.length > 0 && (
-                                    <div className="ek-spell-list">
-                                        {activeResults.map(spell => {
-                                            const known = isAlreadyKnown(spell.id)
-                                            const sel = activeList.some(s => s.id === spell.id)
-                                            const full = !sel && activeList.length >= activeMax
-                                            return (
-                                                <div
-                                                    key={spell.id}
-                                                    className={`ek-spell${sel ? ' sel' : ''}${known ? ' known' : ''}`}
-                                                    onClick={() => !known && !full && activeToggle(spell)}
-                                                >
-                                                    <span>{spell.name}</span>
-                                                    <span className={`ek-spell-school${isRecommended(spell.school) ? ' recommended' : ''}`}>
-                                                        {spell.school}
-                                                    </span>
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                )}
-
-                                {(selectedCantrips.length > 0 || selectedPrepared.length > 0) && (
-                                    <>
-                                        <div style={{ fontSize: '.7rem', color: 'var(--dim)', marginTop: '.8rem', marginBottom: '.3rem' }}>
-                                            Selected:
-                                        </div>
-                                        <div className="ek-selected-list">
-                                            {[...selectedCantrips, ...selectedPrepared].map(s => (
-                                                <div key={s.id} className="ek-selected-tag">{s.name}</div>
-                                            ))}
-                                        </div>
-                                    </>
-                                )}
-
-                                <div style={{ fontSize: '.7rem', color: 'var(--dim)', marginTop: '.6rem' }}>
+                                <div style={{ marginTop: '.8rem', fontSize: '.72rem', color: 'var(--dim)' }}>
                                     {cantripSlots > 0 && (
                                         <span style={{ color: selectedCantrips.length === cantripSlots ? '#7ef5a9' : 'var(--dim)' }}>
                                             Cantrips: {selectedCantrips.length}/{cantripSlots}
@@ -690,6 +841,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                 <div key={i} className={`lu-dot${i === stepIndex ? ' active' : ''}`} />
                             ))}
                         </div>
+
                         <div style={{ display: 'flex', gap: '.75rem' }}>
                             {stepIndex > 0 && (
                                 <button className="btn-ghost" onClick={() => setStepIndex(i => i - 1)}>

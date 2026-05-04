@@ -520,6 +520,131 @@ export function barbarianWeaponMastery(level) {
     return 2
 }
 
+// ─── Bard ─────────────────────────────────────────────────────────────────────
+ 
+export const BARD_SUBCLASSES = [
+    {
+        name: 'College of Dance',
+        desc: 'Move in harmony with the cosmos. Unarmed strikes powered by Bardic Inspiration, Unarmored Defense using DEX+CHA, and flowing battlefield movement.',
+    },
+    {
+        name: 'College of Glamour',
+        desc: 'Weave beguiling fey magic. Charm or frighten after casting, grant allies Temporary HP with Mantle of Inspiration, and command with otherworldly authority.',
+    },
+    {
+        name: 'College of Lore',
+        desc: 'Plumb the depths of magical knowledge. Gain extra skill proficiencies, cut enemy rolls with Cutting Words, and eventually steal spells from any list.',
+    },
+    {
+        name: 'College of Valor',
+        desc: 'Sing the deeds of ancient heroes. Martial weapon and armor training, Bardic Inspiration that boosts AC or damage, and Extra Attack at level 6.',
+    },
+]
+ 
+export const BARD_BASE_FEATURES = {
+    1:  ['Bardic Inspiration', 'Spellcasting'],
+    2:  ['Expertise', 'Jack of All Trades'],
+    3:  ['Bard Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Font of Inspiration'],
+    6:  ['Subclass Feature'],
+    7:  ['Countercharm'],
+    8:  ['Ability Score Improvement'],
+    9:  ['Expertise (2 more skills)'],
+    10: ['Magical Secrets'],
+    11: [],
+    12: ['Ability Score Improvement'],
+    13: [],
+    14: ['Subclass Feature'],
+    15: [],
+    16: ['Ability Score Improvement'],
+    17: [],
+    18: ['Superior Inspiration'],
+    19: ['Epic Boon'],
+    20: ['Words of Creation'],
+}
+ 
+export const BARD_SUBCLASS_FEATURES = {
+    'College of Dance': {
+        3:  ['Dazzling Footwork'],
+        6:  ['Inspiring Movement', 'Tandem Footwork'],
+        14: ['Leading Evasion'],
+    },
+    'College of Glamour': {
+        3:  ['Beguiling Magic', 'Mantle of Inspiration'],
+        6:  ['Mantle of Majesty'],
+        14: ['Unbreakable Majesty'],
+    },
+    'College of Lore': {
+        3:  ['Bonus Proficiencies', 'Cutting Words'],
+        6:  ['Magical Discoveries'],
+        14: ['Peerless Skill'],
+    },
+    'College of Valor': {
+        3:  ['Combat Inspiration', 'Martial Training'],
+        6:  ['Extra Attack'],
+        14: ['Battle Magic'],
+    },
+}
+ 
+export const BARD_ASI_LEVELS = [4, 8, 12, 16, 19]
+ 
+export function getBardFeatures(player, newLevel) {
+    const base = (BARD_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (BARD_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+export function bardInspirationDie(level) {
+    if (level >= 15) return 12
+    if (level >= 10) return 10
+    if (level >= 5)  return 8
+    return 6
+}
+ 
+export function bardPreparedSpells(level) {
+    const table = [0,4,5,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22]
+    return table[level] || 22
+}
+ 
+export function bardCantrips(level) {
+    if (level >= 10) return 4
+    if (level >= 4)  return 3
+    return 2
+}
+ 
+export function bardSpellSlots(level) {
+    const table = {
+        1:  [2,0,0,0,0,0,0,0,0],
+        2:  [3,0,0,0,0,0,0,0,0],
+        3:  [4,2,0,0,0,0,0,0,0],
+        4:  [4,3,0,0,0,0,0,0,0],
+        5:  [4,3,2,0,0,0,0,0,0],
+        6:  [4,3,3,0,0,0,0,0,0],
+        7:  [4,3,3,1,0,0,0,0,0],
+        8:  [4,3,3,2,0,0,0,0,0],
+        9:  [4,3,3,3,1,0,0,0,0],
+        10: [4,3,3,3,2,0,0,0,0],
+        11: [4,3,3,3,2,1,0,0,0],
+        12: [4,3,3,3,2,1,0,0,0],
+        13: [4,3,3,3,2,1,1,0,0],
+        14: [4,3,3,3,2,1,1,0,0],
+        15: [4,3,3,3,2,1,1,1,0],
+        16: [4,3,3,3,2,1,1,1,0],
+        17: [4,3,3,3,2,1,1,1,1],
+        18: [4,3,3,3,3,1,1,1,1],
+        19: [4,3,3,3,3,2,1,1,1],
+        20: [4,3,3,3,3,2,2,1,1],
+    }
+    return table[level] || table[20]
+}
+ 
+// Compact display string e.g. "4/3/3/2"
+export function bardSlotSummary(level) {
+    return bardSpellSlots(level).filter(s => s > 0).join('/')
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

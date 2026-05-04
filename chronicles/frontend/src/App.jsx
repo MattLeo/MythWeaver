@@ -16,15 +16,20 @@ import {
   isLevelUpAvailable,
   getFighterFeatures,
   getBarbarianFeatures,
+  getBardFeatures,
   hitDieForClass,
   proficiencyForLevel,
   FIGHTER_ASI_LEVELS,
   BARBARIAN_ASI_LEVELS,
+  BARD_ASI_LEVELS,
   barbarianRageUses,
   barbarianRageDamage,
   barbarianWeaponMastery,
+  bardInspirationDie,
+  bardPreparedSpells,
+  bardCantrips,
+  bardSlotSummary,
 } from './constants.js'
-
 
 const PHASE = {
   TITLE: 'title',
@@ -155,68 +160,93 @@ export default function App() {
     setShowLevelUp(true)
   }
 
-  const buildLevelUpPreview = (p) => {
+   const buildLevelUpPreview = (p) => {
     const newLevel = p.level + 1
-    const conMod = Math.floor((p.con - 10) / 2)
-    const hitDie = hitDieForClass(p.class)
+    const conMod   = Math.floor((p.con - 10) / 2)
+    const chaMod   = Math.floor((p.cha - 10) / 2)
+    const hitDie   = hitDieForClass(p.class)
     const hpGained = Math.floor(hitDie / 2) + 1 + conMod
     const newMaxHp = p.max_hp + hpGained
-    const newProf = proficiencyForLevel(newLevel)
-    const isFighter = p.class === 'Fighter'
+    const newProf  = proficiencyForLevel(newLevel)
+ 
+    const isFighter   = p.class === 'Fighter'
     const isBarbarian = p.class === 'Barbarian'
-
-    const secondWindUses = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
-
+    const isBard      = p.class === 'Bard'
+ 
+    // ── Fighter scalars ─────────────────────────────────────────────────────
+    const secondWindUses   = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
+    const actionSurgeUses  = isFighter ? (newLevel >= 17 ? 2 : newLevel >= 2 ? 1 : 0) : 0
+    const indomitableMax   = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
+ 
     const weaponMasteryCount = isFighter
       ? (newLevel >= 16 ? 6 : newLevel >= 4 ? 4 : 3)
       : isBarbarian
-        ? barbarianWeaponMastery(newLevel) 
+        ? barbarianWeaponMastery(newLevel)
         : 0
-
+ 
     const extraAttacks = isFighter
       ? (newLevel >= 20 ? 4 : newLevel >= 11 ? 3 : newLevel >= 5 ? 2 : 1)
       : isBarbarian
         ? (newLevel >= 5 ? 2 : 1)
-        : 1
-
-    const actionSurgeUses = isFighter ? (newLevel >= 17 ? 2 : newLevel >= 2 ? 1 : 0) : 0
-    const indomitableMax = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
-
+        : (isBard && p.subclass === 'College of Valor' && newLevel >= 6) ? 2 : 1
+ 
+    // ── Barbarian scalars ───────────────────────────────────────────────────
+    const rageUses   = isBarbarian ? barbarianRageUses(newLevel)   : 0
+    const rageDamage = isBarbarian ? barbarianRageDamage(newLevel) : 0
+ 
+    // ── Bard scalars ────────────────────────────────────────────────────────
+    const bardicDie              = isBard ? bardInspirationDie(newLevel) : 0
+    const bardicInspirationUses  = isBard ? Math.max(1, chaMod)          : 0
+    const bardPrepared           = isBard ? bardPreparedSpells(newLevel)  : 0
+    const bardKnownCantrips      = isBard ? bardCantrips(newLevel)        : 0
+    const bardSlots              = isBard ? bardSlotSummary(newLevel)     : ''
+ 
+    // ── ASI ─────────────────────────────────────────────────────────────────
     const asiAvailable = isFighter
       ? FIGHTER_ASI_LEVELS.includes(newLevel)
       : isBarbarian
         ? BARBARIAN_ASI_LEVELS.includes(newLevel)
-        : [4, 8, 12, 16, 19].includes(newLevel)
-
+        : isBard
+          ? BARD_ASI_LEVELS.includes(newLevel)
+          : [4, 8, 12, 16, 19].includes(newLevel)
+ 
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
-
-    // Barbarian-specific scalars
-    const rageUses = isBarbarian ? barbarianRageUses(newLevel) : 0
-    const rageDamage = isBarbarian ? barbarianRageDamage(newLevel) : 0
-
+ 
+    // ── Features ─────────────────────────────────────────────────────────────
     const newFeatures = isFighter
       ? getFighterFeatures(p, newLevel)
       : isBarbarian
         ? getBarbarianFeatures(p, newLevel)
-        : []
-
+        : isBard
+          ? getBardFeatures(p, newLevel)
+          : []
+ 
     return {
-      new_level: newLevel,
-      hp_gained: hpGained,
-      new_max_hp: newMaxHp,
-      new_proficiency_bonus: newProf,
-      asi_available: asiAvailable,
+      new_level:              newLevel,
+      hp_gained:              hpGained,
+      new_max_hp:             newMaxHp,
+      new_proficiency_bonus:  newProf,
+      asi_available:          asiAvailable,
       subclass_choice_required: subclassChoiceRequired,
-      new_features: newFeatures,
-      second_wind_uses: secondWindUses,
-      weapon_mastery_count: weaponMasteryCount,
-      extra_attacks: extraAttacks,
-      action_surge_uses: actionSurgeUses,
-      indomitable_max: indomitableMax,
-      rage_uses: rageUses,
-      rage_damage: rageDamage,
+      new_features:           newFeatures,
+      // Fighter
+      second_wind_uses:       secondWindUses,
+      weapon_mastery_count:   weaponMasteryCount,
+      extra_attacks:          extraAttacks,
+      action_surge_uses:      actionSurgeUses,
+      indomitable_max:        indomitableMax,
+      // Barbarian
+      rage_uses:              rageUses,
+      rage_damage:            rageDamage,
+      // Bard
+      bardic_die:             bardicDie,
+      bardic_inspiration_uses: bardicInspirationUses,
+      bard_prepared_spells:   bardPrepared,
+      bard_cantrips:          bardKnownCantrips,
+      bard_slot_summary:      bardSlots,
     }
   }
+
 
 
   const handleLevelUpComplete = async (choices) => {

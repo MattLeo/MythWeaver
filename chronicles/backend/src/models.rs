@@ -163,14 +163,22 @@ pub struct LevelUpResult {
     pub subclass_choice_required: bool,
     pub new_features: Vec<String>,
     pub spell_slots: Option<SpellSlots>,
+    // Fighter
     pub second_wind_uses: i64,
     pub weapon_mastery_count: i64,
     pub extra_attacks: i64,
     pub indomitable_max: i64,
     pub action_surge_uses: i64,
+    // Barbarian
     pub rage_uses: i64,
     pub rage_damage: i64,
+    // Bard
+    pub bardic_die: i64,
+    pub bardic_inspiration_uses: i64,
+    pub bard_prepared_spells: i64,
+    pub bard_cantrips: i64,
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpellSlots {

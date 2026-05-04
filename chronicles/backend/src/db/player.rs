@@ -246,10 +246,12 @@ pub async fn level_up_player(
 ) -> Result<LevelUpResult> {
     let new_level = player.level + 1;
     let con_mod   = Player::modifier(player.con);
+    let cha_mod   = Player::modifier(player.cha);
     let hp_gained = hp_gained_on_level(&player.class, con_mod);
     let new_max_hp = player.max_hp + hp_gained;
     let new_prof  = Player::proficiency_for_level(new_level);
  
+    // ── Per-class derived stats ───────────────────────────────────────────────
     let (extra_attacks, indomitable_max, action_surge_uses, second_wind_uses, weapon_mastery_count) =
         match player.class.as_str() {
             "Fighter" => (
@@ -261,25 +263,35 @@ pub async fn level_up_player(
             ),
             "Barbarian" => (
                 barbarian_extra_attacks(new_level),
-                0i64,
-                0i64,
-                0i64,
+                0i64, 0i64, 0i64,
                 barbarian_weapon_mastery(new_level),
             ),
+            "Bard" => {
+                let valor_extra = if player.subclass.as_deref() == Some("College of Valor") && new_level >= 6 { 2 } else { 1 };
+                (valor_extra, 0i64, 0i64, 0i64, 0i64)
+            },
             _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
         };
  
     let rage_uses   = if player.class == "Barbarian" { barbarian_rage_uses(new_level)   } else { 0 };
     let rage_damage = if player.class == "Barbarian" { barbarian_rage_damage(new_level) } else { 0 };
  
+    let bardic_die             = if player.class == "Bard" { bard_inspiration_die(new_level) } else { 0 };
+    let bardic_inspiration_uses = if player.class == "Bard" { cha_mod.max(1) } else { 0 };
+    let bard_prepared_spells_n  = if player.class == "Bard" { bard_prepared_spells(new_level) } else { 0 };
+    let bard_cantrips_n         = if player.class == "Bard" { bard_cantrips(new_level) } else { 0 };
+ 
+    // ── ASI availability ─────────────────────────────────────────────────────
     let asi_available = match player.class.as_str() {
         "Fighter"   => matches!(new_level, 4 | 6 | 8 | 12 | 14 | 16),
         "Barbarian" => matches!(new_level, 4 | 8 | 12 | 16 | 19),
+        "Bard"      => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         _           => Player::is_asi_level(new_level),
     };
  
     let subclass_choice_required = new_level == 3 && player.subclass.is_none();
  
+    // ── Update core player row ────────────────────────────────────────────────
     sqlx::query(
         "UPDATE players SET
             level = ?, max_hp = ?, current_hp = ?,
@@ -305,22 +317,16 @@ pub async fn level_up_player(
             "UPDATE abilities SET max_uses = ?, current_uses = ?
              WHERE owner_id = ? AND name = 'Second Wind'"
         )
-        .bind(second_wind_uses)
-        .bind(second_wind_uses)
-        .bind(player_id)
-        .execute(pool)
-        .await?;
+        .bind(second_wind_uses).bind(second_wind_uses).bind(player_id)
+        .execute(pool).await?;
  
         if action_surge_uses > 0 {
             sqlx::query(
                 "UPDATE abilities SET max_uses = ?, current_uses = ?
                  WHERE owner_id = ? AND name = 'Action Surge'"
             )
-            .bind(action_surge_uses)
-            .bind(action_surge_uses)
-            .bind(player_id)
-            .execute(pool)
-            .await?;
+            .bind(action_surge_uses).bind(action_surge_uses).bind(player_id)
+            .execute(pool).await?;
         }
  
         if player.subclass.as_deref() == Some("Battle Master") {
@@ -329,12 +335,8 @@ pub async fn level_up_player(
                 "UPDATE superiority_dice SET max_dice = ?, current_dice = ?, die_size = ?
                  WHERE player_id = ? AND pool_name = 'Battle Master'"
             )
-            .bind(dice_count)
-            .bind(dice_count)
-            .bind(die_size)
-            .bind(player_id)
-            .execute(pool)
-            .await?;
+            .bind(dice_count).bind(dice_count).bind(die_size).bind(player_id)
+            .execute(pool).await?;
         }
  
         if player.subclass.as_deref() == Some("Psi Warrior") {
@@ -343,25 +345,14 @@ pub async fn level_up_player(
                 "UPDATE superiority_dice SET max_dice = ?, current_dice = ?, die_size = ?
                  WHERE player_id = ? AND pool_name = 'Psi Warrior'"
             )
-            .bind(dice_count)
-            .bind(dice_count)
-            .bind(die_size)
-            .bind(player_id)
-            .execute(pool)
-            .await?;
+            .bind(dice_count).bind(dice_count).bind(die_size).bind(player_id)
+            .execute(pool).await?;
         }
  
         if player.subclass.as_deref() == Some("Champion") {
-            let crit_range = match new_level {
-                3..=14 => 19,
-                15..=20 => 18,
-                _ => 20,
-            };
+            let crit_range = match new_level { 3..=14 => 19, 15..=20 => 18, _ => 20 };
             sqlx::query("UPDATE players SET crit_range_min = ? WHERE id = ?")
-                .bind(crit_range)
-                .bind(player_id)
-                .execute(pool)
-                .await?;
+                .bind(crit_range).bind(player_id).execute(pool).await?;
         }
     }
  
@@ -378,25 +369,46 @@ pub async fn level_up_player(
             "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
              WHERE owner_id = ? AND name = 'Rage'"
         )
-        .bind(rage_uses)
-        .bind(rage_uses)
-        .bind(&rage_desc)
-        .bind(player_id)
-        .execute(pool)
-        .await?;
+        .bind(rage_uses).bind(rage_uses).bind(&rage_desc).bind(player_id)
+        .execute(pool).await?;
  
-        // Primal Champion (level 20): +4 STR and +4 CON, max 25 per PHB
         if new_level == 20 {
             sqlx::query(
-                "UPDATE players SET
-                   str = MIN(str + 4, 25),
-                   con = MIN(con + 4, 25),
-                   updated_at = datetime('now')
-                 WHERE id = ?"
+                "UPDATE players SET str = MIN(str + 4, 25), con = MIN(con + 4, 25),
+                 updated_at = datetime('now') WHERE id = ?"
             )
-            .bind(player_id)
-            .execute(pool)
-            .await?;
+            .bind(player_id).execute(pool).await?;
+        }
+    }
+ 
+    // ── Bard-specific DB updates ──────────────────────────────────────────────
+    if player.class == "Bard" {
+        // Update Bardic Inspiration uses (= CHA mod, min 1) and die size
+        let insp_desc = format!(
+            "Bonus Action: grant one Bardic Inspiration die (d{}) to a creature within 60 ft \
+             that can see or hear you. They can add it to one failed D20 Test within the next \
+             hour. One die per creature at a time. Uses = CHA modifier (min 1). \
+             Refreshes on Long Rest{}.",
+            bardic_die,
+            if new_level >= 5 { " (Short Rest from level 5)" } else { "" }
+        );
+        sqlx::query(
+            "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
+             WHERE owner_id = ? AND name = 'Bardic Inspiration'"
+        )
+        .bind(bardic_inspiration_uses)
+        .bind(bardic_inspiration_uses)
+        .bind(&insp_desc)
+        .bind(player_id)
+        .execute(pool).await?;
+ 
+        // Font of Inspiration at level 5: change refresh type to short_rest
+        if new_level == 5 {
+            sqlx::query(
+                "UPDATE abilities SET refresh_type = 'short_rest'
+                 WHERE owner_id = ? AND name = 'Bardic Inspiration'"
+            )
+            .bind(player_id).execute(pool).await?;
         }
     }
  
@@ -404,7 +416,15 @@ pub async fn level_up_player(
     let new_features = match player.class.as_str() {
         "Fighter"   => fighter_features_at_level(&player.class, new_level, player.subclass.as_deref()),
         "Barbarian" => barbarian_features_at_level(new_level, player.subclass.as_deref()),
+        "Bard"      => bard_features_at_level(new_level, player.subclass.as_deref()),
         _           => class_features_generic(&player.class, new_level),
+    };
+ 
+    // ── Spell slots (Bard = full caster; EK = partial) ────────────────────────
+    let spell_slots = if player.class == "Bard" {
+        bard_spell_slots(new_level)
+    } else {
+        eldritch_knight_spell_slots(player.subclass.as_deref(), new_level)
     };
  
     Ok(LevelUpResult {
@@ -415,14 +435,21 @@ pub async fn level_up_player(
         asi_available,
         subclass_choice_required,
         new_features,
-        spell_slots: eldritch_knight_spell_slots(player.subclass.as_deref(), new_level),
+        spell_slots,
+        // Fighter
         second_wind_uses,
         weapon_mastery_count,
         extra_attacks,
         indomitable_max,
         action_surge_uses,
+        // Barbarian
         rage_uses,
         rage_damage,
+        // Bard
+        bardic_die,
+        bardic_inspiration_uses,
+        bard_prepared_spells: bard_prepared_spells_n,
+        bard_cantrips: bard_cantrips_n,
     })
 }
 
@@ -548,6 +575,109 @@ pub fn barbarian_weapon_mastery(level: i64) -> i64 {
  
 pub fn barbarian_extra_attacks(level: i64) -> i64 {
     if level >= 5 { 2 } else { 1 }
+}
+
+// ─── Bard progression ─────────────────────────────────────────────────────────
+ 
+pub fn bard_inspiration_die(level: i64) -> i64 {
+    // d6 (L1-4), d8 (L5-9), d10 (L10-14), d12 (L15-20)
+    match level {
+        1..=4   => 6,
+        5..=9   => 8,
+        10..=14 => 10,
+        _       => 12,
+    }
+}
+ 
+pub fn bard_prepared_spells(level: i64) -> i64 {
+    let table = [0i64,4,5,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22];
+    table.get(level as usize).copied().unwrap_or(22)
+}
+ 
+pub fn bard_cantrips(level: i64) -> i64 {
+    match level {
+        1..=3  => 2,
+        4..=9  => 3,
+        _      => 4,
+    }
+}
+ 
+// Full caster spell slots — same progression as Wizard
+fn bard_spell_slots(level: i64) -> Option<SpellSlots> {
+    Some(match level {
+        1  => SpellSlots { level_1: Some(2), level_2: None,    level_3: None,    level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        2  => SpellSlots { level_1: Some(3), level_2: None,    level_3: None,    level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        3  => SpellSlots { level_1: Some(4), level_2: Some(2), level_3: None,    level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        4  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: None,    level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        5  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(2), level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        6  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        7  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(1), level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        8  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(2), level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        9  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(1), level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        10 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        11 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: None,    level_8: None,    level_9: None },
+        12 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: None,    level_8: None,    level_9: None },
+        13 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: None,    level_9: None },
+        14 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: None,    level_9: None },
+        15 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: Some(1), level_9: None },
+        16 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: Some(1), level_9: None },
+        17 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: Some(1), level_9: Some(1) },
+        18 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(3), level_6: Some(1), level_7: Some(1), level_8: Some(1), level_9: Some(1) },
+        19 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(3), level_6: Some(2), level_7: Some(1), level_8: Some(1), level_9: Some(1) },
+        20 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(3), level_6: Some(2), level_7: Some(2), level_8: Some(1), level_9: Some(1) },
+        _  => return None,
+    })
+}
+ 
+fn bard_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Bardic Inspiration".to_string(), "Spellcasting".to_string()]),
+        2  => features.extend(["Expertise".to_string(), "Jack of All Trades".to_string()]),
+        3  => features.push("Bard Subclass".to_string()),
+        4  => features.push("Ability Score Improvement".to_string()),
+        5  => features.push("Font of Inspiration".to_string()),
+        6  => features.push("Subclass Feature".to_string()),
+        7  => features.push("Countercharm".to_string()),
+        8  => features.push("Ability Score Improvement".to_string()),
+        9  => features.push("Expertise (2 more skills)".to_string()),
+        10 => features.push("Magical Secrets".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        14 => features.push("Subclass Feature".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        18 => features.push("Superior Inspiration".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Words of Creation".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("College of Dance") => match level {
+            3  => features.push("Dazzling Footwork".to_string()),
+            6  => features.extend(["Inspiring Movement".to_string(), "Tandem Footwork".to_string()]),
+            14 => features.push("Leading Evasion".to_string()),
+            _  => {}
+        },
+        Some("College of Glamour") => match level {
+            3  => features.extend(["Beguiling Magic".to_string(), "Mantle of Inspiration".to_string()]),
+            6  => features.push("Mantle of Majesty".to_string()),
+            14 => features.push("Unbreakable Majesty".to_string()),
+            _  => {}
+        },
+        Some("College of Lore") => match level {
+            3  => features.extend(["Bonus Proficiencies".to_string(), "Cutting Words".to_string()]),
+            6  => features.push("Magical Discoveries".to_string()),
+            14 => features.push("Peerless Skill".to_string()),
+            _  => {}
+        },
+        Some("College of Valor") => match level {
+            3  => features.extend(["Combat Inspiration".to_string(), "Martial Training".to_string()]),
+            6  => features.push("Extra Attack".to_string()),
+            14 => features.push("Battle Magic".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
 }
 
 // ─── Feature tables ───────────────────────────────────────────────────────────
