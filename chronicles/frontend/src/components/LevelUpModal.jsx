@@ -2,11 +2,11 @@ import { useState, useEffect, useMemo } from 'react'
 import { STYLES } from '../styles.js'
 import {
     FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, BARD_SUBCLASSES,
-    CLERIC_SUBCLASSES, DRUID_SUBCLASSES, MONK_SUBCLASSES,
+    CLERIC_SUBCLASSES, DRUID_SUBCLASSES, MONK_SUBCLASSES, PALADIN_SUBCLASSES,
     ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
     FIGHTER_ASI_LEVELS,
     getFighterFeatures, getBarbarianFeatures, getBardFeatures,
-    getClericFeatures, getDruidFeatures, getMonkFeatures,
+    getClericFeatures, getDruidFeatures, getMonkFeatures, getPaladinFeatures,
 } from '../constants.js'
 import { searchSpells } from '../api/client.js'
 
@@ -180,24 +180,18 @@ function ekNewCantrips(level) { return level === 3 ? 2 : level === 10 ? 1 : 0 }
 function ekNewPrepared(level) {
     return ({ 3:3, 4:1, 7:1, 10:2, 13:2, 16:2, 19:1 })[level] || 0
 }
-const RECOMMENDED_SCHOOLS = ['abjuration', 'evocation']
 
 export default function LevelUpModal({ player, levelUpResult, campaignId, onComplete, onClose }) {
     const {
         new_level, hp_gained, new_max_hp, new_proficiency_bonus,
         asi_available, subclass_choice_required, new_features,
-        // Fighter
         second_wind_uses, weapon_mastery_count, extra_attacks, action_surge_uses, indomitable_max,
-        // Barbarian
         rage_uses, rage_damage,
-        // Bard
         bardic_die, bardic_inspiration_uses, bard_prepared_spells, bard_cantrips, bard_slot_summary,
-        // Cleric
         channel_divinity_uses, cleric_cantrips, cleric_prepared_spells, cleric_slot_summary,
-        // Druid
         wild_shape_uses, wild_shape_cr, druid_cantrips, druid_prepared_spells, druid_slot_summary,
-        // Monk
         focus_points, martial_arts_die, unarmored_movement,
+        lay_on_hands_pool, paladin_channel_divinity, paladin_prepared_spells, paladin_slot_summary,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
@@ -206,6 +200,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const isCleric    = player.class === 'Cleric'
     const isDruid     = player.class === 'Druid'
     const isMonk      = player.class === 'Monk'
+    const isPaladin   = player.class === 'Paladin'
 
     const isBattleMaster     = player.subclass === 'Battle Master'
     const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
@@ -309,32 +304,35 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         ? spellResults.filter(s => s.level === 0)
         : spellResults.filter(s => s.level > 0 && s.level <= 2)
 
-    const subclassOptions = isMonk
-        ? MONK_SUBCLASSES
-        : isCleric
-            ? CLERIC_SUBCLASSES
-            : isDruid
-                ? DRUID_SUBCLASSES
-                : isBarbarian
-                    ? BARBARIAN_SUBCLASSES
-                    : isBard
-                        ? BARD_SUBCLASSES
-                        : FIGHTER_SUBCLASSES
+    const subclassOptions = isPaladin
+        ? PALADIN_SUBCLASSES
+        : isMonk
+            ? MONK_SUBCLASSES
+            : isCleric
+                ? CLERIC_SUBCLASSES
+                : isDruid
+                    ? DRUID_SUBCLASSES
+                    : isBarbarian
+                        ? BARBARIAN_SUBCLASSES
+                        : isBard
+                            ? BARD_SUBCLASSES
+                            : FIGHTER_SUBCLASSES
 
-    const subclassLabel = isMonk
-        ? 'Choose your Monastic Tradition'
-        : isCleric
-            ? 'Choose your Divine Domain'
-            : isDruid
-                ? 'Choose your Druid Circle'
-                : isBarbarian
-                    ? 'Choose your Primal Path'
-                    : isBard
-                        ? 'Choose your Bard College'
-                        : 'Choose your Fighter subclass'
+    const subclassLabel = isPaladin
+        ? 'Choose your Sacred Oath'
+        : isMonk
+            ? 'Choose your Monastic Tradition'
+            : isCleric
+                ? 'Choose your Divine Domain'
+                : isDruid
+                    ? 'Choose your Druid Circle'
+                    : isBarbarian
+                        ? 'Choose your Primal Path'
+                        : isBard
+                            ? 'Choose your Bard College'
+                            : 'Choose your Fighter subclass'
 
-    const moonCR = player.subclass === 'Circle of the Moon'
-        ? Math.floor(new_level / 3) : null
+    const moonCR = player.subclass === 'Circle of the Moon' ? Math.floor(new_level / 3) : null
 
     return (
         <>
@@ -352,7 +350,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
 
                     <div className="lu-body">
 
-                        {/* ── Summary ── */}
                         {currentStep === 'summary' && (
                             <>
                                 <div className="lu-step-label">What's new</div>
@@ -361,10 +358,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                     <div className="lu-hp-label">hit points — new maximum: {new_max_hp}</div>
                                 </div>
                                 <div style={{ marginBottom: '1rem' }}>
-                                    <div className="lu-info-row">
-                                        <span>Proficiency Bonus</span>
-                                        <span className="lu-info-val">+{new_proficiency_bonus}</span>
-                                    </div>
+                                    <div className="lu-info-row"><span>Proficiency Bonus</span><span className="lu-info-val">+{new_proficiency_bonus}</span></div>
 
                                     {isFighter && (<>
                                         <div className="lu-info-row"><span>Second Wind Uses</span><span className="lu-info-val">{second_wind_uses}</span></div>
@@ -412,9 +406,18 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                     {isMonk && (<>
                                         <div className="lu-info-row"><span>Martial Arts Die</span><span className="lu-info-val">d{martial_arts_die}</span></div>
                                         {focus_points > 0 && <div className="lu-info-row"><span>Focus Points</span><span className="lu-info-val">{focus_points}</span></div>}
-                                        {unarmored_movement > 0 && <div className="lu-info-row"><span>Unarmored Movement</span><span className="lu-info-val">+{unarmored_movement} ft Speed</span></div>}
+                                        {unarmored_movement > 0 && <div className="lu-info-row"><span>Unarmored Movement</span><span className="lu-info-val">+{unarmored_movement} ft</span></div>}
                                         {new_level >= 5 && <div className="lu-info-row"><span>Attacks per Action</span><span className="lu-info-val">{extra_attacks}</span></div>}
-                                        {new_level === 2 && <div className="lu-info-row"><span>Focus Points Restore</span><span className="lu-info-val">Short Rest</span></div>}
+                                    </>)}
+
+                                    {isPaladin && (<>
+                                        <div className="lu-info-row"><span>Lay On Hands Pool</span><span className="lu-info-val">{lay_on_hands_pool} HP</span></div>
+                                        {paladin_channel_divinity > 0 && <div className="lu-info-row"><span>Channel Divinity Uses</span><span className="lu-info-val">{paladin_channel_divinity}</span></div>}
+                                        <div className="lu-info-row"><span>Prepared Spells</span><span className="lu-info-val">{paladin_prepared_spells}</span></div>
+                                        <div className="lu-info-row"><span>Spell Slots</span><span className="lu-info-val" style={{ fontSize: '.72rem' }}>{paladin_slot_summary}</span></div>
+                                        {new_level >= 5 && <div className="lu-info-row"><span>Attacks per Action</span><span className="lu-info-val">{extra_attacks}</span></div>}
+                                        {new_level === 6 && <div className="lu-info-row"><span>Aura of Protection</span><span className="lu-info-val">10 ft, +CHA to saves</span></div>}
+                                        {new_level === 18 && <div className="lu-info-row"><span>Aura Expansion</span><span className="lu-info-val">30 ft aura</span></div>}
                                     </>)}
                                 </div>
 
@@ -431,7 +434,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                             </>
                         )}
 
-                        {/* ── Subclass ── */}
                         {currentStep === 'subclass' && (<>
                             <div className="lu-step-label">{subclassLabel}</div>
                             <div className="lu-subclass-grid">
@@ -452,7 +454,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                             )}
                         </>)}
 
-                        {/* ── ASI ── */}
                         {currentStep === 'asi' && (<>
                             <div className="lu-step-label">Ability Score Improvement</div>
                             <div className="lu-asi-mode">
@@ -498,7 +499,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                             </>)}
                         </>)}
 
-                        {/* ── Maneuvers ── */}
                         {currentStep === 'maneuvers' && (<>
                             <div className="lu-step-label">
                                 Choose {maneuversToGain} maneuver{maneuversToGain > 1 ? 's' : ''}
@@ -542,7 +542,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                             </div>
                         </>)}
 
-                        {/* ── EK Spells ── */}
                         {currentStep === 'ek_spells' && (<>
                             <div className="lu-step-label">
                                 {new_level === 3 ? 'Eldritch Knight — Choose Starting Spells' : 'Learn New Spells'}

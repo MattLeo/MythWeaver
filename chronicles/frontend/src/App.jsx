@@ -20,6 +20,7 @@ import {
   getClericFeatures,
   getDruidFeatures,
   getMonkFeatures,
+  getPaladinFeatures,
   hitDieForClass,
   proficiencyForLevel,
   FIGHTER_ASI_LEVELS,
@@ -28,6 +29,7 @@ import {
   CLERIC_ASI_LEVELS,
   DRUID_ASI_LEVELS,
   MONK_ASI_LEVELS,
+  PALADIN_ASI_LEVELS,
   barbarianRageUses,
   barbarianRageDamage,
   barbarianWeaponMastery,
@@ -47,6 +49,10 @@ import {
   monkFocusPoints,
   monkMartialArtsDie,
   monkUnarmoredMovement,
+  paladinLayOnHandsPool,
+  paladinChannelDivinityUses,
+  paladinPreparedSpells,
+  paladinSlotSummary,
 } from './constants.js'
 
 const PHASE = {
@@ -193,6 +199,7 @@ export default function App() {
     const isCleric    = p.class === 'Cleric'
     const isDruid     = p.class === 'Druid'
     const isMonk      = p.class === 'Monk'
+    const isPaladin   = p.class === 'Paladin'
  
     // ── Fighter scalars ─────────────────────────────────────────────────────
     const secondWindUses  = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
@@ -211,6 +218,7 @@ export default function App() {
         ? (newLevel >= 5 ? 2 : 1)
         : (isBard && p.subclass === 'College of Valor' && newLevel >= 6) ? 2
         : (isMonk && newLevel >= 5) ? 2
+        : (isPaladin && newLevel >= 5) ? 2
         : 1
  
     // ── Barbarian scalars ───────────────────────────────────────────────────
@@ -238,9 +246,15 @@ export default function App() {
     const druidSlots         = isDruid ? druidSlotSummary(newLevel)     : ''
  
     // ── Monk scalars ────────────────────────────────────────────────────────
-    const focusPoints          = isMonk ? monkFocusPoints(newLevel)        : 0
-    const martialArtsDie       = isMonk ? monkMartialArtsDie(newLevel)     : 0
-    const unarmoredMovement    = isMonk ? monkUnarmoredMovement(newLevel)   : 0
+    const focusPoints       = isMonk ? monkFocusPoints(newLevel)       : 0
+    const martialArtsDie    = isMonk ? monkMartialArtsDie(newLevel)    : 0
+    const unarmoredMovement = isMonk ? monkUnarmoredMovement(newLevel) : 0
+ 
+    // ── Paladin scalars ─────────────────────────────────────────────────────
+    const layOnHandsPool       = isPaladin ? paladinLayOnHandsPool(newLevel)       : 0
+    const paladinCdUses        = isPaladin ? paladinChannelDivinityUses(newLevel)  : 0
+    const paladinPrepared      = isPaladin ? paladinPreparedSpells(newLevel)       : 0
+    const paladinSlots         = isPaladin ? paladinSlotSummary(newLevel)          : ''
  
     // ── ASI ─────────────────────────────────────────────────────────────────
     const asiAvailable = isFighter
@@ -255,11 +269,12 @@ export default function App() {
               ? DRUID_ASI_LEVELS.includes(newLevel)
               : isMonk
                 ? MONK_ASI_LEVELS.includes(newLevel)
-                : [4, 8, 12, 16, 19].includes(newLevel)
+                : isPaladin
+                  ? PALADIN_ASI_LEVELS.includes(newLevel)
+                  : [4, 8, 12, 16, 19].includes(newLevel)
  
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
  
-    // ── Features ─────────────────────────────────────────────────────────────
     const newFeatures = isFighter
       ? getFighterFeatures(p, newLevel)
       : isBarbarian
@@ -272,7 +287,9 @@ export default function App() {
               ? getDruidFeatures(p, newLevel)
               : isMonk
                 ? getMonkFeatures(p, newLevel)
-                : []
+                : isPaladin
+                  ? getPaladinFeatures(p, newLevel)
+                  : []
  
     return {
       new_level:              newLevel,
@@ -312,6 +329,11 @@ export default function App() {
       focus_points:           focusPoints,
       martial_arts_die:       martialArtsDie,
       unarmored_movement:     unarmoredMovement,
+      // Paladin
+      lay_on_hands_pool:      layOnHandsPool,
+      paladin_channel_divinity: paladinCdUses,
+      paladin_prepared_spells: paladinPrepared,
+      paladin_slot_summary:   paladinSlots,
     }
   }
 

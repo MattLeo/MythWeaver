@@ -993,6 +993,117 @@ export function monkUnarmoredMovement(level) {
     return 30
 }
 
+// ─── Paladin ──────────────────────────────────────────────────────────────────
+ 
+export const PALADIN_SUBCLASSES = [
+    {
+        name: 'Oath of Devotion',
+        desc: 'Uphold the ideals of justice and order. Sacred Weapon imbues your blade with holy power, and Holy Nimbus floods your aura with divine radiance.',
+    },
+    {
+        name: 'Oath of Glory',
+        desc: 'Strive for the heights of heroism. Inspire allies with Temporary HP after smiting, grant Speed bonuses with your aura, and deflect attacks with Glorious Defense.',
+    },
+    {
+        name: 'Oath of the Ancients',
+        desc: 'Preserve life and light in the world. Restrain foes with spectral vines, grant your allies Resistance to energy damage, and shrug off death itself.',
+    },
+    {
+        name: 'Oath of Vengeance',
+        desc: 'Punish evildoers at any cost. Mark a foe with Vow of Enmity for Advantage on attacks, cut off retreats with Relentless Avenger, and sprout wings at level 20.',
+    },
+]
+ 
+export const PALADIN_BASE_FEATURES = {
+    1:  ['Lay On Hands', 'Spellcasting', 'Weapon Mastery'],
+    2:  ['Fighting Style', "Paladin's Smite"],
+    3:  ['Channel Divinity', 'Paladin Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Extra Attack', 'Faithful Steed'],
+    6:  ['Aura of Protection'],
+    7:  ['Subclass Feature'],
+    8:  ['Ability Score Improvement'],
+    9:  ['Abjure Foes'],
+    10: ['Aura of Courage'],
+    11: ['Radiant Strikes'],
+    12: ['Ability Score Improvement'],
+    13: [],
+    14: ['Restoring Touch'],
+    15: ['Subclass Feature'],
+    16: ['Ability Score Improvement'],
+    17: [],
+    18: ['Aura Expansion'],
+    19: ['Epic Boon'],
+    20: ['Subclass Feature'],
+}
+ 
+export const PALADIN_SUBCLASS_FEATURES = {
+    'Oath of Devotion': {
+        3:  ['Oath of Devotion Spells', 'Sacred Weapon'],
+        7:  ['Aura of Devotion'],
+        15: ['Smite of Protection'],
+        20: ['Holy Nimbus'],
+    },
+    'Oath of Glory': {
+        3:  ['Oath of Glory Spells', 'Inspiring Smite', 'Peerless Athlete'],
+        7:  ['Aura of Alacrity'],
+        15: ['Glorious Defense'],
+        20: ['Living Legend'],
+    },
+    'Oath of the Ancients': {
+        3:  ['Oath of the Ancients Spells', "Nature's Wrath"],
+        7:  ['Aura of Warding'],
+        15: ['Undying Sentinel'],
+        20: ['Elder Champion'],
+    },
+    'Oath of Vengeance': {
+        3:  ['Oath of Vengeance Spells', 'Vow of Enmity'],
+        7:  ['Relentless Avenger'],
+        15: ['Soul of Vengeance'],
+        20: ['Avenging Angel'],
+    },
+}
+ 
+export const PALADIN_ASI_LEVELS = [4, 8, 12, 16, 19]
+ 
+export function getPaladinFeatures(player, newLevel) {
+    const base = (PALADIN_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (PALADIN_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+// Lay on Hands pool = 5 × Paladin level
+export function paladinLayOnHandsPool(level) {
+    return level * 5
+}
+ 
+// Channel Divinity: 0 before L3, 2 from L3-10, 3 from L11+
+export function paladinChannelDivinityUses(level) {
+    if (level < 3)   return 0
+    if (level < 11)  return 2
+    return 3
+}
+ 
+// Prepared spells column from the PHB table
+export function paladinPreparedSpells(level) {
+    const table = [0,2,3,4,5,6,6,7,7,9,9,10,10,11,11,12,12,14,14,15,15]
+    return table[level] || 15
+}
+ 
+// Half-caster slot table: max level 5 slots
+export function paladinSlotSummary(level) {
+    const slots = {
+        1: [2,0,0,0,0], 2: [2,0,0,0,0], 3: [3,0,0,0,0], 4: [3,0,0,0,0],
+        5: [4,2,0,0,0], 6: [4,2,0,0,0], 7: [4,3,0,0,0], 8: [4,3,0,0,0],
+        9: [4,3,2,0,0], 10:[4,3,2,0,0], 11:[4,3,3,0,0], 12:[4,3,3,0,0],
+        13:[4,3,3,1,0], 14:[4,3,3,1,0], 15:[4,3,3,2,0], 16:[4,3,3,2,0],
+        17:[4,3,3,3,1], 18:[4,3,3,3,1], 19:[4,3,3,3,2], 20:[4,3,3,3,2],
+    }
+    return (slots[level] || slots[20]).filter(s => s > 0).join('/')
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function xpToNextLevel(level) {

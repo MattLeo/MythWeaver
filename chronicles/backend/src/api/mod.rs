@@ -253,6 +253,24 @@ pub async fn create_campaign(
         }
     }
 
+    // ── Paladin: seed initial spell slots + learn Divine Smite + Find Steed ──
+    if p.class == "Paladin" {
+        // Seed level 1 spell slots (2 × L1 slots)
+        if let Err(e) = spells_db::seed_paladin_spell_slots(pool, &camp.id, &p.id, 1).await {
+            tracing::warn!("Failed to seed Paladin spell slots: {}", e);
+        }
+ 
+        // Divine Smite — always prepared from level 2 (seed at creation so LLM DM knows it)
+        // Seed as 'prepared' now; it becomes a free-cast ability tracked as an ability at level 2
+        if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Divine Smite").await {
+            if let Some(spell_id) = spell["id"].as_str() {
+                let _ = spells_db::learn_spell(
+                    pool, &camp.id, &p.id, spell_id, "always_prepared", "paladin"
+                ).await;
+            }
+        }
+    }
+
     if let Err(e) = player::seed_background_proficiencies(
         pool, &camp.id, &p.id,
         &req.player_background_skill_1,
@@ -480,6 +498,14 @@ pub async fn level_up(
             pool, &campaign_id, &p.id, result.new_level
         ).await {
             tracing::warn!("Failed to update full caster spell slots: {}", e);
+        }
+    }
+
+    if p.class == "Paladin" {
+        if let Err(e) = spells_db::seed_paladin_spell_slots(
+            pool, &campaign_id, &p.id, result.new_level
+        ).await {
+            tracing::warn!("Failed to update Paladin spell slots: {}", e);
         }
     }
 
@@ -1495,8 +1521,22 @@ async fn seed_class_abilities(
              1, "manual"),
         ],
         "Paladin" => vec![
-            ("Lay on Hands", Some("Healing pool equal to 5 × paladin level. Use to restore HP or cure disease/poison."), 5, "long_rest"),
-            ("Divine Smite", Some("Expend a spell slot on a hit to deal extra radiant damage."), 1, "per_turn"),
+            ("Lay On Hands",
+             Some("Bonus Action: touch a creature and restore HP from your pool (pool = 5 × Paladin \
+                   level, restored on Long Rest). Expend 5 HP from the pool to remove the Poisoned \
+                   condition instead. Level 14 (Restoring Touch): also expend 5 HP per condition \
+                   removed: Blinded, Charmed, Deafened, Frightened, Paralyzed, or Stunned."),
+             5, "long_rest"),  // 5 HP pool at level 1; updated each level-up
+            ("Weapon Mastery",
+             Some("Use the Mastery property of 2 weapons you are proficient with. \
+                   Change choices after each Long Rest."),
+             1, "manual"),
+            ("Channel Divinity",
+             Some("Channel Divinity unlocks at level 3 (2 uses, regain 1 on Short Rest). \
+                   Divine Sense: Bonus Action — detect Celestials, Fiends, and Undead within 60 ft, \
+                   plus consecrated/desecrated places, for 10 minutes. \
+                   Additional effects from your Sacred Oath at level 3."),
+             0, "short_rest"),  // 0 uses until level 3
         ],
         "Ranger" => vec![
             ("Favored Enemy", Some("Advantage on Survival to track, INT checks to recall info about favored enemy type."), 1, "manual"),
@@ -1574,6 +1614,7 @@ async fn seed_level_up_abilities_direct(
         "Cleric"    => seed_level_up_abilities_cleric(pool, campaign_id, player_id, new_level, subclass).await,
         "Druid"     => seed_level_up_abilities_druid(pool, campaign_id, player_id, new_level, subclass).await,
         "Monk"      => seed_level_up_abilities_monk(pool, campaign_id, player_id, new_level, subclass).await,
+        "Paladin"   => seed_level_up_abilities_paladin(pool, campaign_id, player_id, new_level, subclass).await,
         _           => {}
     }
 }
@@ -3660,6 +3701,541 @@ async fn seed_level_up_abilities_monk(
                               You can have only one creature under this effect at a time. \
                               You can end the vibrations harmlessly (no action required)."),
                         1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_paladin(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    let player = match player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let cha_mod = crate::models::Player::modifier(player.cha).max(1);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            if !has("Paladin's Smite") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Paladin's Smite",
+                    Some("Divine Smite is always prepared. Once per Long Rest, you can cast it \
+                          without expending a spell slot (Bonus Action after hitting with a weapon). \
+                          Divine Smite deals 2d8 Radiant damage, +1d8 if the target is a Fiend or \
+                          Undead, and +1d8 per additional spell slot level above 1."),
+                    1, "long_rest").await;
+            }
+            // Also learn Divine Smite as always-prepared if not already done
+            if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Divine Smite").await {
+                if let Some(id) = spell["id"].as_str() {
+                    let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "paladin").await;
+                }
+            }
+        }
+        5 => {
+            if !has("Faithful Steed") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Faithful Steed",
+                    Some("Find Steed is always prepared. Once per Long Rest, you can cast it \
+                          without expending a spell slot."),
+                    1, "long_rest").await;
+            }
+            // Learn Find Steed as always-prepared
+            if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Find Steed").await {
+                if let Some(id) = spell["id"].as_str() {
+                    let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "paladin").await;
+                }
+            }
+        }
+        6 => {
+            if !has("Aura of Protection") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Aura of Protection",
+                    Some("You radiate a protective aura in a 10-foot Emanation (while not \
+                          Incapacitated). You and allies in the aura gain a bonus to saving throws \
+                          equal to your CHA modifier (min +1). Only one Paladin's Aura of Protection \
+                          applies at a time. Level 18 (Aura Expansion): range increases to 30 feet."),
+                    1, "manual").await;
+            }
+        }
+        9 => {
+            if !has("Abjure Foes") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Abjure Foes",
+                    Some("Magic action: expend a Channel Divinity use. Target up to CHA modifier \
+                          creatures (min 1) you can see within 60 ft. Each makes a WIS save (DC = \
+                          spell save DC) or has the Frightened condition for 1 minute or until it \
+                          takes damage. While Frightened this way, the creature can only do one of: \
+                          move, take an action, or take a Bonus Action on its turn."),
+                    1, "manual").await;
+            }
+        }
+        10 => {
+            if !has("Aura of Courage") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Aura of Courage",
+                    Some("You and your allies have Immunity to the Frightened condition while in \
+                          your Aura of Protection. If a Frightened ally enters the aura, the \
+                          condition has no effect on them while there."),
+                    1, "manual").await;
+            }
+        }
+        11 => {
+            if !has("Radiant Strikes") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Radiant Strikes",
+                    Some("When you hit a target with a Melee weapon or Unarmed Strike, the target \
+                          takes an extra 1d8 Radiant damage."),
+                    1, "manual").await;
+            }
+        }
+        14 => {
+            if !has("Restoring Touch") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Restoring Touch",
+                    Some("When you use Lay On Hands on a creature, you can also remove conditions: \
+                          Blinded, Charmed, Deafened, Frightened, Paralyzed, or Stunned. \
+                          Expend 5 HP from the Lay On Hands pool per condition removed (those \
+                          points don't also restore Hit Points)."),
+                    1, "manual").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Oath of Devotion") => match new_level {
+            3 => {
+                if !has("Sacred Weapon") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Sacred Weapon",
+                        Some("When you take the Attack action, expend a Channel Divinity use to imbue \
+                              one held Melee weapon with positive energy for 10 minutes (or until \
+                              re-used or the weapon leaves your hand). While active: \
+                              add CHA modifier to attack rolls with the weapon (min +1); \
+                              each hit deals normal damage type or Radiant (your choice); \
+                              weapon emits Bright Light 20 ft and Dim Light 20 ft beyond."),
+                        1, "manual").await;
+                }
+                if !has("Oath of Devotion Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Oath of Devotion Spells",
+                        Some("Always prepared (don't count against your limit): \
+                              L3: Protection from Evil and Good, Shield of Faith. \
+                              L5: Aid, Zone of Truth. L9: Beacon of Hope, Dispel Magic. \
+                              L13: Freedom of Movement, Guardian of Faith. \
+                              L17: Commune, Flame Strike."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Protection from Evil and Good", "Shield of Faith"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_devotion").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Aid", "Zone of Truth"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_devotion").await;
+                        }
+                    }
+                }
+            }
+            7 => {
+                if !has("Aura of Devotion") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Aura of Devotion",
+                        Some("You and your allies have Immunity to the Charmed condition while in \
+                              your Aura of Protection. If a Charmed ally enters the aura, the \
+                              condition has no effect on them while there."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Beacon of Hope", "Dispel Magic"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_devotion").await;
+                        }
+                    }
+                }
+            }
+            9 => {
+                for spell_name in &["Beacon of Hope", "Dispel Magic"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_devotion").await;
+                        }
+                    }
+                }
+            }
+            13 => {
+                for spell_name in &["Freedom of Movement", "Guardian of Faith"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_devotion").await;
+                        }
+                    }
+                }
+            }
+            15 => {
+                if !has("Smite of Protection") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Smite of Protection",
+                        Some("Whenever you cast Divine Smite, you and your allies have Half Cover \
+                              while in your Aura of Protection until the start of your next turn."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Commune", "Flame Strike"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_devotion").await;
+                        }
+                    }
+                }
+            }
+            17 => {
+                for spell_name in &["Commune", "Flame Strike"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_devotion").await;
+                        }
+                    }
+                }
+            }
+            20 => {
+                if !has("Holy Nimbus") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Holy Nimbus",
+                        Some("Bonus Action: imbue your Aura of Protection with holy power for \
+                              10 minutes (or end freely). Once per Long Rest, or expend a level 5 \
+                              slot to restore. While active: \
+                              Holy Ward — Advantage on saves forced by Fiends or Undead. \
+                              Radiant Damage — enemies starting their turn in the aura take \
+                                CHA modifier + Proficiency Bonus Radiant damage. \
+                              Sunlight — the aura fills with Bright Light that is sunlight."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Oath of Glory") => match new_level {
+            3 => {
+                if !has("Inspiring Smite") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Inspiring Smite",
+                        Some("Immediately after casting Divine Smite, expend a Channel Divinity use \
+                              to distribute Temporary HP to creatures of your choice within 30 ft \
+                              (can include you). Total = 2d8 + Paladin level, split however you like."),
+                        1, "manual").await;
+                }
+                if !has("Peerless Athlete") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Peerless Athlete",
+                        Some("Bonus Action: expend a Channel Divinity use. For 1 hour: \
+                              Advantage on STR (Athletics) and DEX (Acrobatics) checks; \
+                              Long and High Jump distances increase by 10 feet (costs movement normally)."),
+                        1, "manual").await;
+                }
+                if !has("Oath of Glory Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Oath of Glory Spells",
+                        Some("Always prepared: L3: Guiding Bolt, Heroism. \
+                              L5: Enhance Ability, Magic Weapon. L9: Haste, Protection from Energy. \
+                              L13: Compulsion, Freedom of Movement. \
+                              L17: Legend Lore, Yolande's Regal Presence."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Guiding Bolt", "Heroism"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_glory").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Enhance Ability", "Magic Weapon"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_glory").await;
+                        }
+                    }
+                }
+            }
+            7 => {
+                if !has("Aura of Alacrity") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Aura of Alacrity",
+                        Some("Your Speed increases by 10 feet. Whenever an ally enters your Aura \
+                              of Protection for the first time on a turn or starts their turn there, \
+                              that ally's Speed increases by 10 feet until end of their next turn."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Haste", "Protection from Energy"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_glory").await;
+                        }
+                    }
+                }
+            }
+            13 => {
+                for spell_name in &["Compulsion", "Freedom of Movement"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_glory").await;
+                        }
+                    }
+                }
+            }
+            15 => {
+                if !has("Glorious Defense") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Glorious Defense",
+                        Some("Reaction: when you or a creature within 10 ft is hit by an attack, \
+                              grant a bonus to the target's AC equal to your CHA modifier (min +1), \
+                              potentially causing the attack to miss. If it misses, you can make one \
+                              weapon attack against the attacker as part of this Reaction (if in range). \
+                              Uses = CHA modifier (min 1). Recharges on Long Rest."),
+                        cha_mod, "long_rest").await;
+                }
+                for spell_name in &["Legend Lore", "Yolande's Regal Presence"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_glory").await;
+                        }
+                    }
+                }
+            }
+            20 => {
+                if !has("Living Legend") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Living Legend",
+                        Some("Bonus Action: gain the following for 10 minutes (end freely). \
+                              Once per Long Rest, or expend a level 5 slot to restore. \
+                              Charismatic — Advantage on all CHA checks. \
+                              Saving Throw Reroll — when you fail a save, take a Reaction to \
+                                reroll it; you must use the new roll. \
+                              Unerring Strike — once per turn when you miss with a weapon attack, \
+                                cause it to hit instead."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Oath of the Ancients") => match new_level {
+            3 => {
+                if !has("Nature's Wrath") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Nature's Wrath",
+                        Some("Magic action: expend a Channel Divinity use to conjure spectral vines \
+                              around nearby creatures. Each creature of your choice within 15 ft that \
+                              you can see makes a STR save (DC = spell save DC) or has the Restrained \
+                              condition for 1 minute. A Restrained creature repeats the save at the \
+                              end of each of its turns, ending the effect on success."),
+                        1, "manual").await;
+                }
+                if !has("Oath of the Ancients Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Oath of the Ancients Spells",
+                        Some("Always prepared: L3: Ensnaring Strike, Speak with Animals. \
+                              L5: Misty Step, Moonbeam. L9: Plant Growth, Protection from Energy. \
+                              L13: Ice Storm, Stoneskin. L17: Commune with Nature, Tree Stride."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Ensnaring Strike", "Speak with Animals"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_the_ancients").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Misty Step", "Moonbeam"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_the_ancients").await;
+                        }
+                    }
+                }
+            }
+            7 => {
+                if !has("Aura of Warding") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Aura of Warding",
+                        Some("Ancient magic forms an eldritch ward around you. You and allies in \
+                              your Aura of Protection have Resistance to Necrotic, Psychic, and \
+                              Radiant damage."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Plant Growth", "Protection from Energy"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_the_ancients").await;
+                        }
+                    }
+                }
+            }
+            13 => {
+                for spell_name in &["Ice Storm", "Stoneskin"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_the_ancients").await;
+                        }
+                    }
+                }
+            }
+            15 => {
+                if !has("Undying Sentinel") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Undying Sentinel",
+                        Some("When you are reduced to 0 HP and don't die outright, you can drop to \
+                              1 HP instead and regain HP equal to three times your Paladin level. \
+                              Once per Long Rest. \
+                              Additionally, you can't be aged magically and cease visibly aging."),
+                        1, "long_rest").await;
+                }
+                for spell_name in &["Commune with Nature", "Tree Stride"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_the_ancients").await;
+                        }
+                    }
+                }
+            }
+            20 => {
+                if !has("Elder Champion") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Elder Champion",
+                        Some("Bonus Action: imbue your Aura with primal power for 1 minute (end freely). \
+                              Once per Long Rest, or expend a level 5 slot to restore. \
+                              Diminish Defiance — enemies in the aura have Disadvantage on saves \
+                                against your spells and Channel Divinity options. \
+                              Regeneration — regain 10 HP at the start of each of your turns. \
+                              Swift Spells — spells with a casting time of 1 action can be cast as \
+                                a Bonus Action instead."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Oath of Vengeance") => match new_level {
+            3 => {
+                if !has("Vow of Enmity") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Vow of Enmity",
+                        Some("When you take the Attack action, expend a Channel Divinity use to utter \
+                              a vow of enmity against a creature you can see within 30 ft. You have \
+                              Advantage on attack rolls against that creature for 1 minute or until \
+                              you use this feature again. If the creature drops to 0 HP before the \
+                              vow ends, you can transfer it to a different creature within 30 ft \
+                              (no action required)."),
+                        1, "manual").await;
+                }
+                if !has("Oath of Vengeance Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Oath of Vengeance Spells",
+                        Some("Always prepared: L3: Bane, Hunter's Mark. \
+                              L5: Hold Person, Misty Step. L9: Haste, Protection from Energy. \
+                              L13: Banishment, Dimension Door. L17: Hold Monster, Scrying."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Bane", "Hunter's Mark"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_vengeance").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Hold Person", "Misty Step"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_vengeance").await;
+                        }
+                    }
+                }
+            }
+            7 => {
+                if !has("Relentless Avenger") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Relentless Avenger",
+                        Some("When you hit a creature with an Opportunity Attack, you can reduce \
+                              its Speed to 0 until the end of the current turn. You can then move \
+                              up to half your Speed as part of the same Reaction. This movement \
+                              doesn't provoke Opportunity Attacks."),
+                        1, "per_turn").await;
+                }
+                for spell_name in &["Haste", "Protection from Energy"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_vengeance").await;
+                        }
+                    }
+                }
+            }
+            13 => {
+                for spell_name in &["Banishment", "Dimension Door"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_vengeance").await;
+                        }
+                    }
+                }
+            }
+            15 => {
+                if !has("Soul of Vengeance") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Soul of Vengeance",
+                        Some("Immediately after a creature under the effect of your Vow of Enmity \
+                              hits or misses with an attack roll, you can take a Reaction to make \
+                              one melee attack against that creature if it's within range."),
+                        1, "per_turn").await;
+                }
+                for spell_name in &["Hold Monster", "Scrying"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "oath_of_vengeance").await;
+                        }
+                    }
+                }
+            }
+            20 => {
+                if !has("Avenging Angel") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Avenging Angel",
+                        Some("Bonus Action: gain the following for 10 minutes (end freely). \
+                              Once per Long Rest, or expend a level 5 slot to restore. \
+                              Flight — sprout spectral wings, gain Fly Speed 60 ft, and can hover. \
+                              Frightful Aura — enemies starting their turn in your Aura of Protection \
+                                make a WIS save (DC = spell save DC) or have the Frightened condition \
+                                for 1 minute or until they take damage. Attack rolls against the \
+                                Frightened creature have Advantage."),
+                        1, "long_rest").await;
                 }
             }
             _ => {}

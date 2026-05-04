@@ -329,6 +329,160 @@ pub async fn seed_ek_spell_slots(
     Ok(())
 }
 
+pub fn full_caster_slot_table(level: i64) -> [i64; 9] {
+    match level {
+        1  => [2,0,0,0,0,0,0,0,0],
+        2  => [3,0,0,0,0,0,0,0,0],
+        3  => [4,2,0,0,0,0,0,0,0],
+        4  => [4,3,0,0,0,0,0,0,0],
+        5  => [4,3,2,0,0,0,0,0,0],
+        6  => [4,3,3,0,0,0,0,0,0],
+        7  => [4,3,3,1,0,0,0,0,0],
+        8  => [4,3,3,2,0,0,0,0,0],
+        9  => [4,3,3,3,1,0,0,0,0],
+        10 => [4,3,3,3,2,0,0,0,0],
+        11 => [4,3,3,3,2,1,0,0,0],
+        12 => [4,3,3,3,2,1,0,0,0],
+        13 => [4,3,3,3,2,1,1,0,0],
+        14 => [4,3,3,3,2,1,1,0,0],
+        15 => [4,3,3,3,2,1,1,1,0],
+        16 => [4,3,3,3,2,1,1,1,0],
+        17 => [4,3,3,3,2,1,1,1,1],
+        18 => [4,3,3,3,3,1,1,1,1],
+        19 => [4,3,3,3,3,2,1,1,1],
+        20 => [4,3,3,3,3,2,2,1,1],
+        _  => [0,0,0,0,0,0,0,0,0],
+    }
+}
+
+pub async fn seed_full_caster_spell_slots(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    class_level: i64,
+) -> Result<()> {
+    let slots = full_caster_slot_table(class_level);
+ 
+    for (i, &max) in slots.iter().enumerate() {
+        let level = (i + 1) as i64;
+ 
+        if max == 0 {
+            // Remove any row that no longer has slots (shouldn't happen in normal play)
+            sqlx::query!(
+                "DELETE FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+                player_id, level
+            )
+            .execute(pool)
+            .await?;
+            continue;
+        }
+ 
+        let existing = sqlx::query!(
+            "SELECT id, current_slots FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+            player_id, level
+        )
+        .fetch_optional(pool)
+        .await?;
+ 
+        if let Some(row) = existing {
+            // Raise max without touching current (player may have expended some)
+            let new_current = row.current_slots.min(max);
+            sqlx::query!(
+                "UPDATE spell_slots SET max_slots = ?, current_slots = ?, updated_at = datetime('now') WHERE id = ?",
+                max, new_current, row.id
+            )
+            .execute(pool)
+            .await?;
+        } else {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query!(
+                "INSERT INTO spell_slots
+                 (id, campaign_id, player_id, slot_level, current_slots, max_slots)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                id, campaign_id, player_id, level, max, max
+            )
+            .execute(pool)
+            .await?;
+        }
+    }
+ 
+    Ok(())
+}
+
+pub fn paladin_slot_table(level: i64) -> [i64; 5] {
+    match level {
+        1  => [2,0,0,0,0],
+        2  => [2,0,0,0,0],
+        3  => [3,0,0,0,0],
+        4  => [3,0,0,0,0],
+        5  => [4,2,0,0,0],
+        6  => [4,2,0,0,0],
+        7  => [4,3,0,0,0],
+        8  => [4,3,0,0,0],
+        9  => [4,3,2,0,0],
+        10 => [4,3,2,0,0],
+        11 => [4,3,3,0,0],
+        12 => [4,3,3,0,0],
+        13 => [4,3,3,1,0],
+        14 => [4,3,3,1,0],
+        15 => [4,3,3,2,0],
+        16 => [4,3,3,2,0],
+        17 => [4,3,3,3,1],
+        18 => [4,3,3,3,1],
+        19 => [4,3,3,3,2],
+        20 => [4,3,3,3,2],
+        _  => [0,0,0,0,0],
+    }
+}
+
+pub async fn seed_paladin_spell_slots(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    paladin_level: i64,
+) -> Result<()> {
+    let slots = paladin_slot_table(paladin_level);
+ 
+    for (i, &max) in slots.iter().enumerate() {
+        let level = (i + 1) as i64;
+ 
+        if max == 0 {
+            sqlx::query!(
+                "DELETE FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+                player_id, level
+            )
+            .execute(pool).await?;
+            continue;
+        }
+ 
+        let existing = sqlx::query!(
+            "SELECT id, current_slots FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+            player_id, level
+        )
+        .fetch_optional(pool).await?;
+ 
+        if let Some(row) = existing {
+            let new_current = row.current_slots.min(max);
+            sqlx::query!(
+                "UPDATE spell_slots SET max_slots = ?, current_slots = ?, updated_at = datetime('now') WHERE id = ?",
+                max, new_current, row.id
+            )
+            .execute(pool).await?;
+        } else {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query!(
+                "INSERT INTO spell_slots
+                 (id, campaign_id, player_id, slot_level, current_slots, max_slots)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                id, campaign_id, player_id, level, max, max
+            )
+            .execute(pool).await?;
+        }
+    }
+ 
+    Ok(())
+}
+
 /// EK spell slot table: returns (level1, level2, level3, level4) max slots
 pub fn ek_slot_table(fighter_level: i64) -> (i64, i64, i64, i64) {
     match fighter_level {

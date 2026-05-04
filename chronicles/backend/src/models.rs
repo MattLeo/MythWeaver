@@ -189,6 +189,10 @@ pub struct LevelUpResult {
     pub focus_points: i64,
     pub martial_arts_die: i64,
     pub unarmored_movement: i64,
+    // Paladin
+    pub lay_on_hands_pool: i64,
+    pub paladin_channel_divinity: i64,
+    pub paladin_prepared_spells: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
