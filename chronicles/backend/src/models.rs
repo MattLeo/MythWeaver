@@ -177,8 +177,11 @@ pub struct LevelUpResult {
     pub bardic_inspiration_uses: i64,
     pub bard_prepared_spells: i64,
     pub bard_cantrips: i64,
+    // Cleric
+    pub channel_divinity_uses: i64,
+    pub cleric_cantrips: i64,
+    pub cleric_prepared_spells: i64,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpellSlots {

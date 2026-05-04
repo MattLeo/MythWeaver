@@ -77,6 +77,16 @@ pub async fn create_campaign(
         .await;
     }
 
+    if p.class == "Cleric" {
+        let _ = sqlx::query(
+            "UPDATE abilities SET max_uses = 0, current_uses = 0
+             WHERE owner_id = ? AND name = 'Channel Divinity'"
+        )
+        .bind(&p.id)
+        .execute(pool)
+        .await;
+    }
+
     if let Err(e) = player::seed_background_proficiencies(
         pool, &camp.id, &p.id,
         &req.player_background_skill_1,
@@ -1276,9 +1286,25 @@ async fn seed_class_abilities(
         "Wizard" | "Sorcerer" => vec![
             ("Spell Slots (1st)", Some("1st level spell slots."), 2, "long_rest"),
         ],
-        "Cleric" | "Druid" => vec![
+        "Cleric" => vec![
+            ("Channel Divinity",
+             Some("Use Channel Divinity 2 times per rest (regain 1 on Short Rest, all on Long Rest). \
+                   Effects: Divine Spark — Magic action: roll 1d8+WIS to heal or deal Necrotic/Radiant \
+                   damage to a target within 30 ft (CON save for half on damage). Die count grows at \
+                   levels 7 (2d8), 13 (3d8), 18 (4d8). \
+                   Turn Undead — Magic action: Undead within 30 ft make a WIS save or gain Frightened \
+                   and Incapacitated for 1 min. Plus your domain Channel Divinity feature at level 3."),
+             2, "short_rest"),
+            ("Divine Order",
+             Some("Choose one at character creation — \
+                   Protector: proficiency with Martial weapons and training with Heavy armor. \
+                   Thaumaturge: one extra Cleric cantrip; add WIS modifier (min +1) to \
+                   Intelligence (Arcana or Religion) checks."),
+             1, "manual"),
+        ],
+        "Druid" => vec![
             ("Spell Slots (1st)", Some("1st level spell slots."), 2, "long_rest"),
-            ("Channel Divinity", Some("Channel divine energy for effects based on your domain."), 1, "short_rest"),
+            ("Channel Divinity", Some("Channel divine energy for effects based on your circle."), 1, "short_rest"),
         ],
         "Paladin" => vec![
             ("Lay on Hands", Some("Healing pool equal to 5 × paladin level. Use to restore HP or cure disease/poison."), 5, "long_rest"),
@@ -1339,6 +1365,7 @@ async fn seed_level_up_abilities_direct(
         "Fighter"   => seed_level_up_abilities_fighter(pool, campaign_id, player_id, new_level, subclass).await,
         "Barbarian" => seed_level_up_abilities_barbarian(pool, campaign_id, player_id, new_level, subclass).await,
         "Bard"      => seed_level_up_abilities_bard(pool, campaign_id, player_id, new_level, subclass).await,
+        "Cleric"    => seed_level_up_abilities_cleric(pool, campaign_id, player_id, new_level, subclass).await,
         _           => {}
     }
 }
@@ -2199,6 +2226,315 @@ async fn seed_level_up_abilities_bard(
                         "Battle Magic",
                         Some("After you cast a spell that has a casting time of an action, you can \
                               make one attack with a weapon as a Bonus Action."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_cleric(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    // Get current WIS mod for uses that scale with it
+    let player = match crate::db::player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let wis_mod = crate::models::Player::modifier(player.wis).max(1);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            // Channel Divinity unlocked — update from 0 to 2 uses
+            sqlx::query(
+                "UPDATE abilities SET max_uses = 2, current_uses = 2
+                 WHERE owner_id = ? AND name = 'Channel Divinity'"
+            )
+            .bind(player_id)
+            .execute(pool)
+            .await.ok();
+ 
+            if !has("Sear Undead") {
+                // Sear Undead becomes available at level 5 but seed Turn Undead sub-ability note here
+                // Nothing extra to seed — Turn Undead is part of Channel Divinity description
+            }
+        }
+        5 => {
+            if !has("Sear Undead") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Sear Undead",
+                    Some("Whenever you use Turn Undead, roll a number of d8s equal to your WIS \
+                          modifier (min 1d8) and add them together. Each Undead that fails its \
+                          saving throw against that Turn Undead takes Radiant damage equal to the \
+                          roll's total. This damage doesn't end the Turned condition."),
+                    1, "manual").await;
+            }
+        }
+        7 => {
+            if !has("Blessed Strikes") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Blessed Strikes",
+                    Some("Choose one option (your choice, inform the DM): \
+                          Divine Strike — once per turn when you hit with a weapon attack, deal \
+                            +1d8 Necrotic or Radiant damage (your choice). \
+                          Potent Spellcasting — add your WIS modifier to damage dealt by Cleric cantrips. \
+                          At level 14 (Improved Blessed Strikes): Divine Strike increases to +2d8; \
+                          Potent Spellcasting also grants Temporary HP equal to 2×WIS modifier to \
+                          yourself or a creature within 60 ft when you deal cantrip damage."),
+                    1, "manual").await;
+            }
+        }
+        10 => {
+            if !has("Divine Intervention") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Divine Intervention",
+                    Some("Magic action: choose any Cleric spell of level 5 or lower that doesn't \
+                          require a Reaction. Cast it without expending a spell slot or needing \
+                          Material components. Recharges on Long Rest. \
+                          At level 20 (Greater Divine Intervention): you may also choose Wish — \
+                          if you do, you can't use Divine Intervention again until you finish 2d4 \
+                          Long Rests."),
+                    1, "long_rest").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Life Domain") => match new_level {
+            3 => {
+                if !has("Disciple of Life") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Disciple of Life",
+                        Some("When a spell you cast with a spell slot restores HP to a creature, \
+                              that creature regains additional HP equal to 2 + the spell slot's level \
+                              on the turn you cast the spell."),
+                        1, "manual").await;
+                }
+                if !has("Preserve Life") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Preserve Life",
+                        Some("Magic action: expend a Channel Divinity use to evoke healing energy. \
+                              Restore HP equal to 5 × your Cleric level, divided among Bloodied \
+                              creatures within 30 ft of your choice (can include yourself). \
+                              Cannot restore a creature beyond half its HP maximum."),
+                        1, "manual").await;
+                }
+                // Life Domain always-prepared spells (informational note — actual spell learning
+                // is tracked in the spells system separately)
+                if !has("Life Domain Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Life Domain Spells",
+                        Some("Always prepared (don't count against prepared spell limit): \
+                              L3: Aid, Bless, Cure Wounds, Lesser Restoration. \
+                              L5: Mass Healing Word, Revivify. \
+                              L7: Aura of Life, Death Ward. \
+                              L9: Greater Restoration, Mass Cure Wounds."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Blessed Healer") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Blessed Healer",
+                        Some("Immediately after you cast a spell with a spell slot that restores HP \
+                              to one or more creatures other than yourself, you regain HP equal to \
+                              2 + the spell slot's level."),
+                        1, "manual").await;
+                }
+            }
+            17 => {
+                if !has("Supreme Healing") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Supreme Healing",
+                        Some("When you would normally roll dice to restore HP to a creature with a \
+                              spell or Channel Divinity, don't roll — instead use the highest possible \
+                              result for each die. (e.g., 2d6 healing becomes 12.)"),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Light Domain") => match new_level {
+            3 => {
+                if !has("Warding Flare") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Warding Flare",
+                        Some("Reaction: when a creature you can see within 30 ft makes an attack \
+                              roll, impose Disadvantage on the roll as light flares before it hits \
+                              or misses. Uses = WIS modifier (min 1). Recharges on Long Rest."),
+                        wis_mod, "long_rest").await;
+                }
+                if !has("Radiance of the Dawn") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Radiance of the Dawn",
+                        Some("Magic action: expend a Channel Divinity use to emit a flash of light \
+                              in a 30-foot Emanation. Dispels magical Darkness in the area. Each \
+                              creature of your choice in the area makes a CON save (DC = spell save \
+                              DC) — fail: take 2d10 + Cleric level Radiant damage; success: half."),
+                        1, "manual").await;
+                }
+                if !has("Light Domain Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Light Domain Spells",
+                        Some("Always prepared: \
+                              L3: Burning Hands, Faerie Fire, Scorching Ray, See Invisibility. \
+                              L5: Daylight, Fireball. L7: Arcane Eye, Wall of Fire. \
+                              L9: Flame Strike, Scrying."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Improved Warding Flare") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Improved Warding Flare",
+                        Some("Warding Flare now recharges on Short or Long Rest. In addition, \
+                              whenever you use Warding Flare, the target of the triggering attack \
+                              gains Temporary HP equal to 2d6 + your WIS modifier."),
+                        1, "manual").await;
+                }
+                // Update Warding Flare refresh type to short_rest
+                if let Some(a) = existing.iter().find(|a| a.name == "Warding Flare") {
+                    let _ = sqlx::query(
+                        "UPDATE abilities SET refresh_type = 'short_rest' WHERE id = ?"
+                    )
+                    .bind(&a.id)
+                    .execute(pool)
+                    .await;
+                }
+            }
+            17 => {
+                if !has("Corona of Light") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Corona of Light",
+                        Some("Magic action: emit an aura of sunlight for 1 minute (dismiss as no \
+                              action). Bright Light 60-foot radius, Dim Light 30 ft beyond that. \
+                              Enemies in the Bright Light have Disadvantage on saving throws \
+                              against your Radiance of the Dawn and any Fire or Radiant damage spell. \
+                              Uses = WIS modifier (min 1). Recharges on Long Rest."),
+                        wis_mod, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Trickery Domain") => match new_level {
+            3 => {
+                if !has("Blessing of the Trickster") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Blessing of the Trickster",
+                        Some("Magic action: choose yourself or a willing creature within 30 ft. \
+                              That creature has Advantage on DEX (Stealth) checks until you finish \
+                              a Long Rest or use this feature again."),
+                        1, "manual").await;
+                }
+                if !has("Invoke Duplicity") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Invoke Duplicity",
+                        Some("Bonus Action: expend a Channel Divinity use to create a perfect visual \
+                              illusion of yourself in an unoccupied space within 30 ft (lasts 1 min, \
+                              or until dismissed or Incapacitated). While it persists: \
+                              Cast Spells as though in the illusion's space (using your own senses). \
+                              Distract: Advantage on attack rolls against creatures within 5 ft of \
+                              the illusion. \
+                              Move: Bonus Action to move the illusion up to 30 ft (within 120 ft of you)."),
+                        1, "manual").await;
+                }
+                if !has("Trickery Domain Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Trickery Domain Spells",
+                        Some("Always prepared: \
+                              L3: Charm Person, Disguise Self, Invisibility, Pass without Trace. \
+                              L5: Hypnotic Pattern, Nondetection. L7: Confusion, Dimension Door. \
+                              L9: Dominate Person, Modify Memory."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Trickster's Transposition") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Trickster's Transposition",
+                        Some("Whenever you take the Bonus Action to create or move your Invoke \
+                              Duplicity illusion, you can teleport, swapping places with the illusion."),
+                        1, "manual").await;
+                }
+            }
+            17 => {
+                if !has("Improved Duplicity") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Improved Duplicity",
+                        Some("Your Invoke Duplicity illusion is now more powerful: \
+                              Shared Distraction — you and your allies have Advantage on attack \
+                              rolls against any creature within 5 ft of the illusion. \
+                              Healing Illusion — when the illusion ends, you or a creature of your \
+                              choice within 5 ft of it regains HP equal to your Cleric level."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("War Domain") => match new_level {
+            3 => {
+                if !has("Guided Strike") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Guided Strike",
+                        Some("When you or a creature within 30 ft misses with an attack roll, \
+                              expend a Channel Divinity use to give that roll a +10 bonus, \
+                              potentially causing it to hit. To benefit another creature's attack, \
+                              you must use your Reaction."),
+                        1, "manual").await;
+                }
+                if !has("War Priest") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "War Priest",
+                        Some("Bonus Action: make one attack with a weapon or Unarmed Strike. \
+                              Uses = WIS modifier (min 1). Recharges on Short or Long Rest."),
+                        wis_mod, "short_rest").await;
+                }
+                if !has("War Domain Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "War Domain Spells",
+                        Some("Always prepared: \
+                              L3: Guiding Bolt, Magic Weapon, Shield of Faith, Spiritual Weapon. \
+                              L5: Crusader's Mantle, Spirit Guardians. \
+                              L7: Fire Shield, Freedom of Movement. \
+                              L9: Hold Monster, Steel Wind Strike."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("War God's Blessing") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "War God's Blessing",
+                        Some("Expend a Channel Divinity use to cast Shield of Faith or Spiritual \
+                              Weapon without a spell slot. The spell lasts 1 minute and doesn't \
+                              require Concentration. It ends early if you cast the same spell again, \
+                              have the Incapacitated condition, or die."),
+                        1, "manual").await;
+                }
+            }
+            17 => {
+                if !has("Avatar of Battle") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Avatar of Battle",
+                        Some("You gain Resistance to Bludgeoning, Piercing, and Slashing damage."),
                         1, "manual").await;
                 }
             }

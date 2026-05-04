@@ -270,22 +270,28 @@ pub async fn level_up_player(
                 let valor_extra = if player.subclass.as_deref() == Some("College of Valor") && new_level >= 6 { 2 } else { 1 };
                 (valor_extra, 0i64, 0i64, 0i64, 0i64)
             },
+            "Cleric" => (1i64, 0i64, 0i64, 0i64, 0i64),
             _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
         };
  
     let rage_uses   = if player.class == "Barbarian" { barbarian_rage_uses(new_level)   } else { 0 };
     let rage_damage = if player.class == "Barbarian" { barbarian_rage_damage(new_level) } else { 0 };
  
-    let bardic_die             = if player.class == "Bard" { bard_inspiration_die(new_level) } else { 0 };
+    let bardic_die              = if player.class == "Bard" { bard_inspiration_die(new_level) } else { 0 };
     let bardic_inspiration_uses = if player.class == "Bard" { cha_mod.max(1) } else { 0 };
     let bard_prepared_spells_n  = if player.class == "Bard" { bard_prepared_spells(new_level) } else { 0 };
     let bard_cantrips_n         = if player.class == "Bard" { bard_cantrips(new_level) } else { 0 };
+ 
+    let channel_divinity_uses   = if player.class == "Cleric" { cleric_channel_divinity_uses(new_level) } else { 0 };
+    let cleric_cantrips_n       = if player.class == "Cleric" { cleric_cantrips(new_level) } else { 0 };
+    let cleric_prepared_spells_n = if player.class == "Cleric" { cleric_prepared_spells(new_level) } else { 0 };
  
     // ── ASI availability ─────────────────────────────────────────────────────
     let asi_available = match player.class.as_str() {
         "Fighter"   => matches!(new_level, 4 | 6 | 8 | 12 | 14 | 16),
         "Barbarian" => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Bard"      => matches!(new_level, 4 | 8 | 12 | 16 | 19),
+        "Cleric"    => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         _           => Player::is_asi_level(new_level),
     };
  
@@ -383,7 +389,6 @@ pub async fn level_up_player(
  
     // ── Bard-specific DB updates ──────────────────────────────────────────────
     if player.class == "Bard" {
-        // Update Bardic Inspiration uses (= CHA mod, min 1) and die size
         let insp_desc = format!(
             "Bonus Action: grant one Bardic Inspiration die (d{}) to a creature within 60 ft \
              that can see or hear you. They can add it to one failed D20 Test within the next \
@@ -396,13 +401,9 @@ pub async fn level_up_player(
             "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
              WHERE owner_id = ? AND name = 'Bardic Inspiration'"
         )
-        .bind(bardic_inspiration_uses)
-        .bind(bardic_inspiration_uses)
-        .bind(&insp_desc)
-        .bind(player_id)
+        .bind(bardic_inspiration_uses).bind(bardic_inspiration_uses).bind(&insp_desc).bind(player_id)
         .execute(pool).await?;
  
-        // Font of Inspiration at level 5: change refresh type to short_rest
         if new_level == 5 {
             sqlx::query(
                 "UPDATE abilities SET refresh_type = 'short_rest'
@@ -412,19 +413,64 @@ pub async fn level_up_player(
         }
     }
  
+    // ── Cleric-specific DB updates ────────────────────────────────────────────
+    if player.class == "Cleric" {
+        // Update Channel Divinity uses when the table changes (L2→2, L6→3, L18→4)
+        if matches!(new_level, 2 | 6 | 18) {
+            let cd_desc = format!(
+                "Use Channel Divinity {} time{} per rest (regain 1 on Short Rest, all on Long Rest). \
+                 Effects: Divine Spark (heal or damage 1d8+WIS, scales to {}d8 at higher levels) \
+                 and Turn Undead (WIS save or Frightened+Incapacitated for 1 min), \
+                 plus your domain feature.",
+                channel_divinity_uses,
+                if channel_divinity_uses == 1 { "" } else { "s" },
+                match new_level { 2..=6 => 1, 7..=12 => 2, 13..=17 => 3, _ => 4 }
+            );
+            sqlx::query(
+                "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
+                 WHERE owner_id = ? AND name = 'Channel Divinity'"
+            )
+            .bind(channel_divinity_uses).bind(channel_divinity_uses).bind(&cd_desc).bind(player_id)
+            .execute(pool).await?;
+        }
+        // Update Divine Spark die count milestone levels even without full CD use update
+        if matches!(new_level, 7 | 13 | 18) {
+            // Description update already covered above for L18; handle L7 and L13
+            let dice = match new_level { 7..=12 => 2, 13..=17 => 3, _ => 4 };
+            let cd_uses = channel_divinity_uses;
+            let cd_desc = format!(
+                "Use Channel Divinity {} time{} per rest (regain 1 on Short Rest, all on Long Rest). \
+                 Effects: Divine Spark (heal or damage {}d8+WIS) and Turn Undead \
+                 (WIS save or Frightened+Incapacitated), plus your domain feature.",
+                cd_uses,
+                if cd_uses == 1 { "" } else { "s" },
+                dice
+            );
+            sqlx::query(
+                "UPDATE abilities SET description = ?
+                 WHERE owner_id = ? AND name = 'Channel Divinity'"
+            )
+            .bind(&cd_desc).bind(player_id)
+            .execute(pool).await?;
+        }
+        // Warding Flare (Light Domain): update uses to WIS mod when WIS changes via ASI
+        // This is handled in the level up seeder, not here, since we don't track WIS mod changes
+    }
+ 
     // ── Feature list ──────────────────────────────────────────────────────────
     let new_features = match player.class.as_str() {
         "Fighter"   => fighter_features_at_level(&player.class, new_level, player.subclass.as_deref()),
         "Barbarian" => barbarian_features_at_level(new_level, player.subclass.as_deref()),
         "Bard"      => bard_features_at_level(new_level, player.subclass.as_deref()),
+        "Cleric"    => cleric_features_at_level(new_level, player.subclass.as_deref()),
         _           => class_features_generic(&player.class, new_level),
     };
  
-    // ── Spell slots (Bard = full caster; EK = partial) ────────────────────────
-    let spell_slots = if player.class == "Bard" {
-        bard_spell_slots(new_level)
-    } else {
-        eldritch_knight_spell_slots(player.subclass.as_deref(), new_level)
+    // ── Spell slots ───────────────────────────────────────────────────────────
+    let spell_slots = match player.class.as_str() {
+        "Bard"   => bard_spell_slots(new_level),
+        "Cleric" => cleric_spell_slots(new_level),
+        _        => eldritch_knight_spell_slots(player.subclass.as_deref(), new_level),
     };
  
     Ok(LevelUpResult {
@@ -450,6 +496,10 @@ pub async fn level_up_player(
         bardic_inspiration_uses,
         bard_prepared_spells: bard_prepared_spells_n,
         bard_cantrips: bard_cantrips_n,
+        // Cleric
+        channel_divinity_uses,
+        cleric_cantrips: cleric_cantrips_n,
+        cleric_prepared_spells: cleric_prepared_spells_n,
     })
 }
 
@@ -680,6 +730,110 @@ fn bard_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
     features
 }
 
+// ─── Cleric progression ───────────────────────────────────────────────────────
+ 
+pub fn cleric_channel_divinity_uses(level: i64) -> i64 {
+    // PHB table: — (L1), 2 (L2-5), 3 (L6-17), 4 (L18+)
+    match level {
+        1     => 0,
+        2..=5 => 2,
+        6..=17 => 3,
+        _     => 4,
+    }
+}
+ 
+pub fn cleric_cantrips(level: i64) -> i64 {
+    // PHB table: 3 (L1-3), 4 (L4-9), 5 (L10+)
+    match level {
+        1..=3  => 3,
+        4..=9  => 4,
+        _      => 5,
+    }
+}
+ 
+pub fn cleric_prepared_spells(level: i64) -> i64 {
+    // Same table as Bard: 4/5/6/7/9/10/11/12/14/15/16/16/17/17/18/18/19/20/21/22
+    let table = [0i64,4,5,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22];
+    table.get(level as usize).copied().unwrap_or(22)
+}
+ 
+// Cleric is a full caster — identical slot table to Bard
+fn cleric_spell_slots(level: i64) -> Option<SpellSlots> {
+    Some(match level {
+        1  => SpellSlots { level_1: Some(2), level_2: None,    level_3: None,    level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        2  => SpellSlots { level_1: Some(3), level_2: None,    level_3: None,    level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        3  => SpellSlots { level_1: Some(4), level_2: Some(2), level_3: None,    level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        4  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: None,    level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        5  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(2), level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        6  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: None,    level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        7  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(1), level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        8  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(2), level_5: None,    level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        9  => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(1), level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        10 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: None,    level_7: None,    level_8: None,    level_9: None },
+        11 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: None,    level_8: None,    level_9: None },
+        12 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: None,    level_8: None,    level_9: None },
+        13 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: None,    level_9: None },
+        14 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: None,    level_9: None },
+        15 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: Some(1), level_9: None },
+        16 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: Some(1), level_9: None },
+        17 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(2), level_6: Some(1), level_7: Some(1), level_8: Some(1), level_9: Some(1) },
+        18 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(3), level_6: Some(1), level_7: Some(1), level_8: Some(1), level_9: Some(1) },
+        19 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(3), level_6: Some(2), level_7: Some(1), level_8: Some(1), level_9: Some(1) },
+        20 => SpellSlots { level_1: Some(4), level_2: Some(3), level_3: Some(3), level_4: Some(3), level_5: Some(3), level_6: Some(2), level_7: Some(2), level_8: Some(1), level_9: Some(1) },
+        _  => return None,
+    })
+}
+ 
+fn cleric_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Spellcasting".to_string(), "Divine Order".to_string()]),
+        2  => features.push("Channel Divinity".to_string()),
+        3  => features.push("Cleric Subclass".to_string()),
+        4  => features.push("Ability Score Improvement".to_string()),
+        5  => features.push("Sear Undead".to_string()),
+        6  => features.push("Subclass Feature".to_string()),
+        7  => features.push("Blessed Strikes".to_string()),
+        8  => features.push("Ability Score Improvement".to_string()),
+        10 => features.push("Divine Intervention".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        14 => features.push("Improved Blessed Strikes".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        17 => features.push("Subclass Feature".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Greater Divine Intervention".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("Life Domain") => match level {
+            3  => features.extend(["Disciple of Life".to_string(), "Life Domain Spells".to_string(), "Preserve Life".to_string()]),
+            6  => features.push("Blessed Healer".to_string()),
+            17 => features.push("Supreme Healing".to_string()),
+            _  => {}
+        },
+        Some("Light Domain") => match level {
+            3  => features.extend(["Light Domain Spells".to_string(), "Radiance of the Dawn".to_string(), "Warding Flare".to_string()]),
+            6  => features.push("Improved Warding Flare".to_string()),
+            17 => features.push("Corona of Light".to_string()),
+            _  => {}
+        },
+        Some("Trickery Domain") => match level {
+            3  => features.extend(["Blessing of the Trickster".to_string(), "Trickery Domain Spells".to_string(), "Invoke Duplicity".to_string()]),
+            6  => features.push("Trickster's Transposition".to_string()),
+            17 => features.push("Improved Duplicity".to_string()),
+            _  => {}
+        },
+        Some("War Domain") => match level {
+            3  => features.extend(["Guided Strike".to_string(), "War Domain Spells".to_string(), "War Priest".to_string()]),
+            6  => features.push("War God's Blessing".to_string()),
+            17 => features.push("Avatar of Battle".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
+}
+
 // ─── Feature tables ───────────────────────────────────────────────────────────
 
 fn fighter_features_at_level(class: &str, level: i64, subclass: Option<&str>) -> Vec<String> {
@@ -837,8 +991,22 @@ fn class_features_generic(class: &str, level: i64) -> Vec<String> {
             _ => {}
         },
         "Cleric" => match level {
-            2 => features.push("Channel Divinity".to_string()),
-            _ => {}
+            1  => features.extend(["Spellcasting".to_string(), "Divine Order".to_string()]),
+            2  => features.push("Channel Divinity".to_string()),
+            3  => features.push("Cleric Subclass".to_string()),
+            4  => features.push("Ability Score Improvement".to_string()),
+            5  => features.push("Sear Undead".to_string()),
+            6  => features.push("Subclass Feature".to_string()),
+            7  => features.push("Blessed Strikes".to_string()),
+            8  => features.push("Ability Score Improvement".to_string()),
+            10 => features.push("Divine Intervention".to_string()),
+            12 => features.push("Ability Score Improvement".to_string()),
+            14 => features.push("Improved Blessed Strikes".to_string()),
+            16 => features.push("Ability Score Improvement".to_string()),
+            17 => features.push("Subclass Feature".to_string()),
+            19 => features.push("Epic Boon".to_string()),
+            20 => features.push("Greater Divine Intervention".to_string()),
+            _  => {}
         },
         _ => {}
     }

@@ -646,6 +646,115 @@ export function bardSlotSummary(level) {
     return bardSpellSlots(level).filter(s => s > 0).join('/')
 }
 
+// ─── Cleric ───────────────────────────────────────────────────────────────────
+ 
+export const CLERIC_SUBCLASSES = [
+    {
+        name: 'Life Domain',
+        desc: 'Soothe the hurts of the world. Healing spells restore bonus HP, Preserve Life channels mass healing, and Supreme Healing always rolls maximum dice.',
+    },
+    {
+        name: 'Light Domain',
+        desc: 'Bring light to banish darkness. Radiance of the Dawn blinds enemies, Warding Flare deflects attacks, and Corona of Light weakens foes in your sunlight.',
+    },
+    {
+        name: 'Trickery Domain',
+        desc: 'Make mischief and challenge authority. Invoke Duplicity creates a perfect illusion of yourself, and Trickster\'s Transposition lets you swap places with it.',
+    },
+    {
+        name: 'War Domain',
+        desc: 'Inspire valor and smite foes. Guided Strike adds +10 to attack rolls, War Priest grants bonus weapon attacks, and Avatar of Battle grants damage resistance.',
+    },
+]
+ 
+export const CLERIC_BASE_FEATURES = {
+    1:  ['Spellcasting', 'Divine Order'],
+    2:  ['Channel Divinity'],
+    3:  ['Cleric Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Sear Undead'],
+    6:  ['Subclass Feature'],
+    7:  ['Blessed Strikes'],
+    8:  ['Ability Score Improvement'],
+    9:  [],
+    10: ['Divine Intervention'],
+    11: [],
+    12: ['Ability Score Improvement'],
+    13: [],
+    14: ['Improved Blessed Strikes'],
+    15: [],
+    16: ['Ability Score Improvement'],
+    17: ['Subclass Feature'],
+    18: [],
+    19: ['Epic Boon'],
+    20: ['Greater Divine Intervention'],
+}
+ 
+export const CLERIC_SUBCLASS_FEATURES = {
+    'Life Domain': {
+        3:  ['Disciple of Life', 'Life Domain Spells', 'Preserve Life'],
+        6:  ['Blessed Healer'],
+        17: ['Supreme Healing'],
+    },
+    'Light Domain': {
+        3:  ['Light Domain Spells', 'Radiance of the Dawn', 'Warding Flare'],
+        6:  ['Improved Warding Flare'],
+        17: ['Corona of Light'],
+    },
+    'Trickery Domain': {
+        3:  ['Blessing of the Trickster', 'Trickery Domain Spells', 'Invoke Duplicity'],
+        6:  ["Trickster's Transposition"],
+        17: ['Improved Duplicity'],
+    },
+    'War Domain': {
+        3:  ['Guided Strike', 'War Domain Spells', 'War Priest'],
+        6:  ["War God's Blessing"],
+        17: ['Avatar of Battle'],
+    },
+}
+ 
+export const CLERIC_ASI_LEVELS = [4, 8, 12, 16, 19]
+ 
+export function getClericFeatures(player, newLevel) {
+    const base = (CLERIC_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (CLERIC_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+export function clericChannelDivinityUses(level) {
+    if (level < 2)   return 0
+    if (level < 6)   return 2
+    if (level < 18)  return 3
+    return 4
+}
+ 
+export function clericCantrips(level) {
+    if (level >= 10) return 5
+    if (level >= 4)  return 4
+    return 3
+}
+ 
+export function clericPreparedSpells(level) {
+    const table = [0,4,5,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22]
+    return table[level] || 22
+}
+ 
+export function clericSlotSummary(level) {
+    // Same full-caster table as Bard
+    const slots = {
+        1:[2,0,0,0,0,0,0,0,0], 2:[3,0,0,0,0,0,0,0,0], 3:[4,2,0,0,0,0,0,0,0],
+        4:[4,3,0,0,0,0,0,0,0], 5:[4,3,2,0,0,0,0,0,0], 6:[4,3,3,0,0,0,0,0,0],
+        7:[4,3,3,1,0,0,0,0,0], 8:[4,3,3,2,0,0,0,0,0], 9:[4,3,3,3,1,0,0,0,0],
+        10:[4,3,3,3,2,0,0,0,0],11:[4,3,3,3,2,1,0,0,0],12:[4,3,3,3,2,1,0,0,0],
+        13:[4,3,3,3,2,1,1,0,0],14:[4,3,3,3,2,1,1,0,0],15:[4,3,3,3,2,1,1,1,0],
+        16:[4,3,3,3,2,1,1,1,0],17:[4,3,3,3,2,1,1,1,1],18:[4,3,3,3,3,1,1,1,1],
+        19:[4,3,3,3,3,2,1,1,1],20:[4,3,3,3,3,2,2,1,1],
+    }
+    return (slots[level] || slots[20]).filter(s => s > 0).join('/')
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function xpToNextLevel(level) {

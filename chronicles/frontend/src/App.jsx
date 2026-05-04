@@ -17,11 +17,13 @@ import {
   getFighterFeatures,
   getBarbarianFeatures,
   getBardFeatures,
+  getClericFeatures,
   hitDieForClass,
   proficiencyForLevel,
   FIGHTER_ASI_LEVELS,
   BARBARIAN_ASI_LEVELS,
   BARD_ASI_LEVELS,
+  CLERIC_ASI_LEVELS,
   barbarianRageUses,
   barbarianRageDamage,
   barbarianWeaponMastery,
@@ -29,6 +31,10 @@ import {
   bardPreparedSpells,
   bardCantrips,
   bardSlotSummary,
+  clericChannelDivinityUses,
+  clericCantrips,
+  clericPreparedSpells,
+  clericSlotSummary,
 } from './constants.js'
 
 const PHASE = {
@@ -160,7 +166,7 @@ export default function App() {
     setShowLevelUp(true)
   }
 
-   const buildLevelUpPreview = (p) => {
+  const buildLevelUpPreview = (p) => {
     const newLevel = p.level + 1
     const conMod   = Math.floor((p.con - 10) / 2)
     const chaMod   = Math.floor((p.cha - 10) / 2)
@@ -172,11 +178,12 @@ export default function App() {
     const isFighter   = p.class === 'Fighter'
     const isBarbarian = p.class === 'Barbarian'
     const isBard      = p.class === 'Bard'
+    const isCleric    = p.class === 'Cleric'
  
     // ── Fighter scalars ─────────────────────────────────────────────────────
-    const secondWindUses   = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
-    const actionSurgeUses  = isFighter ? (newLevel >= 17 ? 2 : newLevel >= 2 ? 1 : 0) : 0
-    const indomitableMax   = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
+    const secondWindUses  = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
+    const actionSurgeUses = isFighter ? (newLevel >= 17 ? 2 : newLevel >= 2 ? 1 : 0) : 0
+    const indomitableMax  = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
  
     const weaponMasteryCount = isFighter
       ? (newLevel >= 16 ? 6 : newLevel >= 4 ? 4 : 3)
@@ -195,11 +202,17 @@ export default function App() {
     const rageDamage = isBarbarian ? barbarianRageDamage(newLevel) : 0
  
     // ── Bard scalars ────────────────────────────────────────────────────────
-    const bardicDie              = isBard ? bardInspirationDie(newLevel) : 0
-    const bardicInspirationUses  = isBard ? Math.max(1, chaMod)          : 0
-    const bardPrepared           = isBard ? bardPreparedSpells(newLevel)  : 0
-    const bardKnownCantrips      = isBard ? bardCantrips(newLevel)        : 0
-    const bardSlots              = isBard ? bardSlotSummary(newLevel)     : ''
+    const bardicDie             = isBard ? bardInspirationDie(newLevel) : 0
+    const bardicInspirationUses = isBard ? Math.max(1, chaMod)          : 0
+    const bardPrepared          = isBard ? bardPreparedSpells(newLevel)  : 0
+    const bardKnownCantrips     = isBard ? bardCantrips(newLevel)        : 0
+    const bardSlots             = isBard ? bardSlotSummary(newLevel)     : ''
+ 
+    // ── Cleric scalars ──────────────────────────────────────────────────────
+    const channelDivinityUses   = isCleric ? clericChannelDivinityUses(newLevel) : 0
+    const clericKnownCantrips   = isCleric ? clericCantrips(newLevel)            : 0
+    const clericPrepared        = isCleric ? clericPreparedSpells(newLevel)      : 0
+    const clericSlots           = isCleric ? clericSlotSummary(newLevel)         : ''
  
     // ── ASI ─────────────────────────────────────────────────────────────────
     const asiAvailable = isFighter
@@ -208,7 +221,9 @@ export default function App() {
         ? BARBARIAN_ASI_LEVELS.includes(newLevel)
         : isBard
           ? BARD_ASI_LEVELS.includes(newLevel)
-          : [4, 8, 12, 16, 19].includes(newLevel)
+          : isCleric
+            ? CLERIC_ASI_LEVELS.includes(newLevel)
+            : [4, 8, 12, 16, 19].includes(newLevel)
  
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
  
@@ -219,7 +234,9 @@ export default function App() {
         ? getBarbarianFeatures(p, newLevel)
         : isBard
           ? getBardFeatures(p, newLevel)
-          : []
+          : isCleric
+            ? getClericFeatures(p, newLevel)
+            : []
  
     return {
       new_level:              newLevel,
@@ -244,10 +261,13 @@ export default function App() {
       bard_prepared_spells:   bardPrepared,
       bard_cantrips:          bardKnownCantrips,
       bard_slot_summary:      bardSlots,
+      // Cleric
+      channel_divinity_uses:  channelDivinityUses,
+      cleric_cantrips:        clericKnownCantrips,
+      cleric_prepared_spells: clericPrepared,
+      cleric_slot_summary:    clericSlots,
     }
   }
-
-
 
   const handleLevelUpComplete = async (choices) => {
     setShowLevelUp(false)

@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { STYLES } from '../styles.js'
 import {
-    FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, BARD_SUBCLASSES,
+    FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, BARD_SUBCLASSES, CLERIC_SUBCLASSES,
     ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
-    FIGHTER_ASI_LEVELS, getFighterFeatures, getBarbarianFeatures, getBardFeatures,
+    FIGHTER_ASI_LEVELS, getFighterFeatures, getBarbarianFeatures, getBardFeatures, getClericFeatures,
 } from '../constants.js'
 import { searchSpells, learnSpell, seedEkSlots } from '../api/client.js'
 
@@ -260,17 +260,19 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         // Bard
         bardic_die, bardic_inspiration_uses, bard_prepared_spells,
         bard_cantrips, bard_slot_summary,
+        // Cleric
+        channel_divinity_uses, cleric_cantrips, cleric_prepared_spells, cleric_slot_summary,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
     const isBarbarian = player.class === 'Barbarian'
     const isBard      = player.class === 'Bard'
+    const isCleric    = player.class === 'Cleric'
 
     const isBattleMaster     = player.subclass === 'Battle Master'
     const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
     const canReplaceManeuver = isBattleMaster && new_level >= 7
 
-    // Subclass state (Fighter & Barbarian & Bard all choose at level 3)
     const [subclass, setSubclass] = useState(null)
     const isEKChosen    = subclass === 'Eldritch Knight'
     const isExistingEK  = player.subclass === 'Eldritch Knight'
@@ -294,7 +296,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const [replacedManeuver, setReplacedManeuver] = useState(null)
     const [replaceMode, setReplaceMode] = useState(false)
 
-    // EK spell state
     const [ekSpellTab, setEkSpellTab] = useState('cantrip')
     const [spellSearch, setSpellSearch] = useState('')
     const [spellResults, setSpellResults] = useState([])
@@ -392,18 +393,21 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
 
     const isRecommended = (school) => RECOMMENDED_SCHOOLS.includes(school)
 
-    // Subclass options for the current class
-    const subclassOptions = isBarbarian
-        ? BARBARIAN_SUBCLASSES
-        : isBard
-            ? BARD_SUBCLASSES
-            : FIGHTER_SUBCLASSES
+    const subclassOptions = isCleric
+        ? CLERIC_SUBCLASSES
+        : isBarbarian
+            ? BARBARIAN_SUBCLASSES
+            : isBard
+                ? BARD_SUBCLASSES
+                : FIGHTER_SUBCLASSES
 
-    const subclassLabel = isBarbarian
-        ? 'Choose your Primal Path'
-        : isBard
-            ? 'Choose your Bard College'
-            : 'Choose your Fighter subclass'
+    const subclassLabel = isCleric
+        ? 'Choose your Divine Domain'
+        : isBarbarian
+            ? 'Choose your Primal Path'
+            : isBard
+                ? 'Choose your Bard College'
+                : 'Choose your Fighter subclass'
 
     // ────────────────────────────────────────────────────────────────────────
     return (
@@ -545,6 +549,30 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                                     <span className="lu-info-val">{extra_attacks}</span>
                                                 </div>
                                             )}
+                                        </>
+                                    )}
+
+                                    {/* ── Cleric stats ── */}
+                                    {isCleric && (
+                                        <>
+                                            {channel_divinity_uses > 0 && (
+                                                <div className="lu-info-row">
+                                                    <span>Channel Divinity Uses</span>
+                                                    <span className="lu-info-val">{channel_divinity_uses}</span>
+                                                </div>
+                                            )}
+                                            <div className="lu-info-row">
+                                                <span>Cantrips Known</span>
+                                                <span className="lu-info-val">{cleric_cantrips}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Prepared Spells</span>
+                                                <span className="lu-info-val">{cleric_prepared_spells}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Spell Slots</span>
+                                                <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{cleric_slot_summary}</span>
+                                            </div>
                                         </>
                                     )}
                                 </div>
@@ -730,7 +758,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                 <div className="lu-step-label">
                                     {new_level === 3 ? 'Eldritch Knight — Choose Starting Spells' : 'Learn New Spells'}
                                 </div>
-
                                 <div className="ek-hint">
                                     As an Eldritch Knight, you specialize in <span style={{ color: '#7ec8e3' }}>Abjuration</span> and{' '}
                                     <span style={{ color: '#f5a96a' }}>Evocation</span> spells.
@@ -841,7 +868,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                 <div key={i} className={`lu-dot${i === stepIndex ? ' active' : ''}`} />
                             ))}
                         </div>
-
                         <div style={{ display: 'flex', gap: '.75rem' }}>
                             {stepIndex > 0 && (
                                 <button className="btn-ghost" onClick={() => setStepIndex(i => i - 1)}>
