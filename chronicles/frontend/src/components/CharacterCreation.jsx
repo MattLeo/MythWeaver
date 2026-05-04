@@ -125,13 +125,36 @@ ${STYLES}
 // Base steps: name, sex, species, [species_subtype?], class, background, background_asi, stats, equipment, backstory
 const BASE_STEPS = ['name', 'sex', 'species', 'class', 'background', 'background_asi', 'stats', 'equipment', 'backstory']
 
-function buildSteps(race, background) {
+const CLERIC_CANTRIPS = [
+    { name: 'Guidance',        school: 'Divination',    note: 'Concentration' },
+    { name: 'Light',           school: 'Evocation',     note: null },
+    { name: 'Mending',         school: 'Transmutation', note: null },
+    { name: 'Resistance',      school: 'Abjuration',    note: 'Concentration' },
+    { name: 'Sacred Flame',    school: 'Evocation',     note: 'DEX save' },
+    { name: 'Spare the Dying', school: 'Necromancy',    note: null },
+    { name: 'Thaumaturgy',     school: 'Transmutation', note: null },
+    { name: 'Toll the Dead',   school: 'Necromancy',    note: 'WIS save' },
+    { name: 'Word of Radiance', school: 'Evocation',    note: 'CON save' },
+]
+ 
+const SCHOOL_COLORS_CC = {
+    Divination: '#f5e87e', Evocation: '#f5a96a', Transmutation: '#f5cfa9',
+    Abjuration: '#7ec8e3', Necromancy: '#b0f5a9',
+}
+
+function buildSteps(race, background, playerClass, divineOrder) {
   const steps = ['name', 'sex', 'species']
   const sp = getSpeciesByName(race)
   if (sp?.subtype) steps.push('species_subtype')
-  steps.push('class', 'background', 'background_asi', 'stats', 'equipment', 'backstory')
+  steps.push('class')
+  if (playerClass === 'Cleric') {
+    steps.push('divine_order')
+    if (divineOrder === 'Thaumaturge') steps.push('thaumaturge_cantrip')
+  }
+  steps.push('background', 'background_asi', 'stats', 'equipment', 'backstory')
   return steps
 }
+
 
 export default function CharacterCreation({ onComplete }) {
   const [char, setChar] = useState({
@@ -145,9 +168,11 @@ export default function CharacterCreation({ onComplete }) {
     stats: rollBlock(),
     equipment_choice: '',
     backstory: '',
+    divine_order: '',
+    thaumaturge_cantrip: '',
   })
 
-  const steps = buildSteps(char.race, char.background)
+    const steps = buildSteps(char.race, char.background, char.player_class, char.divine_order)
   const [stepIndex, setStepIndex] = useState(0)
   const currentStep = steps[stepIndex]
 
@@ -197,6 +222,8 @@ export default function CharacterCreation({ onComplete }) {
       case 'stats': return true
       case 'equipment': return !!char.equipment_choice
       case 'backstory': return true
+      case 'divine_order': return !!char.divine_order
+      case 'thaumaturge_cantrip': return !!char.thaumaturge_cantrip
       default: return true
     }
   }
@@ -226,6 +253,7 @@ export default function CharacterCreation({ onComplete }) {
       },
       player_backstory: char.backstory || null,
       equipment_choice: char.equipment_choice,
+      divine_order: char.divine_order || null,
     })
   }
 
@@ -538,7 +566,8 @@ export default function CharacterCreation({ onComplete }) {
             <div className="info-box" style={{ marginTop: '1.25rem', fontSize: '.76rem', lineHeight: 1.9 }}>
               <strong>Summary</strong><br />
               {char.name} · {char.sex} {char.race}{char.species_subtype ? ` (${char.species_subtype})` : ''}<br />
-              {char.player_class} · {char.background}{bg ? ` · ${bg.feat}` : ''}<br />
+              {char.player_class} · {char.background}{bg ? ` · ${bg.feat}` : ''}
+              {char.divine_order ? ` · ${char.divine_order}` : ''}<br />
               STR {Math.min(20, char.stats[0] + (char.background_asi.str || 0))} ·{' '}
               DEX {Math.min(20, char.stats[1] + (char.background_asi.dex || 0))} ·{' '}
               CON {Math.min(20, char.stats[2] + (char.background_asi.con || 0))} ·{' '}
@@ -546,6 +575,69 @@ export default function CharacterCreation({ onComplete }) {
               WIS {Math.min(20, char.stats[4] + (char.background_asi.wis || 0))} ·{' '}
               CHA {Math.min(20, char.stats[5] + (char.background_asi.cha || 0))}<br />
               Equipment: Option {char.equipment_choice}
+            </div>
+          </>
+        )
+
+      case 'divine_order':
+        return (
+          <>
+            <h2>Divine Order</h2>
+            <p className="card-sub">
+              You have dedicated yourself to one of these sacred roles. This choice shapes your
+              combat capabilities and connection to divine knowledge.
+            </p>
+            <div className="pick-grid-2">
+              <div
+                className={`pick-card${char.divine_order === 'Protector' ? ' sel' : ''}`}
+                onClick={() => upd('divine_order', 'Protector')}
+              >
+                <div className="pick-card-name">Protector</div>
+                <div className="pick-card-desc">
+                  Trained for battle. You gain proficiency with Martial weapons and training
+                  with Heavy armor — letting you wade into the front line as a warrior of your deity.
+                </div>
+              </div>
+              <div
+                className={`pick-card${char.divine_order === 'Thaumaturge' ? ' sel' : ''}`}
+                onClick={() => upd('divine_order', 'Thaumaturge')}
+              >
+                <div className="pick-card-name">Thaumaturge</div>
+                <div className="pick-card-desc">
+                  Attuned to divine knowledge. You know one extra cantrip from the Cleric spell list,
+                  and add your Wisdom modifier (min +1) to Intelligence (Arcana or Religion) checks.
+                </div>
+              </div>
+            </div>
+          </>
+        )
+
+      case 'thaumaturge_cantrip':
+        return (
+          <>
+            <h2>Extra Cantrip</h2>
+            <p className="card-sub">
+              As a Thaumaturge, you know one extra cantrip from the Cleric spell list.
+              Choose which one you begin your adventure with.
+            </p>
+            <div className="pick-grid-2">
+              {CLERIC_CANTRIPS.map(c => (
+                <div
+                  key={c.name}
+                  className={`pick-card${char.thaumaturge_cantrip === c.name ? ' sel' : ''}`}
+                  onClick={() => upd('thaumaturge_cantrip', c.name)}
+                >
+                  <div className="pick-card-name">{c.name}</div>
+                  <div className="pick-card-desc" style={{ display: 'flex', flexDirection: 'column', gap: '.2rem' }}>
+                    <span style={{ color: SCHOOL_COLORS_CC[c.school] || 'var(--dim)', fontSize: '.72rem' }}>
+                      {c.school}
+                    </span>
+                    {c.note && (
+                      <span style={{ fontSize: '.7rem', color: 'var(--dim)' }}>{c.note}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </>
         )

@@ -631,6 +631,8 @@ pub struct CreateCampaignRequest {
     pub player_stats: PlayerStats,
     pub player_backstory: Option<String>,
     pub equipment_choice: String,
+    pub divine_order: Option<String>,  // "Protector" | "Thaumaturge" — Cleric only
+    pub thaumaturge_cantrip: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
