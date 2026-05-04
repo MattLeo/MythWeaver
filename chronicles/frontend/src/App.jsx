@@ -13,29 +13,14 @@ import InventoryModal from './components/InventoryModal.jsx'
 import AbilitiesModal from './components/AbilitiesModal.jsx'
 import SpellsModal from './components/SpellsModal'
 import {
-  isLevelUpAvailable,
-  getFighterFeatures,
-  getBarbarianFeatures,
-  getBardFeatures,
-  getClericFeatures,
-  hitDieForClass,
-  proficiencyForLevel,
-  FIGHTER_ASI_LEVELS,
-  BARBARIAN_ASI_LEVELS,
-  BARD_ASI_LEVELS,
-  CLERIC_ASI_LEVELS,
-  barbarianRageUses,
-  barbarianRageDamage,
-  barbarianWeaponMastery,
-  bardInspirationDie,
-  bardPreparedSpells,
-  bardCantrips,
-  bardSlotSummary,
-  clericChannelDivinityUses,
-  clericCantrips,
-  clericPreparedSpells,
-  clericSlotSummary,
+  isLevelUpAvailable, getFighterFeatures, getBarbarianFeatures, getBardFeatures, getClericFeatures,
+  getDruidFeatures, hitDieForClass, proficiencyForLevel, FIGHTER_ASI_LEVELS, BARBARIAN_ASI_LEVELS,
+  BARD_ASI_LEVELS, CLERIC_ASI_LEVELS, DRUID_ASI_LEVELS, barbarianRageUses, barbarianRageDamage,
+  barbarianWeaponMastery, bardInspirationDie, bardPreparedSpells, bardCantrips, bardSlotSummary,
+  clericChannelDivinityUses, clericCantrips, clericPreparedSpells, clericSlotSummary, druidWildShapeUses,
+  druidWildShapeCR, druidCantrips, druidPreparedSpells, druidSlotSummary,
 } from './constants.js'
+
 
 const PHASE = {
   TITLE: 'title',
@@ -179,6 +164,7 @@ export default function App() {
     const isBarbarian = p.class === 'Barbarian'
     const isBard      = p.class === 'Bard'
     const isCleric    = p.class === 'Cleric'
+    const isDruid     = p.class === 'Druid'
  
     // ── Fighter scalars ─────────────────────────────────────────────────────
     const secondWindUses  = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
@@ -214,6 +200,13 @@ export default function App() {
     const clericPrepared        = isCleric ? clericPreparedSpells(newLevel)      : 0
     const clericSlots           = isCleric ? clericSlotSummary(newLevel)         : ''
  
+    // ── Druid scalars ───────────────────────────────────────────────────────
+    const wildShapeUses         = isDruid ? druidWildShapeUses(newLevel)   : 0
+    const wildShapeCR           = isDruid ? druidWildShapeCR(newLevel)     : ''
+    const druidKnownCantrips    = isDruid ? druidCantrips(newLevel)        : 0
+    const druidPrepared         = isDruid ? druidPreparedSpells(newLevel)  : 0
+    const druidSlots            = isDruid ? druidSlotSummary(newLevel)     : ''
+ 
     // ── ASI ─────────────────────────────────────────────────────────────────
     const asiAvailable = isFighter
       ? FIGHTER_ASI_LEVELS.includes(newLevel)
@@ -223,7 +216,9 @@ export default function App() {
           ? BARD_ASI_LEVELS.includes(newLevel)
           : isCleric
             ? CLERIC_ASI_LEVELS.includes(newLevel)
-            : [4, 8, 12, 16, 19].includes(newLevel)
+            : isDruid
+              ? DRUID_ASI_LEVELS.includes(newLevel)
+              : [4, 8, 12, 16, 19].includes(newLevel)
  
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
  
@@ -236,7 +231,9 @@ export default function App() {
           ? getBardFeatures(p, newLevel)
           : isCleric
             ? getClericFeatures(p, newLevel)
-            : []
+            : isDruid
+              ? getDruidFeatures(p, newLevel)
+              : []
  
     return {
       new_level:              newLevel,
@@ -266,8 +263,15 @@ export default function App() {
       cleric_cantrips:        clericKnownCantrips,
       cleric_prepared_spells: clericPrepared,
       cleric_slot_summary:    clericSlots,
+      // Druid
+      wild_shape_uses:        wildShapeUses,
+      wild_shape_cr:          wildShapeCR,
+      druid_cantrips:         druidKnownCantrips,
+      druid_prepared_spells:  druidPrepared,
+      druid_slot_summary:     druidSlots,
     }
   }
+
 
   const handleLevelUpComplete = async (choices) => {
     setShowLevelUp(false)

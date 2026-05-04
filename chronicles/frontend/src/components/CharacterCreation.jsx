@@ -126,23 +126,39 @@ ${STYLES}
 const BASE_STEPS = ['name', 'sex', 'species', 'class', 'background', 'background_asi', 'stats', 'equipment', 'backstory']
 
 const CLERIC_CANTRIPS = [
-    { name: 'Guidance',        school: 'Divination',    note: 'Concentration' },
-    { name: 'Light',           school: 'Evocation',     note: null },
-    { name: 'Mending',         school: 'Transmutation', note: null },
-    { name: 'Resistance',      school: 'Abjuration',    note: 'Concentration' },
-    { name: 'Sacred Flame',    school: 'Evocation',     note: 'DEX save' },
-    { name: 'Spare the Dying', school: 'Necromancy',    note: null },
-    { name: 'Thaumaturgy',     school: 'Transmutation', note: null },
-    { name: 'Toll the Dead',   school: 'Necromancy',    note: 'WIS save' },
-    { name: 'Word of Radiance', school: 'Evocation',    note: 'CON save' },
+  { name: 'Guidance', school: 'Divination', note: 'Concentration' },
+  { name: 'Light', school: 'Evocation', note: null },
+  { name: 'Mending', school: 'Transmutation', note: null },
+  { name: 'Resistance', school: 'Abjuration', note: 'Concentration' },
+  { name: 'Sacred Flame', school: 'Evocation', note: 'DEX save' },
+  { name: 'Spare the Dying', school: 'Necromancy', note: null },
+  { name: 'Thaumaturgy', school: 'Transmutation', note: null },
+  { name: 'Toll the Dead', school: 'Necromancy', note: 'WIS save' },
+  { name: 'Word of Radiance', school: 'Evocation', note: 'CON save' },
 ]
- 
+
+const DRUID_CANTRIPS_CC = [
+  { name: 'Druidcraft', school: 'Transmutation', note: null },
+  { name: 'Elementalism', school: 'Transmutation', note: null },
+  { name: 'Guidance', school: 'Divination', note: 'Concentration' },
+  { name: 'Mending', school: 'Transmutation', note: null },
+  { name: 'Message', school: 'Transmutation', note: null },
+  { name: 'Poison Spray', school: 'Necromancy', note: null },
+  { name: 'Produce Flame', school: 'Conjuration', note: null },
+  { name: 'Resistance', school: 'Abjuration', note: 'Concentration' },
+  { name: 'Shillelagh', school: 'Transmutation', note: 'WIS for attacks' },
+  { name: 'Spare the Dying', school: 'Necromancy', note: null },
+  { name: 'Starry Wisp', school: 'Evocation', note: null },
+  { name: 'Thorn Whip', school: 'Transmutation', note: null },
+  { name: 'Thunderclap', school: 'Evocation', note: null },
+]
+
 const SCHOOL_COLORS_CC = {
-    Divination: '#f5e87e', Evocation: '#f5a96a', Transmutation: '#f5cfa9',
-    Abjuration: '#7ec8e3', Necromancy: '#b0f5a9',
+  Divination: '#f5e87e', Evocation: '#f5a96a', Transmutation: '#f5cfa9',
+  Abjuration: '#7ec8e3', Necromancy: '#b0f5a9', Conjuration: '#b5a9f5',
 }
 
-function buildSteps(race, background, playerClass, divineOrder) {
+function buildSteps(race, background, playerClass, divineOrder, primalOrder) {
   const steps = ['name', 'sex', 'species']
   const sp = getSpeciesByName(race)
   if (sp?.subtype) steps.push('species_subtype')
@@ -151,10 +167,13 @@ function buildSteps(race, background, playerClass, divineOrder) {
     steps.push('divine_order')
     if (divineOrder === 'Thaumaturge') steps.push('thaumaturge_cantrip')
   }
+  if (playerClass === 'Druid') {
+    steps.push('primal_order')
+    if (primalOrder === 'Magician') steps.push('magician_cantrip')
+  }
   steps.push('background', 'background_asi', 'stats', 'equipment', 'backstory')
   return steps
 }
-
 
 export default function CharacterCreation({ onComplete }) {
   const [char, setChar] = useState({
@@ -168,11 +187,13 @@ export default function CharacterCreation({ onComplete }) {
     stats: rollBlock(),
     equipment_choice: '',
     backstory: '',
-    divine_order: '',
-    thaumaturge_cantrip: '',
+    divine_order: '',         // Cleric: "Protector" | "Thaumaturge"
+    thaumaturge_cantrip: '',  // Cleric Thaumaturge: chosen extra cantrip
+    primal_order: '',         // Druid: "Warden" | "Magician"
+    magician_cantrip: '',     // Druid Magician: chosen extra cantrip
   })
 
-    const steps = buildSteps(char.race, char.background, char.player_class, char.divine_order)
+  const steps = buildSteps(char.race, char.background, char.player_class, char.divine_order, char.primal_order)
   const [stepIndex, setStepIndex] = useState(0)
   const currentStep = steps[stepIndex]
 
@@ -224,6 +245,8 @@ export default function CharacterCreation({ onComplete }) {
       case 'backstory': return true
       case 'divine_order': return !!char.divine_order
       case 'thaumaturge_cantrip': return !!char.thaumaturge_cantrip
+      case 'primal_order':     return !!char.primal_order
+      case 'magician_cantrip': return !!char.magician_cantrip
       default: return true
     }
   }
@@ -254,6 +277,9 @@ export default function CharacterCreation({ onComplete }) {
       player_backstory: char.backstory || null,
       equipment_choice: char.equipment_choice,
       divine_order: char.divine_order || null,
+      thaumaturge_cantrip: char.thaumaturge_cantrip || null,
+      primal_order: char.primal_order || null,
+      magician_cantrip: char.magician_cantrip || null,
     })
   }
 
@@ -567,7 +593,10 @@ export default function CharacterCreation({ onComplete }) {
               <strong>Summary</strong><br />
               {char.name} · {char.sex} {char.race}{char.species_subtype ? ` (${char.species_subtype})` : ''}<br />
               {char.player_class} · {char.background}{bg ? ` · ${bg.feat}` : ''}
-              {char.divine_order ? ` · ${char.divine_order}` : ''}<br />
+              {char.divine_order ? ` · ${char.divine_order}` : ''}
+              {char.thaumaturge_cantrip ? ` (${char.thaumaturge_cantrip})` : ''}
+              {char.primal_order ? ` · ${char.primal_order}` : ''}
+              {char.magician_cantrip ? ` (${char.magician_cantrip})` : ''}<br />
               STR {Math.min(20, char.stats[0] + (char.background_asi.str || 0))} ·{' '}
               DEX {Math.min(20, char.stats[1] + (char.background_asi.dex || 0))} ·{' '}
               CON {Math.min(20, char.stats[2] + (char.background_asi.con || 0))} ·{' '}
@@ -641,6 +670,73 @@ export default function CharacterCreation({ onComplete }) {
             </div>
           </>
         )
+
+      case 'primal_order':
+        return (
+          <>
+            <h2>Primal Order</h2>
+            <p className="card-sub">
+              You have dedicated yourself to one of these sacred roles. This choice shapes
+              your combat abilities and your connection to mystical knowledge.
+            </p>
+            <div className="pick-grid-2">
+              <div
+                className={`pick-card${char.primal_order === 'Warden' ? ' sel' : ''}`}
+                onClick={() => {
+                  upd('primal_order', 'Warden')
+                  upd('magician_cantrip', '') // clear if switching
+                }}
+              >
+                <div className="pick-card-name">Warden</div>
+                <div className="pick-card-desc">
+                  Trained for battle. You gain proficiency with Martial weapons and training
+                  with Medium armor, letting you protect the natural world up close.
+                </div>
+              </div>
+              <div
+                className={`pick-card${char.primal_order === 'Magician' ? ' sel' : ''}`}
+                onClick={() => upd('primal_order', 'Magician')}
+              >
+                <div className="pick-card-name">Magician</div>
+                <div className="pick-card-desc">
+                  Attuned to mystical forces. You know one extra cantrip from the Druid
+                  spell list, and add your Wisdom modifier (min +1) to Intelligence
+                  (Arcana or Nature) checks.
+                </div>
+              </div>
+            </div>
+          </>
+        )
+
+      case 'magician_cantrip':
+        return (
+          <>
+            <h2>Extra Cantrip</h2>
+            <p className="card-sub">
+              As a Magician, you know one extra cantrip from the Druid spell list.
+              Choose which one you begin your adventure with.
+            </p>
+            <div className="pick-grid-2">
+              {DRUID_CANTRIPS_CC.map(c => (
+                <div
+                  key={c.name}
+                  className={`pick-card${char.magician_cantrip === c.name ? ' sel' : ''}`}
+                  onClick={() => upd('magician_cantrip', c.name)}
+                >
+                  <div className="pick-card-name">{c.name}</div>
+                  <div className="pick-card-desc" style={{ display: 'flex', flexDirection: 'column', gap: '.2rem' }}>
+                    <span style={{ color: SCHOOL_COLORS_CC[c.school] || 'var(--dim)', fontSize: '.72rem' }}>
+                      {c.school}
+                    </span>
+                    {c.note && (
+                      <span style={{ fontSize: '.7rem', color: 'var(--dim)' }}>{c.note}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )  
 
       default:
         return null

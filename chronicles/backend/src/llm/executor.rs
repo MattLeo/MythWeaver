@@ -461,6 +461,17 @@ pub async fn execute_tool(
                     .await?;
                 }
 
+                if p.class == "Druid" {
+                    sqlx::query(
+                        "UPDATE abilities
+                        SET current_uses = MIN(current_uses + 1, max_uses)
+                        WHERE owner_id = ? AND name = 'Wild Shape'"
+                    )
+                    .bind(&p.id)
+                    .execute(pool)
+                    .await?;
+                }
+
                 time::advance_time(pool, campaign_id, 1, "short rest").await?;
                 Ok(json!({
                     "message": "Short rest complete",

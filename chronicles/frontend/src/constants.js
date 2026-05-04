@@ -755,6 +755,140 @@ export function clericSlotSummary(level) {
     return (slots[level] || slots[20]).filter(s => s > 0).join('/')
 }
 
+// ─── Druid ────────────────────────────────────────────────────────────────────
+ 
+export const DRUID_CANTRIPS_LIST = [
+    { name: 'Druidcraft',    school: 'Transmutation', note: null },
+    { name: 'Elementalism',  school: 'Transmutation', note: null },
+    { name: 'Guidance',      school: 'Divination',    note: 'Concentration' },
+    { name: 'Mending',       school: 'Transmutation', note: null },
+    { name: 'Message',       school: 'Transmutation', note: null },
+    { name: 'Poison Spray',  school: 'Necromancy',    note: null },
+    { name: 'Produce Flame', school: 'Conjuration',   note: null },
+    { name: 'Resistance',    school: 'Abjuration',    note: 'Concentration' },
+    { name: 'Shillelagh',    school: 'Transmutation', note: 'WIS for attacks' },
+    { name: 'Spare the Dying', school: 'Necromancy',  note: null },
+    { name: 'Starry Wisp',   school: 'Evocation',     note: null },
+    { name: 'Thorn Whip',    school: 'Transmutation', note: null },
+    { name: 'Thunderclap',   school: 'Evocation',     note: null },
+]
+ 
+export const DRUID_SUBCLASSES = [
+    {
+        name: 'Circle of the Land',
+        desc: 'Ancient mystics who safeguard natural lore. Choose a land type each Long Rest for bonus prepared spells, and recover spell slots on Short Rests.',
+    },
+    {
+        name: 'Circle of the Moon',
+        desc: 'Channel lunar magic to assume more powerful Beast forms. Wild Shape CR scales with your level, and your attacks deal Radiant damage.',
+    },
+    {
+        name: 'Circle of the Sea',
+        desc: 'Embody tides and storms. Wrath of the Sea buffets foes with cold waves, and at higher levels you soar and resist elemental damage.',
+    },
+    {
+        name: 'Circle of the Stars',
+        desc: 'Harness secrets hidden in constellations. Starry Form grants Archer, Chalice, or Dragon constellation powers, and free Guiding Bolt casts.',
+    },
+]
+ 
+export const DRUID_BASE_FEATURES = {
+    1:  ['Spellcasting', 'Druidic', 'Primal Order'],
+    2:  ['Wild Shape', 'Wild Companion'],
+    3:  ['Druid Subclass'],
+    4:  ['Ability Score Improvement', 'Wild Shape (CR 1/2, 6 forms)'],
+    5:  ['Wild Resurgence'],
+    6:  ['Subclass Feature', 'Wild Shape (3 uses)'],
+    7:  ['Elemental Fury'],
+    8:  ['Ability Score Improvement', 'Wild Shape (CR 1, 8 forms, Fly Speed)'],
+    9:  [],
+    10: ['Subclass Feature'],
+    11: [],
+    12: ['Ability Score Improvement'],
+    13: [],
+    14: ['Subclass Feature'],
+    15: ['Improved Elemental Fury'],
+    16: ['Ability Score Improvement'],
+    17: ['Wild Shape (4 uses)'],
+    18: ['Beast Spells'],
+    19: ['Epic Boon'],
+    20: ['Archdruid'],
+}
+ 
+export const DRUID_SUBCLASS_FEATURES = {
+    'Circle of the Land': {
+        3:  ['Circle of the Land Spells', "Land's Aid"],
+        6:  ['Natural Recovery'],
+        10: ["Nature's Ward"],
+        14: ["Nature's Sanctuary"],
+    },
+    'Circle of the Moon': {
+        3:  ['Circle Forms', 'Circle of the Moon Spells'],
+        6:  ['Improved Circle Forms'],
+        10: ['Moonlight Step'],
+        14: ['Lunar Form'],
+    },
+    'Circle of the Sea': {
+        3:  ['Circle of the Sea Spells', 'Wrath of the Sea'],
+        6:  ['Aquatic Affinity'],
+        10: ['Stormborn'],
+        14: ['Oceanic Gift'],
+    },
+    'Circle of the Stars': {
+        3:  ['Star Map', 'Starry Form'],
+        6:  ['Cosmic Omen'],
+        10: ['Twinkling Constellations'],
+        14: ['Full of Stars'],
+    },
+}
+ 
+export const DRUID_ASI_LEVELS = [4, 8, 12, 16, 19]
+ 
+export function getDruidFeatures(player, newLevel) {
+    const base = (DRUID_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (DRUID_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+export function druidWildShapeUses(level) {
+    if (level < 2)   return 0
+    if (level < 6)   return 2
+    if (level < 17)  return 3
+    return 4
+}
+ 
+export function druidWildShapeCR(level) {
+    if (level >= 8) return '1'
+    if (level >= 4) return '1/2'
+    return '1/4'
+}
+ 
+export function druidCantrips(level) {
+    if (level >= 10) return 4
+    if (level >= 4)  return 3
+    return 2
+}
+ 
+export function druidPreparedSpells(level) {
+    const table = [0,4,5,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22]
+    return table[level] || 22
+}
+ 
+export function druidSlotSummary(level) {
+    const slots = {
+        1:[2,0,0,0,0,0,0,0,0], 2:[3,0,0,0,0,0,0,0,0], 3:[4,2,0,0,0,0,0,0,0],
+        4:[4,3,0,0,0,0,0,0,0], 5:[4,3,2,0,0,0,0,0,0], 6:[4,3,3,0,0,0,0,0,0],
+        7:[4,3,3,1,0,0,0,0,0], 8:[4,3,3,2,0,0,0,0,0], 9:[4,3,3,3,1,0,0,0,0],
+        10:[4,3,3,3,2,0,0,0,0],11:[4,3,3,3,2,1,0,0,0],12:[4,3,3,3,2,1,0,0,0],
+        13:[4,3,3,3,2,1,1,0,0],14:[4,3,3,3,2,1,1,0,0],15:[4,3,3,3,2,1,1,1,0],
+        16:[4,3,3,3,2,1,1,1,0],17:[4,3,3,3,2,1,1,1,1],18:[4,3,3,3,3,1,1,1,1],
+        19:[4,3,3,3,3,2,1,1,1],20:[4,3,3,3,3,2,2,1,1],
+    }
+    return (slots[level] || slots[20]).filter(s => s > 0).join('/')
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function xpToNextLevel(level) {

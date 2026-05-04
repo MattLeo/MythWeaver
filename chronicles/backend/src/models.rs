@@ -181,7 +181,12 @@ pub struct LevelUpResult {
     pub channel_divinity_uses: i64,
     pub cleric_cantrips: i64,
     pub cleric_prepared_spells: i64,
+    // Druid
+    pub wild_shape_uses: i64,
+    pub druid_cantrips: i64,
+    pub druid_prepared_spells: i64,
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpellSlots {
@@ -633,6 +638,8 @@ pub struct CreateCampaignRequest {
     pub equipment_choice: String,
     pub divine_order: Option<String>,  // "Protector" | "Thaumaturge" — Cleric only
     pub thaumaturge_cantrip: Option<String>,
+    pub primal_order: Option<String>, 
+    pub magician_cantrip: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -77,7 +77,7 @@ pub async fn create_campaign(
         .await;
     }
 
-       if p.class == "Cleric" {
+    if p.class == "Cleric" {
         // Channel Divinity is a level 2 feature — zero it out at creation
         let _ = sqlx::query(
             "UPDATE abilities SET max_uses = 0, current_uses = 0
@@ -174,6 +174,84 @@ pub async fn create_campaign(
         }
     }
 
+    if p.class == "Druid" {
+        let wis_mod = Player::modifier(p.wis).max(1);
+ 
+        // Speak with Animals — always prepared from Druidic (level 1)
+        if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Speak with Animals").await {
+            if let Some(spell_id) = spell["id"].as_str() {
+                let _ = spells_db::learn_spell(
+                    pool, &camp.id, &p.id, spell_id, "always_prepared", "druidic"
+                ).await;
+            }
+        }
+ 
+        // Seed level 1 spell slots (2 × Level 1)
+        if let Err(e) = spells_db::seed_full_caster_spell_slots(pool, &camp.id, &p.id, 1).await {
+            tracing::warn!("Failed to seed Druid spell slots: {}", e);
+        }
+ 
+        match req.primal_order.as_deref() {
+            Some("Warden") => {
+                // Martial weapon proficiency
+                let _ = sqlx::query(
+                    "INSERT OR IGNORE INTO proficiencies
+                     (id, campaign_id, player_id, proficiency_type, name, source)
+                     VALUES (?, ?, ?, 'weapon', 'martial', 'class')"
+                )
+                .bind(Uuid::new_v4().to_string()).bind(&camp.id).bind(&p.id)
+                .execute(pool).await;
+ 
+                // Medium armor training
+                let _ = sqlx::query(
+                    "INSERT OR IGNORE INTO proficiencies
+                     (id, campaign_id, player_id, proficiency_type, name, source)
+                     VALUES (?, ?, ?, 'armor', 'medium', 'class')"
+                )
+                .bind(Uuid::new_v4().to_string()).bind(&camp.id).bind(&p.id)
+                .execute(pool).await;
+ 
+                let _ = sqlx::query(
+                    "UPDATE abilities SET description = ? WHERE owner_id = ? AND name = 'Primal Order'"
+                )
+                .bind("Warden: you have proficiency with Martial weapons and training with Medium armor.")
+                .bind(&p.id)
+                .execute(pool).await;
+ 
+                let _ = items::recalculate_ac(pool, &p.id).await;
+            }
+ 
+            Some("Magician") => {
+                // Learn the chosen extra cantrip
+                if let Some(ref cantrip_name) = req.magician_cantrip {
+                    match spells_db::get_spell_by_name(pool, cantrip_name).await {
+                        Ok(Some(spell)) => {
+                            if let Some(spell_id) = spell["id"].as_str() {
+                                let _ = spells_db::learn_spell(
+                                    pool, &camp.id, &p.id, spell_id, "cantrip", "magician"
+                                ).await;
+                            }
+                        }
+                        _ => tracing::warn!("Magician cantrip '{}' not found", cantrip_name),
+                    }
+                }
+ 
+                let cantrip_display = req.magician_cantrip.as_deref().unwrap_or("(not chosen)");
+                let _ = sqlx::query(
+                    "UPDATE abilities SET description = ? WHERE owner_id = ? AND name = 'Primal Order'"
+                )
+                .bind(&format!(
+                    "Magician: you know one extra cantrip ({}) from the Druid spell list. \
+                     You add your WIS modifier (+{}) to Intelligence (Arcana or Nature) checks.",
+                    cantrip_display, wis_mod
+                ))
+                .bind(&p.id)
+                .execute(pool).await;
+            }
+ 
+            _ => {}
+        }
+    }
 
     if let Err(e) = player::seed_background_proficiencies(
         pool, &camp.id, &p.id,
@@ -394,6 +472,14 @@ pub async fn level_up(
     {
         if let Some(new_m) = new_maneuvers.last() {
             let _ = fighter::replace_maneuver(pool, &p.id, old_m, new_m).await;
+        }
+    }
+
+    if matches!(p.class.as_str(), "Bard" | "Cleric" | "Druid") {
+        if let Err(e) = spells_db::seed_full_caster_spell_slots(
+            pool, &campaign_id, &p.id, result.new_level
+        ).await {
+            tracing::warn!("Failed to update full caster spell slots: {}", e);
         }
     }
 
@@ -1391,8 +1477,22 @@ async fn seed_class_abilities(
              1, "manual"),
         ],
         "Druid" => vec![
-            ("Spell Slots (1st)", Some("1st level spell slots."), 2, "long_rest"),
-            ("Channel Divinity", Some("Channel divine energy for effects based on your circle."), 1, "short_rest"),
+            ("Wild Shape",
+             Some("Wild Shape is gained at level 2. At that point: Bonus Action — shapeshift into \
+                   a known Beast form (CR 1/4 max, 4 forms). Regain 1 use on Short Rest, all on \
+                   Long Rest. Ability will be updated when you reach level 2."),
+             0, "long_rest"),  // 0 uses until level 2 unlocks it
+            ("Druidic",
+             Some("You know Druidic, the secret language of Druids. You can leave hidden messages \
+                   legible only to those who know Druidic (DC 15 INT Investigation to spot the \
+                   message's existence; can't be deciphered without magic). \
+                   You also always have Speak with Animals prepared."),
+             1, "manual"),
+            ("Primal Order",
+             Some("Choose one sacred role — Magician: one extra Druid cantrip + add WIS modifier \
+                   (min +1) to Intelligence (Arcana or Nature) checks. \
+                   Warden: proficiency with Martial weapons and training with Medium armor."),
+             1, "manual"),
         ],
         "Paladin" => vec![
             ("Lay on Hands", Some("Healing pool equal to 5 × paladin level. Use to restore HP or cure disease/poison."), 5, "long_rest"),
@@ -1454,6 +1554,7 @@ async fn seed_level_up_abilities_direct(
         "Barbarian" => seed_level_up_abilities_barbarian(pool, campaign_id, player_id, new_level, subclass).await,
         "Bard"      => seed_level_up_abilities_bard(pool, campaign_id, player_id, new_level, subclass).await,
         "Cleric"    => seed_level_up_abilities_cleric(pool, campaign_id, player_id, new_level, subclass).await,
+        "Druid"     => seed_level_up_abilities_druid(pool, campaign_id, player_id, new_level, subclass).await,
         _           => {}
     }
 }
@@ -2677,6 +2778,428 @@ async fn seed_level_up_abilities_cleric(
                     let _ = world::create_ability(pool, campaign_id, "player", player_id,
                         "Avatar of Battle",
                         Some("You gain Resistance to Bludgeoning, Piercing, and Slashing damage."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_druid(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    let player = match player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let wis_mod = crate::models::Player::modifier(player.wis).max(1);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            if !has("Wild Shape") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Wild Shape",
+                    Some("Bonus Action: shapeshift into a known Beast form (CR 1/4 max, 4 forms). \
+                          You retain your HP, hit dice, INT/WIS/CHA, class features, languages, feats, \
+                          and skill/saving throw proficiencies. Gain Temporary HP equal to your Druid \
+                          level when shifting. You can't cast spells while shifted, but existing \
+                          Concentration isn't broken. Lasts half your Druid level in hours. \
+                          Regain 1 use on Short Rest, all on Long Rest."),
+                    2, "long_rest").await;
+            }
+            if !has("Wild Companion") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Wild Companion",
+                    Some("Magic action: expend a spell slot or Wild Shape use to cast Find Familiar \
+                          without Material components. The familiar is Fey and disappears when you \
+                          finish a Long Rest."),
+                    1, "manual").await;
+            }
+        }
+        5 => {
+            if !has("Wild Resurgence") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Wild Resurgence",
+                    Some("Once per turn, if you have no Wild Shape uses remaining, you can expend \
+                          a spell slot (no action required) to regain one Wild Shape use. \
+                          Additionally, once per Long Rest, you can expend one Wild Shape use \
+                          (no action required) to give yourself a level 1 spell slot."),
+                    1, "manual").await;
+            }
+        }
+        7 => {
+            if !has("Elemental Fury") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Elemental Fury",
+                    Some("Choose one option (inform the DM): \
+                          Potent Spellcasting — add your WIS modifier to damage dealt by Druid cantrips. \
+                            At level 15: range of affected cantrips (10 ft+) increases by 300 ft. \
+                          Primal Strike — once per turn when you hit with a weapon or Beast form \
+                            attack, deal +1d8 Cold, Fire, Lightning, or Thunder damage (choose each hit). \
+                            At level 15: increases to +2d8."),
+                    1, "manual").await;
+            }
+        }
+        18 => {
+            if !has("Beast Spells") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Beast Spells",
+                    Some("While using Wild Shape, you can cast Druid spells in Beast form, \
+                          except for spells with a Material component that has a cost or is consumed."),
+                    1, "manual").await;
+            }
+        }
+        20 => {
+            if !has("Archdruid") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Archdruid",
+                    Some("Evergreen Wild Shape: when you roll Initiative with no Wild Shape uses \
+                          remaining, regain one use. \
+                          Nature Magician (once per Long Rest): convert Wild Shape uses into a single \
+                          spell slot — each use contributes 2 spell levels (e.g. 2 uses = level 4 slot). \
+                          Longevity: primal magic causes you to age one year for every ten that pass."),
+                    1, "long_rest").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Circle of the Land") => match new_level {
+            3 => {
+                if !has("Circle of the Land Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Circle of the Land Spells",
+                        Some("Whenever you finish a Long Rest, choose a land type. You have those \
+                              circle spells prepared (they don't count against your limit). \
+                              Arid: Blur, Burning Hands, Fire Bolt (L3); Fireball (L5); Blight (L7); Wall of Stone (L9). \
+                              Polar: Fog Cloud, Hold Person, Ray of Frost (L3); Sleet Storm (L5); Ice Storm (L7); Cone of Cold (L9). \
+                              Temperate: Misty Step, Shocking Grasp, Sleep (L3); Lightning Bolt (L5); Freedom of Movement (L7); Tree Stride (L9). \
+                              Tropical: Acid Splash, Ray of Sickness, Web (L3); Stinking Cloud (L5); Polymorph (L7); Insect Plague (L9)."),
+                        1, "manual").await;
+                }
+                if !has("Land's Aid") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Land's Aid",
+                        Some("Magic action: expend a Wild Shape use and choose a point within 60 ft. \
+                              Flowers and thorns appear in a 10-foot Sphere for a moment. \
+                              Each creature of your choice makes a CON save (DC = spell save DC): \
+                              fail: 2d6 Necrotic damage; success: half. One creature of your choice \
+                              in the area regains 2d6 HP. Damage and healing increase to 3d6 at \
+                              level 10, 4d6 at level 14."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Natural Recovery") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Natural Recovery",
+                        Some("Once per Long Rest: cast one prepared Circle Spell of level 1+ without \
+                              expending a spell slot. \
+                              On Short Rest: recover expended spell slots with combined level ≤ half \
+                              your Druid level (round up), no slot of level 6+. \
+                              (e.g. level 6 Druid: recover up to 3 levels of slots total.)"),
+                        1, "long_rest").await;
+                }
+            }
+            10 => {
+                if !has("Nature's Ward") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Nature's Ward",
+                        Some("You are immune to the Poisoned condition. You also have Resistance to a \
+                              damage type based on your current land choice: \
+                              Arid → Fire, Polar → Cold, Temperate → Lightning, Tropical → Poison."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Nature's Sanctuary") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Nature's Sanctuary",
+                        Some("Magic action: expend a Wild Shape use to summon spectral trees and vines \
+                              in a 15-foot Cube on the ground within 120 ft (lasts 1 min or until \
+                              Incapacitated/dead). You and allies in the area have Half Cover and \
+                              gain the Nature's Ward Resistance for your current land. \
+                              Bonus Action: move the Cube up to 60 ft (within 120 ft of you)."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Circle of the Moon") => match new_level {
+            3 => {
+                if !has("Circle Forms") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Circle Forms",
+                        Some("When you use Wild Shape, you gain enhanced lunar benefits: \
+                              Max CR equals your Druid level divided by 3 (round down) — \
+                                e.g. CR 1 at level 3, CR 2 at level 6, CR 6 at level 18. \
+                              AC equals 13 + WIS modifier if that total is higher than the Beast's AC. \
+                              Temporary HP equals three times your Druid level (instead of once)."),
+                        1, "manual").await;
+                }
+                if !has("Circle of the Moon Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Circle of the Moon Spells",
+                        Some("Always prepared: Cure Wounds, Moonbeam, Starry Wisp (L3); \
+                              Conjure Animals (L5); Fount of Moonlight (L7); Mass Cure Wounds (L9). \
+                              You can also cast these spells while in Wild Shape form."),
+                        1, "manual").await;
+                }
+                // Learn the level 3 always-prepared spells
+                for spell_name in &["Cure Wounds", "Moonbeam", "Starry Wisp"] {
+                    if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = spell["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_moon").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                // Conjure Animals becomes available (level 5 circle spell)
+                if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Conjure Animals").await {
+                    if let Some(id) = spell["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_moon").await;
+                    }
+                }
+            }
+            6 => {
+                if !has("Improved Circle Forms") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Improved Circle Forms",
+                        Some("While in a Wild Shape form: \
+                              Lunar Radiance — each of your attacks can deal its normal damage type \
+                                or Radiant damage (choose each time you hit). \
+                              Increased Toughness — add your WIS modifier to Constitution saving throws."),
+                        1, "manual").await;
+                }
+            }
+            7 => {
+                // Fount of Moonlight becomes available
+                if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Fount of Moonlight").await {
+                    if let Some(id) = spell["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_moon").await;
+                    }
+                }
+            }
+            9 => {
+                // Mass Cure Wounds becomes available
+                if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Mass Cure Wounds").await {
+                    if let Some(id) = spell["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_moon").await;
+                    }
+                }
+            }
+            10 => {
+                if !has("Moonlight Step") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Moonlight Step",
+                        Some("Bonus Action: teleport up to 30 ft to an unoccupied space you can see, \
+                              then have Advantage on the next attack roll you make before the end of \
+                              your turn. Uses = WIS modifier (min 1). Recharges on Long Rest. \
+                              You can also restore uses by expending a level 2+ spell slot per use \
+                              (no action required)."),
+                        wis_mod, "long_rest").await;
+                }
+            }
+            14 => {
+                if !has("Lunar Form") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Lunar Form",
+                        Some("Improved Lunar Radiance: once per turn, deal an extra 2d10 Radiant \
+                              damage to a target you hit with a Wild Shape form attack. \
+                              Shared Moonlight: when you use Moonlight Step, you can also teleport \
+                              one willing creature within 10 ft of you to an unoccupied space within \
+                              10 ft of your destination."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Circle of the Sea") => match new_level {
+            3 => {
+                if !has("Circle of the Sea Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Circle of the Sea Spells",
+                        Some("Always prepared: Fog Cloud, Gust of Wind, Ray of Frost, Shatter, Thunderwave (L3); \
+                              Lightning Bolt, Water Breathing (L5); Control Water, Ice Storm (L7); \
+                              Conjure Elemental, Hold Monster (L9)."),
+                        1, "manual").await;
+                }
+                if !has("Wrath of the Sea") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Wrath of the Sea",
+                        Some("Bonus Action: expend a Wild Shape use to manifest a 5-foot Emanation \
+                              of ocean spray around you for 10 minutes (dismiss freely; ends if \
+                              Incapacitated or re-manifested). \
+                              When manifesting and as a Bonus Action on subsequent turns, choose a \
+                              creature you can see in the Emanation — it makes a CON save (DC = spell \
+                              save DC) or take Cold damage and, if Large or smaller, be pushed up to \
+                              15 ft away. Damage = roll d6s equal to your WIS modifier (min 1d6). \
+                              Level 6: Emanation grows to 10 ft."),
+                        1, "manual").await;
+                }
+                // Learn the level 3 always-prepared Sea spells
+                for spell_name in &["Fog Cloud", "Gust of Wind", "Ray of Frost", "Shatter", "Thunderwave"] {
+                    if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = spell["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_sea").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Lightning Bolt", "Water Breathing"] {
+                    if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = spell["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_sea").await;
+                        }
+                    }
+                }
+            }
+            6 => {
+                if !has("Aquatic Affinity") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Aquatic Affinity",
+                        Some("The Emanation of your Wrath of the Sea increases to 10 feet. \
+                              In addition, you gain a Swim Speed equal to your Speed."),
+                        1, "manual").await;
+                }
+            }
+            7 => {
+                for spell_name in &["Control Water", "Ice Storm"] {
+                    if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = spell["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_sea").await;
+                        }
+                    }
+                }
+            }
+            9 => {
+                for spell_name in &["Conjure Elemental", "Hold Monster"] {
+                    if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = spell["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_sea").await;
+                        }
+                    }
+                }
+            }
+            10 => {
+                if !has("Stormborn") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Stormborn",
+                        Some("While your Wrath of the Sea Emanation is active: \
+                              Flight — you gain a Fly Speed equal to your Speed. \
+                              Resistance — you have Resistance to Cold, Lightning, and Thunder damage."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Oceanic Gift") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Oceanic Gift",
+                        Some("When manifesting Wrath of the Sea, you can instead manifest it around \
+                              one willing creature within 60 ft — that creature gains all benefits of \
+                              the Emanation and uses your spell save DC and WIS modifier. \
+                              You can also manifest the Emanation around both that creature and yourself \
+                              by expending two Wild Shape uses instead of one."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Circle of the Stars") => match new_level {
+            3 => {
+                if !has("Star Map") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Star Map",
+                        Some("You have a star chart (a Tiny object usable as a Spellcasting Focus). \
+                              While holding it, you have Guidance and Guiding Bolt always prepared. \
+                              Free Guiding Bolt: cast without a spell slot a number of times equal to \
+                              your WIS modifier (min 1). Recharges on Long Rest. \
+                              If lost, perform a 1-hour ceremony (during a Short or Long Rest) to \
+                              create a replacement."),
+                        wis_mod, "long_rest").await;
+                }
+                if !has("Starry Form") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Starry Form",
+                        Some("Bonus Action: expend a Wild Shape use to take on a starry form for \
+                              10 minutes (dismiss freely; ends if Incapacitated or used again). \
+                              Your body becomes luminous (Bright Light 10 ft, Dim Light 10 ft beyond). \
+                              Choose one constellation: \
+                              Archer — On activation and as a Bonus Action each turn: ranged spell \
+                                attack for 1d8+WIS Radiant damage against one creature within 60 ft. \
+                              Chalice — When you cast a healing spell with a slot, you or another \
+                                creature within 30 ft regains 1d8+WIS HP. \
+                              Dragon — INT/WIS checks and CON saves for Concentration treat a d20 \
+                                roll of 9 or lower as a 10. \
+                              Level 10 (Twinkling Constellations): Archer and Chalice dice become 2d8; \
+                              Dragon grants Fly Speed 20 ft + hover; you can change constellations \
+                              at start of each turn."),
+                        1, "manual").await;
+                }
+                // Learn Guidance and Guiding Bolt as always-prepared
+                for spell_name in &["Guidance", "Guiding Bolt"] {
+                    if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = spell["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "circle_of_the_stars").await;
+                        }
+                    }
+                }
+            }
+            6 => {
+                if !has("Cosmic Omen") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Cosmic Omen",
+                        Some("After each Long Rest, roll a die: even = Weal, odd = Woe. Until your \
+                              next Long Rest, when a creature you can see within 30 ft is about to \
+                              make a D20 Test, you can take a Reaction to roll 1d6 and: \
+                              Weal (even): add the roll to the total. \
+                              Woe (odd): subtract the roll from the total. \
+                              Uses = WIS modifier (min 1). Recharges on Long Rest."),
+                        wis_mod, "long_rest").await;
+                }
+            }
+            10 => {
+                // Update Starry Form description (Twinkling Constellations) — already included
+                // in the level 3 Starry Form description for forward-looking players.
+                // Separately note the upgrade:
+                if !has("Twinkling Constellations") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Twinkling Constellations",
+                        Some("Your Starry Form constellations improve: \
+                              Archer and Chalice dice increase to 2d8. \
+                              Dragon grants a Fly Speed of 20 feet and the ability to hover. \
+                              At the start of each of your turns in Starry Form, you can change \
+                              which constellation glimmers on your body."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Full of Stars") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Full of Stars",
+                        Some("While in your Starry Form, you become partially incorporeal, giving \
+                              you Resistance to Bludgeoning, Piercing, and Slashing damage."),
                         1, "manual").await;
                 }
             }

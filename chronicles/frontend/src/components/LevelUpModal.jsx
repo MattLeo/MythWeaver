@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { STYLES } from '../styles.js'
 import {
-    FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, BARD_SUBCLASSES, CLERIC_SUBCLASSES,
+    FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, BARD_SUBCLASSES,
+    CLERIC_SUBCLASSES, DRUID_SUBCLASSES,
     ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
-    FIGHTER_ASI_LEVELS, getFighterFeatures, getBarbarianFeatures, getBardFeatures, getClericFeatures,
+    FIGHTER_ASI_LEVELS,
+    getFighterFeatures, getBarbarianFeatures, getBardFeatures,
+    getClericFeatures, getDruidFeatures,
 } from '../constants.js'
 import { searchSpells, learnSpell, seedEkSlots } from '../api/client.js'
 
@@ -149,11 +152,7 @@ ${STYLES}
   border-color: var(--gold); color: var(--goldl);
   background: rgba(200,150,42,.07);
 }
-
-/* ── EK Spell Picker ── */
-.ek-tabs {
-  display: flex; gap: .4rem; margin-bottom: .8rem;
-}
+.ek-tabs { display: flex; gap: .4rem; margin-bottom: .8rem; }
 .ek-tab {
   flex: 1; background: var(--elev); border: 1px solid var(--bord);
   border-radius: 2px; padding: .35rem; cursor: pointer;
@@ -161,10 +160,7 @@ ${STYLES}
   letter-spacing: .08em; color: var(--dim); transition: all .15s;
   text-align: center;
 }
-.ek-tab.active {
-  border-color: #b5a9f5; color: #b5a9f5;
-  background: rgba(181,169,245,.08);
-}
+.ek-tab.active { border-color: #b5a9f5; color: #b5a9f5; background: rgba(181,169,245,.08); }
 .ek-search-bar {
   display: flex; align-items: center; gap: .5rem;
   background: var(--elev); border: 1px solid var(--bord);
@@ -172,8 +168,7 @@ ${STYLES}
 }
 .ek-search-input {
   background: none; border: none; outline: none;
-  color: var(--text); font-size: .8rem; flex: 1;
-  font-family: inherit;
+  color: var(--text); font-size: .8rem; flex: 1; font-family: inherit;
 }
 .ek-spell-list {
   display: flex; flex-direction: column; gap: .3rem;
@@ -183,40 +178,32 @@ ${STYLES}
 .ek-spell-row {
   display: flex; align-items: center; gap: .6rem;
   padding: .4rem .6rem; border-radius: 2px;
-  border: 1px solid transparent;
-  cursor: pointer; transition: all .12s;
+  border: 1px solid transparent; cursor: pointer; transition: all .12s;
 }
 .ek-spell-row:hover { background: rgba(181,169,245,.06); border-color: rgba(181,169,245,.2); }
 .ek-spell-row.selected { background: rgba(181,169,245,.1); border-color: #b5a9f5; }
 .ek-spell-row.learned { opacity: .4; cursor: not-allowed; }
 .ek-spell-name { font-family: 'Cinzel', serif; font-size: .72rem; color: var(--text); flex: 1; }
-.ek-spell-school { font-size: .62rem; color: #b5a9f5; }
 .ek-spell-check { font-size: .72rem; color: #b5a9f5; }
 .ek-school-badge {
-  font-size: .58rem; padding: .1rem .35rem;
-  border-radius: 2px; background: rgba(181,169,245,.12);
-  color: #b5a9f5; border: 1px solid rgba(181,169,245,.2);
-  white-space: nowrap;
+  font-size: .58rem; padding: .1rem .35rem; border-radius: 2px;
+  background: rgba(181,169,245,.12); color: #b5a9f5;
+  border: 1px solid rgba(181,169,245,.2); white-space: nowrap;
 }
 .ek-school-badge.recommended { background: rgba(126,200,227,.12); color: #7ec8e3; border-color: rgba(126,200,227,.2); }
-.ek-selected-pills {
-  display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .6rem;
-}
+.ek-selected-pills { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .6rem; }
 .ek-pill {
   display: flex; align-items: center; gap: .3rem;
   background: rgba(181,169,245,.1); border: 1px solid rgba(181,169,245,.25);
   border-radius: 10px; padding: .2rem .5rem;
   font-size: .68rem; color: #b5a9f5;
 }
-.ek-pill-remove {
-  cursor: pointer; opacity: .6; font-size: .8rem; line-height: 1;
-}
+.ek-pill-remove { cursor: pointer; opacity: .6; font-size: .8rem; line-height: 1; }
 .ek-pill-remove:hover { opacity: 1; }
 .ek-hint {
   font-size: .72rem; color: var(--dim); line-height: 1.6;
   margin-bottom: .8rem; background: rgba(181,169,245,.04);
-  border: 1px solid rgba(181,169,245,.1); border-radius: 2px;
-  padding: .6rem .8rem;
+  border: 1px solid rgba(181,169,245,.1); border-radius: 2px; padding: .6rem .8rem;
 }
 `
 
@@ -262,12 +249,15 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         bard_cantrips, bard_slot_summary,
         // Cleric
         channel_divinity_uses, cleric_cantrips, cleric_prepared_spells, cleric_slot_summary,
+        // Druid
+        wild_shape_uses, wild_shape_cr, druid_cantrips, druid_prepared_spells, druid_slot_summary,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
     const isBarbarian = player.class === 'Barbarian'
     const isBard      = player.class === 'Bard'
     const isCleric    = player.class === 'Cleric'
+    const isDruid     = player.class === 'Druid'
 
     const isBattleMaster     = player.subclass === 'Battle Master'
     const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
@@ -395,28 +385,35 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
 
     const subclassOptions = isCleric
         ? CLERIC_SUBCLASSES
-        : isBarbarian
-            ? BARBARIAN_SUBCLASSES
-            : isBard
-                ? BARD_SUBCLASSES
-                : FIGHTER_SUBCLASSES
+        : isDruid
+            ? DRUID_SUBCLASSES
+            : isBarbarian
+                ? BARBARIAN_SUBCLASSES
+                : isBard
+                    ? BARD_SUBCLASSES
+                    : FIGHTER_SUBCLASSES
 
     const subclassLabel = isCleric
         ? 'Choose your Divine Domain'
-        : isBarbarian
-            ? 'Choose your Primal Path'
-            : isBard
-                ? 'Choose your Bard College'
-                : 'Choose your Fighter subclass'
+        : isDruid
+            ? 'Choose your Druid Circle'
+            : isBarbarian
+                ? 'Choose your Primal Path'
+                : isBard
+                    ? 'Choose your Bard College'
+                    : 'Choose your Fighter subclass'
 
-    // ────────────────────────────────────────────────────────────────────────
+    // Moon Druid CR display
+    const moonCR = player.subclass === 'Circle of the Moon'
+        ? Math.floor(new_level / 3)
+        : null
+
     return (
         <>
             <style dangerouslySetInnerHTML={{ __html: MODAL_STYLES }} />
             <div className="lu-overlay">
                 <div className="lu-modal">
 
-                    {/* ── Header ── */}
                     <div className="lu-header">
                         <div className="lu-title">Level {new_level}!</div>
                         <div className="lu-subtitle">
@@ -431,7 +428,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                         {currentStep === 'summary' && (
                             <>
                                 <div className="lu-step-label">What's new</div>
-
                                 <div className="lu-hp-gained">
                                     <div className="lu-hp-num">+{hp_gained}</div>
                                     <div className="lu-hp-label">hit points — new maximum: {new_max_hp}</div>
@@ -443,7 +439,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         <span className="lu-info-val">+{new_proficiency_bonus}</span>
                                     </div>
 
-                                    {/* ── Fighter stats ── */}
+                                    {/* Fighter */}
                                     {isFighter && (
                                         <>
                                             <div className="lu-info-row">
@@ -484,7 +480,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         </>
                                     )}
 
-                                    {/* ── Barbarian stats ── */}
+                                    {/* Barbarian */}
                                     {isBarbarian && (
                                         <>
                                             <div className="lu-info-row">
@@ -514,7 +510,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         </>
                                     )}
 
-                                    {/* ── Bard stats ── */}
+                                    {/* Bard */}
                                     {isBard && (
                                         <>
                                             <div className="lu-info-row">
@@ -552,7 +548,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         </>
                                     )}
 
-                                    {/* ── Cleric stats ── */}
+                                    {/* Cleric */}
                                     {isCleric && (
                                         <>
                                             {channel_divinity_uses > 0 && (
@@ -573,6 +569,44 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                                 <span>Spell Slots</span>
                                                 <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{cleric_slot_summary}</span>
                                             </div>
+                                        </>
+                                    )}
+
+                                    {/* Druid */}
+                                    {isDruid && (
+                                        <>
+                                            {wild_shape_uses > 0 && (
+                                                <div className="lu-info-row">
+                                                    <span>Wild Shape Uses</span>
+                                                    <span className="lu-info-val">{wild_shape_uses}</span>
+                                                </div>
+                                            )}
+                                            {wild_shape_uses > 0 && (
+                                                <div className="lu-info-row">
+                                                    <span>Wild Shape Max CR</span>
+                                                    <span className="lu-info-val">
+                                                        {moonCR !== null ? `${moonCR} (Moon)` : wild_shape_cr}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            <div className="lu-info-row">
+                                                <span>Cantrips Known</span>
+                                                <span className="lu-info-val">{druid_cantrips}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Prepared Spells</span>
+                                                <span className="lu-info-val">{druid_prepared_spells}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Spell Slots</span>
+                                                <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{druid_slot_summary}</span>
+                                            </div>
+                                            {new_level === 5 && (
+                                                <div className="lu-info-row">
+                                                    <span>Wild Resurgence</span>
+                                                    <span className="lu-info-val">Exchange slots ↔ uses</span>
+                                                </div>
+                                            )}
                                         </>
                                     )}
                                 </div>
@@ -625,29 +659,18 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                     <button
                                         className={`lu-mode-btn${asiMode === '+2' ? ' sel' : ''}`}
                                         onClick={() => { setAsiMode('+2'); setAsi2(null) }}
-                                    >
-                                        +2 to one stat
-                                    </button>
+                                    >+2 to one stat</button>
                                     <button
                                         className={`lu-mode-btn${asiMode === '+1+1' ? ' sel' : ''}`}
                                         onClick={() => setAsiMode('+1+1')}
-                                    >
-                                        +1 to two stats
-                                    </button>
+                                    >+1 to two stats</button>
                                 </div>
-
                                 {asiMode === '+2' ? (
                                     <>
-                                        <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginBottom: '.6rem' }}>
-                                            Choose one stat to increase by 2
-                                        </div>
+                                        <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginBottom: '.6rem' }}>Choose one stat to increase by 2</div>
                                         <div className="lu-stat-grid">
                                             {STAT_KEYS.map(k => (
-                                                <div
-                                                    key={k}
-                                                    className={`lu-stat${asi1 === k ? ' sel' : ''}`}
-                                                    onClick={() => setAsi1(k)}
-                                                >
+                                                <div key={k} className={`lu-stat${asi1 === k ? ' sel' : ''}`} onClick={() => setAsi1(k)}>
                                                     <div className="lu-stat-label">{STAT_LABELS[k]}</div>
                                                     <div className="lu-stat-val">{player[k]}</div>
                                                     <div className="lu-stat-mod">{fmt(player[k])} → {fmt(player[k] + 2)}</div>
@@ -663,25 +686,18 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         </div>
                                         <div className="lu-stat-grid">
                                             {STAT_KEYS.map(k => {
-                                                const isFirst  = asi1 === k
-                                                const isSecond = asi2 === k
-                                                const isSel    = isFirst || isSecond
+                                                const isFirst = asi1 === k, isSecond = asi2 === k, isSel = isFirst || isSecond
                                                 return (
-                                                    <div
-                                                        key={k}
-                                                        className={`lu-stat${isSel ? ' sel' : ''}`}
+                                                    <div key={k} className={`lu-stat${isSel ? ' sel' : ''}`}
                                                         onClick={() => {
                                                             if (isFirst) { setAsi1(asi2); setAsi2(null) }
                                                             else if (isSecond) { setAsi2(null) }
                                                             else if (!asi1) { setAsi1(k) }
                                                             else if (!asi2 && k !== asi1) { setAsi2(k) }
-                                                        }}
-                                                    >
+                                                        }}>
                                                         <div className="lu-stat-label">{STAT_LABELS[k]}</div>
                                                         <div className="lu-stat-val">{player[k]}</div>
-                                                        <div className="lu-stat-mod">
-                                                            {isSel ? `${fmt(player[k])} → ${fmt(player[k] + 1)}` : fmt(player[k])}
-                                                        </div>
+                                                        <div className="lu-stat-mod">{isSel ? `${fmt(player[k])} → ${fmt(player[k] + 1)}` : fmt(player[k])}</div>
                                                     </div>
                                                 )
                                             })}
@@ -698,30 +714,22 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                     Choose {maneuversToGain} maneuver{maneuversToGain > 1 ? 's' : ''}
                                     {selectedManeuvers.length > 0 && ` (${selectedManeuvers.length}/${maneuversToGain} selected)`}
                                 </div>
-
                                 {canReplaceManeuver && (
                                     <div style={{ marginBottom: '.8rem' }}>
                                         <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', cursor: 'pointer', fontSize: '.78rem', color: 'var(--dim)' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={replaceMode}
-                                                onChange={e => { setReplaceMode(e.target.checked); setReplacedManeuver(null) }}
-                                            />
+                                            <input type="checkbox" checked={replaceMode}
+                                                onChange={e => { setReplaceMode(e.target.checked); setReplacedManeuver(null) }} />
                                             Also replace one known maneuver
                                         </label>
                                         {replaceMode && (
                                             <>
-                                                <div style={{ fontSize: '.72rem', color: 'var(--dim)', margin: '.4rem 0 .3rem' }}>
-                                                    Select a known maneuver to replace:
-                                                </div>
+                                                <div style={{ fontSize: '.72rem', color: 'var(--dim)', margin: '.4rem 0 .3rem' }}>Select a known maneuver to replace:</div>
                                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.3rem', marginBottom: '.5rem' }}>
                                                     {(player.known_maneuvers || []).map(m => (
-                                                        <button
-                                                            key={m.maneuver_name}
+                                                        <button key={m.maneuver_name}
                                                             className={`btn-sm${replacedManeuver === m.maneuver_name ? ' active' : ''}`}
                                                             style={replacedManeuver === m.maneuver_name ? { borderColor: 'var(--gold)', color: 'var(--gold)' } : {}}
-                                                            onClick={() => setReplacedManeuver(m.maneuver_name)}
-                                                        >
+                                                            onClick={() => setReplacedManeuver(m.maneuver_name)}>
                                                             {m.maneuver_name}
                                                         </button>
                                                     ))}
@@ -730,19 +738,14 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         )}
                                     </div>
                                 )}
-
                                 <div className="lu-maneuver-grid">
                                     {MANEUVERS.map(m => {
-                                        const alreadyKnown = (player.known_maneuvers || []).some(k => k.maneuver_name === m)
-                                            && m !== replacedManeuver
-                                        const isSel      = selectedManeuvers.includes(m)
+                                        const alreadyKnown = (player.known_maneuvers || []).some(k => k.maneuver_name === m) && m !== replacedManeuver
+                                        const isSel = selectedManeuvers.includes(m)
                                         const isDisabled = alreadyKnown || (!isSel && selectedManeuvers.length >= maneuversToGain)
                                         return (
-                                            <div
-                                                key={m}
-                                                className={`lu-maneuver${isSel ? ' sel' : ''}${isDisabled ? ' disabled' : ''}`}
-                                                onClick={() => !isDisabled && toggleManeuver(m)}
-                                            >
+                                            <div key={m} className={`lu-maneuver${isSel ? ' sel' : ''}${isDisabled ? ' disabled' : ''}`}
+                                                onClick={() => !isDisabled && toggleManeuver(m)}>
                                                 {m}
                                                 {alreadyKnown && <span style={{ fontSize: '.65rem', opacity: .5, marginLeft: '.3rem' }}>known</span>}
                                             </div>
@@ -762,40 +765,30 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                     As an Eldritch Knight, you specialize in <span style={{ color: '#7ec8e3' }}>Abjuration</span> and{' '}
                                     <span style={{ color: '#f5a96a' }}>Evocation</span> spells.
                                     You may choose one spell from any school at levels 3, 8, 14, and 20.
-                                    All other spells must be from those two schools.
                                 </div>
-
                                 <div className="ek-tabs">
                                     {cantripSlots > 0 && (
-                                        <button
-                                            className={`ek-tab${ekSpellTab === 'cantrip' ? ' active' : ''}`}
-                                            onClick={() => setEkSpellTab('cantrip')}
-                                        >
+                                        <button className={`ek-tab${ekSpellTab === 'cantrip' ? ' active' : ''}`}
+                                            onClick={() => setEkSpellTab('cantrip')}>
                                             Cantrips ({selectedCantrips.length}/{cantripSlots})
                                         </button>
                                     )}
                                     {preparedSlots > 0 && (
-                                        <button
-                                            className={`ek-tab${ekSpellTab === 'prepared' ? ' active' : ''}`}
-                                            onClick={() => setEkSpellTab('prepared')}
-                                        >
+                                        <button className={`ek-tab${ekSpellTab === 'prepared' ? ' active' : ''}`}
+                                            onClick={() => setEkSpellTab('prepared')}>
                                             Spells ({selectedPrepared.length}/{preparedSlots})
                                         </button>
                                     )}
                                 </div>
-
                                 <div className="ek-search-bar">
                                     <span style={{ opacity: .5 }}>🔍</span>
-                                    <input
-                                        className="ek-search-input"
+                                    <input className="ek-search-input"
                                         placeholder={ekSpellTab === 'cantrip' ? 'Search cantrips...' : 'Search spells...'}
                                         value={spellSearch}
                                         onChange={e => setSpellSearch(e.target.value)}
-                                        autoFocus
-                                    />
+                                        autoFocus />
                                     {searching && <span style={{ fontSize: '.7rem', color: 'var(--dim)' }}>...</span>}
                                 </div>
-
                                 <div className="ek-spell-list">
                                     {spellSearch.trim().length < 2 && activeList.length === 0 && (
                                         <div style={{ padding: '.5rem', fontSize: '.72rem', color: 'var(--dim)', textAlign: 'center' }}>
@@ -803,23 +796,18 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         </div>
                                     )}
                                     {activeResults.map(spell => {
-                                        const known       = isAlreadyKnown(spell.id)
-                                        const isSel       = activeList.some(s => s.id === spell.id)
-                                        const atMax       = activeList.length >= activeMax && !isSel
-                                        const recommended = isRecommended(spell.school)
+                                        const known = isAlreadyKnown(spell.id)
+                                        const isSel = activeList.some(s => s.id === spell.id)
+                                        const atMax = activeList.length >= activeMax && !isSel
                                         return (
-                                            <div
-                                                key={spell.id}
+                                            <div key={spell.id}
                                                 className={`ek-spell-row${isSel ? ' selected' : ''}${known || atMax ? ' learned' : ''}`}
-                                                onClick={() => !known && !atMax && activeToggle({ id: spell.id, name: spell.name, school: spell.school })}
-                                            >
+                                                onClick={() => !known && !atMax && activeToggle({ id: spell.id, name: spell.name, school: spell.school })}>
                                                 <span style={{ fontSize: '.9rem', color: SCHOOL_COLORS[spell.school] || '#b5a9f5' }}>
                                                     {spell.level === 0 ? '⊕' : spell.level}
                                                 </span>
                                                 <span className="ek-spell-name">{spell.name}</span>
-                                                <span className={`ek-school-badge${recommended ? ' recommended' : ''}`}>
-                                                    {spell.school}
-                                                </span>
+                                                <span className={`ek-school-badge${isRecommended(spell.school) ? ' recommended' : ''}`}>{spell.school}</span>
                                                 {isSel  && <span className="ek-spell-check">✓</span>}
                                                 {known  && <span style={{ fontSize: '.6rem', color: 'var(--dim)' }}>known</span>}
                                             </div>
@@ -831,7 +819,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         </div>
                                     )}
                                 </div>
-
                                 {activeList.length > 0 && (
                                     <div className="ek-selected-pills">
                                         {activeList.map(s => (
@@ -842,7 +829,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         ))}
                                     </div>
                                 )}
-
                                 <div style={{ marginTop: '.8rem', fontSize: '.72rem', color: 'var(--dim)' }}>
                                     {cantripSlots > 0 && (
                                         <span style={{ color: selectedCantrips.length === cantripSlots ? '#7ef5a9' : 'var(--dim)' }}>
@@ -861,7 +847,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
 
                     </div>
 
-                    {/* ── Footer ── */}
                     <div className="lu-footer">
                         <div className="lu-step-dots">
                             {steps.map((_, i) => (
@@ -870,26 +855,12 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                         </div>
                         <div style={{ display: 'flex', gap: '.75rem' }}>
                             {stepIndex > 0 && (
-                                <button className="btn-ghost" onClick={() => setStepIndex(i => i - 1)}>
-                                    ← Back
-                                </button>
+                                <button className="btn-ghost" onClick={() => setStepIndex(i => i - 1)}>← Back</button>
                             )}
                             {!isLast ? (
-                                <button
-                                    className="btn-gold"
-                                    disabled={!canAdvance()}
-                                    onClick={() => setStepIndex(i => i + 1)}
-                                >
-                                    Continue →
-                                </button>
+                                <button className="btn-gold" disabled={!canAdvance()} onClick={() => setStepIndex(i => i + 1)}>Continue →</button>
                             ) : (
-                                <button
-                                    className="btn-gold"
-                                    disabled={!canAdvance()}
-                                    onClick={handleConfirm}
-                                >
-                                    Confirm ⚔
-                                </button>
+                                <button className="btn-gold" disabled={!canAdvance()} onClick={handleConfirm}>Confirm ⚔</button>
                             )}
                         </div>
                     </div>
