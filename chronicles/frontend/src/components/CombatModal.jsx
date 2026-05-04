@@ -662,15 +662,10 @@ function cantripDiceAtLevel(spell, charLevel) {
 }
 
 function gfbSecondaryDamage(playerLevel, spellcastingMod) {
-    // Primary extra fire dice (also used for secondary die count):
-    //   L1-4:  0 dice, secondary = just modifier (min 0)
-    //   L5-10: 1d8 primary, secondary = 1d8 + mod
-    //   L11-16: 2d8 primary, secondary = 2d8 + mod
-    //   L17+:  3d8 primary, secondary = 3d8 + mod
     const diceCount = playerLevel >= 17 ? 3
         : playerLevel >= 11 ? 2
-            : playerLevel >= 5 ? 1
-                : 0
+        : playerLevel >= 5 ? 1
+        : 0
     return { diceCount, mod: Math.max(0, spellcastingMod) }
 }
 
@@ -726,7 +721,6 @@ function SpellPicker({ spells, slots, concentration, charLevel, onCast, onClose,
     const cantrips = spells.filter(s => s.level === 0)
     const prepared = spells.filter(s => s.level > 0)
 
-    // In War Magic mode only cantrips are allowed
     const showCantrips = cantrips
     const showPrepared = warMagicMode ? [] : prepared
 
@@ -735,8 +729,6 @@ function SpellPicker({ spells, slots, concentration, charLevel, onCast, onClose,
             setCastLevel(Math.max(selected.level, 1))
         }
     }, [selected?.spell_id])
-
-    const hasSlot = (level) => slots.some(s => s.slot_level === level && s.current_slots > 0)
 
     const availableSlots = selected && selected.level > 0
         ? slots.filter(s => s.slot_level >= selected.level && s.current_slots > 0)
@@ -808,7 +800,6 @@ function SpellPicker({ spells, slots, concentration, charLevel, onCast, onClose,
 
             {selected && (
                 <div className="spell-cast-bar">
-                    {/* Slot level selector for leveled spells */}
                     {selected.level > 0 && availableSlots.length > 0 && (
                         <div className="slot-level-row">
                             <span className="slot-level-label">Slot:</span>
@@ -879,10 +870,9 @@ export default function CombatModal({
     const [showSkillsMenu, setShowSkillsMenu] = useState(false)
     const [showSpellPicker, setShowSpellPicker] = useState(false)
     const [warMagicMode, setWarMagicMode] = useState(false)
-    const [pendingSpell, setPendingSpell] = useState(null) // { spell, castLevel }
+    const [pendingSpell, setPendingSpell] = useState(null)
     const [isCrit, setIsCrit] = useState(false)
 
-    // Spell state
     const [knownSpells, setKnownSpells] = useState([])
     const [spellSlots, setSpellSlots] = useState([])
     const [concentration, setConcentration] = useState(null)
@@ -899,10 +889,15 @@ export default function CombatModal({
     const logRef = useRef(null)
     const logData = useRef([])
 
-    // ── EK detection ──────────────────────────────────────────────────────────
+    // ── Class feature detection ───────────────────────────────────────────────
     const isEK = player?.subclass === 'Eldritch Knight'
     const hasWarMagic = isEK && (player?.level || 0) >= 7
     const hasImprovedWarMagic = isEK && (player?.level || 0) >= 18
+
+    // Any class with a spell list — determines whether spell UI is shown
+    const canCastSpells = isEK
+        || ['Bard', 'Cleric', 'Druid', 'Paladin'].includes(player?.class)
+        || player?.class === 'Monk' // Warrior of Shadow / Elements get cantrips
 
     // ── Load ──────────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -910,20 +905,20 @@ export default function CombatModal({
     }, [campaignId])
 
     const loadSpellData = useCallback(async () => {
-        if (!isEK) return
+        if (!canCastSpells) return
         try {
             const [knownRes, slotsRes, concRes, bondsRes] = await Promise.all([
                 api.getKnownSpells(campaignId),
                 api.getSpellSlots(campaignId),
                 api.getConcentration(campaignId),
-                api.getWarBonds(campaignId),
+                isEK ? api.getWarBonds(campaignId) : Promise.resolve({ war_bonds: [] }),
             ])
             setKnownSpells(knownRes.known_spells || [])
             setSpellSlots(slotsRes.spell_slots || [])
             setConcentration(concRes.concentration || null)
             setWarBonds(bondsRes.war_bonds || [])
         } catch (e) { /* non-fatal */ }
-    }, [campaignId, isEK])
+    }, [campaignId, canCastSpells, isEK])
 
     useEffect(() => { loadSpellData() }, [loadSpellData])
 
@@ -955,7 +950,6 @@ export default function CombatModal({
 
     const totalSlotsLeft = spellSlots.reduce((a, s) => a + s.current_slots, 0)
 
-    // Spells available: only action-cast ones in combat
     const combatSpells = knownSpells.filter(s =>
         s.casting_time === 'action' || s.casting_time === 'bonus_action'
     )
@@ -1106,7 +1100,7 @@ export default function CombatModal({
         setPhase('player_turn')
     }
 
-    // ── Spell casting in combat ────────────────────────────────────────────────
+    // ── Spell casting ──────────────────────────────────────────────────────────
     const openSpellPicker = (warMagic = false) => {
         setWarMagicMode(warMagic)
         setShowSpellPicker(true)
@@ -1118,13 +1112,11 @@ export default function CombatModal({
         setShowSpellPicker(false)
         setPendingSpell({ spell, castLevel })
 
-        // Check concentration conflict
         if (spell.concentration === 1 && concentration) {
             const ok = window.confirm(`Casting ${spell.name} will drop concentration on ${concentration.spell_name}. Continue?`)
             if (!ok) { cancelAction(); return }
         }
 
-        // Expend slot via API
         try {
             const castRes = await api.castSpell(campaignId, spell.spell_id, {
                 slotLevel: castLevel,
@@ -1135,7 +1127,6 @@ export default function CombatModal({
                 if (!ok) { cancelAction(); return }
                 await api.castSpell(campaignId, spell.spell_id, { slotLevel: castLevel, dropConcentration: true })
             }
-            // Update local slot state
             setSpellSlots(castRes.spell_slots || spellSlots)
             if (spell.concentration === 1) setConcentration({ spell_id: spell.spell_id, spell_name: spell.name })
             else if (castRes.concentration) setConcentration(castRes.concentration)
@@ -1144,9 +1135,7 @@ export default function CombatModal({
             cancelAction(); return
         }
 
-        // Now resolve the spell effect
         if (!spell.damage_die || !spell.damage_die_count) {
-            // Utility/concentration spell — no damage to roll
             addLog(`${player.name} casts ${spell.name}${castLevel ? ` (level ${castLevel} slot)` : ''}`, 'spell')
             finishSpellAction(spell)
             return
@@ -1158,18 +1147,14 @@ export default function CombatModal({
 
         const { sides } = parseDamageDie(spell.damage_die)
 
-        // Attack roll needed?
         if (spell.attack_type === 'ranged_spell' || spell.attack_type === 'melee_spell') {
-            // Need to pick a target first
             setSelectedAction('spell_target')
             setPhase('player_turn')
-            // Store spell info for after target selection
             setPendingSpell({ spell, castLevel, diceCount, sides })
             addLog(`${player.name} casts ${spell.name} — choose a target`, 'spell')
             return
         }
 
-        // Save spell — roll damage directly, apply to target (or all for AoE)
         if (spell.save_type) {
             if (spell.target_type === 'single') {
                 setSelectedAction('spell_target_save')
@@ -1178,8 +1163,6 @@ export default function CombatModal({
                 addLog(`${player.name} casts ${spell.name} — choose a target`, 'spell')
                 return
             }
-            // AoE save: roll damage, model handles the save narration
-            // AoE save: log damage, let model narrate saves
             startDiceRoll({
                 count: diceCount, sides,
                 label: `${spell.name} — ${diceCount}d${sides} ${spell.damage_type} (${spell.save_type?.toUpperCase()} save, half on success)`,
@@ -1206,7 +1189,6 @@ export default function CombatModal({
             return
         }
 
-        // No attack, no save (self buff etc.) — already handled above
         addLog(`${player.name} casts ${spell.name}`, 'spell')
         finishSpellAction(spell)
     }
@@ -1216,7 +1198,6 @@ export default function CombatModal({
         const { spell, castLevel, diceCount, sides } = pendingSpell
 
         const isGFB = spell.spell_id === 'spell_green_flame_blade'
-        // INT modifier for EK (the only class that gets GFB via class features)
         const intMod = Math.floor((player.int - 10) / 2)
 
         startDiceRoll({
@@ -1238,9 +1219,6 @@ export default function CombatModal({
                         )
                         setIsCrit(result.is_crit)
 
-                        // ── Primary damage: weapon + bonus fire dice ──────────────
-                        // For GFB: weapon damage die comes from resolve_attack result,
-                        // plus extra fire dice from the cantrip scaling.
                         const bonusDice = isGFB ? gfbPrimaryBonusDice(player.level || 1) : 0
                         const totalDiceCount = result.is_crit
                             ? (diceCount + bonusDice) * 2
@@ -1257,7 +1235,6 @@ export default function CombatModal({
                             isAdvantage: false,
                             isSpell: true,
                             onConfirm: async (dmgRolls) => {
-                                // Apply primary damage to primary target
                                 const result2 = await api.resolveDamage(campaignId, dmgRolls, result.is_crit)
                                 setShakingEnemy(selectedTarget)
                                 setTimeout(() => setShakingEnemy(null), 500)
@@ -1271,40 +1248,23 @@ export default function CombatModal({
                                 await refreshCombat()
                                 if (result2.all_enemies_defeated) { endCombatVictory(); return }
 
-                                // ── GFB secondary target ──────────────────────────────
                                 if (isGFB) {
                                     const { diceCount: secDice, mod: secMod } =
                                         gfbSecondaryDamage(player.level || 1, intMod)
-
-                                    const livingOthers = enemies.filter(
-                                        e => e.is_alive && e.id !== selectedTarget
-                                    )
+                                    const livingOthers = enemies.filter(e => e.is_alive && e.id !== selectedTarget)
 
                                     if (livingOthers.length === 0) {
-                                        // No valid secondary target — fire fizzles
-                                        addLog(
-                                            'Green fire finds no second target within 5 feet.',
-                                            'spell'
-                                        )
+                                        addLog('Green fire finds no second target within 5 feet.', 'spell')
                                         finishSpellAction(spell)
                                         return
                                     }
 
-                                    // If there's exactly one other living enemy it auto-targets;
-                                    // if multiple, the player should pick — we use the first
-                                    // for simplicity (combat UI doesn't currently support
-                                    // mid-flow target changes). This can be upgraded later.
                                     const secondaryTarget = livingOthers[0]
 
                                     if (secDice === 0) {
-                                        // L1-4: secondary takes modifier fire damage directly
                                         if (secMod > 0) {
                                             await api.setCombatTarget(campaignId, secondaryTarget.id)
-                                            const secResult = await api.resolveDamage(
-                                                campaignId,
-                                                [secMod], // pass as a single "roll" of fixed value
-                                                false
-                                            )
+                                            const secResult = await api.resolveDamage(campaignId, [secMod], false)
                                             addLog(
                                                 `Green fire leaps to ${secondaryTarget.name} `
                                                 + `for ${secResult.damage_dealt} fire damage`
@@ -1314,32 +1274,20 @@ export default function CombatModal({
                                             setShakingEnemy(secondaryTarget.id)
                                             setTimeout(() => setShakingEnemy(null), 500)
                                             await refreshCombat()
-                                            if (secResult.all_enemies_defeated) {
-                                                endCombatVictory(); return
-                                            }
+                                            if (secResult.all_enemies_defeated) { endCombatVictory(); return }
                                         } else {
-                                            addLog(
-                                                'Green fire leaps to a nearby creature but deals no damage (INT mod 0).',
-                                                'spell'
-                                            )
+                                            addLog('Green fire leaps to a nearby creature but deals no damage (INT mod 0).', 'spell')
                                         }
                                         finishSpellAction(spell)
                                     } else {
-                                        // L5+: roll secondary dice, then apply + mod
                                         startDiceRoll({
-                                            count: secDice,
-                                            sides: 8,
+                                            count: secDice, sides: 8,
                                             label: `Green Flame — ${secDice}d8 + ${secMod} fire on ${secondaryTarget.name}`,
-                                            isAdvantage: false,
-                                            isSpell: true,
+                                            isAdvantage: false, isSpell: true,
                                             onConfirm: async (secRolls) => {
                                                 const secTotal = secRolls.reduce((a, b) => a + b, 0) + secMod
                                                 await api.setCombatTarget(campaignId, secondaryTarget.id)
-                                                const secResult = await api.resolveDamage(
-                                                    campaignId,
-                                                    [secTotal],
-                                                    false
-                                                )
+                                                const secResult = await api.resolveDamage(campaignId, [secTotal], false)
                                                 setShakingEnemy(secondaryTarget.id)
                                                 setTimeout(() => setShakingEnemy(null), 500)
                                                 addLog(
@@ -1349,15 +1297,12 @@ export default function CombatModal({
                                                     secResult.enemy_dead ? 'crit' : 'hit'
                                                 )
                                                 await refreshCombat()
-                                                if (secResult.all_enemies_defeated) {
-                                                    endCombatVictory(); return
-                                                }
+                                                if (secResult.all_enemies_defeated) { endCombatVictory(); return }
                                                 finishSpellAction(spell)
                                             }
                                         })
                                     }
                                 } else {
-                                    // Not GFB — normal spell finish
                                     finishSpellAction(spell)
                                 }
                             }
@@ -1377,15 +1322,13 @@ export default function CombatModal({
         })
     }
 
-
     const confirmSpellSave = async () => {
         if (!selectedTarget || !pendingSpell) return
         const { spell, castLevel, diceCount, sides } = pendingSpell
         startDiceRoll({
             count: diceCount, sides,
             label: `${spell.name} Damage — ${diceCount}d${sides} ${spell.damage_type} (${spell.save_type?.toUpperCase()} save)`,
-            isAdvantage: false,
-            isSpell: true,
+            isAdvantage: false, isSpell: true,
             onConfirm: async (rolls) => {
                 try {
                     await api.setCombatTarget(campaignId, selectedTarget)
@@ -1400,6 +1343,7 @@ export default function CombatModal({
             }
         })
     }
+
     const finishSpellAction = (spell) => {
         const isWarMagic = warMagicMode
         setWarMagicMode(false)
@@ -1408,7 +1352,6 @@ export default function CombatModal({
         setPendingSpell(null)
 
         if (isWarMagic) {
-            // War Magic counts as one attack
             if (attacksRemaining <= 1) {
                 setActionUsed(true)
                 setAttacksRemaining(0)
@@ -1423,7 +1366,6 @@ export default function CombatModal({
         loadSpellData()
     }
 
-    // ── Bonus action spell ─────────────────────────────────────────────────────
     const openBonusSpellPicker = () => {
         setWarMagicMode(false)
         setShowSpellPicker(true)
@@ -1431,7 +1373,6 @@ export default function CombatModal({
         setSelectedAction('bonus_spell')
     }
 
-    // ── War Bond Summon ────────────────────────────────────────────────────────
     const summonBondedWeapon = async (itemId, itemName) => {
         try {
             const res = await api.summonBondedWeapon(campaignId, itemId)
@@ -1676,8 +1617,8 @@ export default function CombatModal({
                         </div>
                     </div>
 
-                    {/* EK: Concentration banner */}
-                    {isEK && concentration && (
+                    {/* Concentration banner — all casters */}
+                    {canCastSpells && concentration && (
                         <div className="conc-banner">
                             <span>◉ Concentrating on <strong>{concentration.spell_name}</strong></span>
                             <button className="conc-drop-btn" onClick={async () => {
@@ -1688,8 +1629,8 @@ export default function CombatModal({
                         </div>
                     )}
 
-                    {/* EK: Slot pips bar */}
-                    {isEK && spellSlots.length > 0 && (
+                    {/* Slot pips bar — all casters */}
+                    {canCastSpells && spellSlots.length > 0 && (
                         <SlotPipsBar slots={spellSlots} />
                     )}
 
@@ -1843,8 +1784,8 @@ export default function CombatModal({
                                         }} />
                                     </div>
                                     <div className="combatant-hp-text">{player.current_hp}/{player.max_hp} HP</div>
-                                    <div className="combatant-class">{player.class}{isEK ? ' · EK' : ''}</div>
-                                    {isEK && totalSlotsLeft > 0 && (
+                                    <div className="combatant-class">{player.class}{player.subclass ? ` · ${player.subclass.split(' ').map(w => w[0]).join('')}` : ''}</div>
+                                    {canCastSpells && totalSlotsLeft > 0 && (
                                         <div style={{ fontSize: '.55rem', color: '#b5a9f5', marginTop: '.15rem' }}>
                                             ✦ {totalSlotsLeft} slot{totalSlotsLeft !== 1 ? 's' : ''}
                                         </div>
@@ -1942,9 +1883,7 @@ export default function CombatModal({
                             </div>
                             <div style={{ display: 'flex', gap: '.4rem' }}>
                                 <button className="confirm-cancel" onClick={cancelAction}>Cancel</button>
-                                <button className="confirm-ok spell-ok" onClick={confirmSpellAttack}>
-                                    Roll Attack
-                                </button>
+                                <button className="confirm-ok spell-ok" onClick={confirmSpellAttack}>Roll Attack</button>
                             </div>
                         </div>
                     )}
@@ -1960,9 +1899,7 @@ export default function CombatModal({
                             </div>
                             <div style={{ display: 'flex', gap: '.4rem' }}>
                                 <button className="confirm-cancel" onClick={cancelAction}>Cancel</button>
-                                <button className="confirm-ok spell-ok" onClick={confirmSpellSave}>
-                                    Roll Damage
-                                </button>
+                                <button className="confirm-ok spell-ok" onClick={confirmSpellSave}>Roll Damage</button>
                             </div>
                         </div>
                     )}
@@ -1993,7 +1930,7 @@ export default function CombatModal({
                                             onClick={startAttack}
                                         >⚔ Attack</button>
 
-                                        {/* War Magic: replace attack with cantrip (level 7+ EK) */}
+                                        {/* War Magic — EK only (level 7+) */}
                                         {isEK && hasWarMagic && !actionUsed && attacksRemaining > 0 && (
                                             <div style={{ position: 'relative' }}>
                                                 <button
@@ -2015,8 +1952,8 @@ export default function CombatModal({
                                             </div>
                                         )}
 
-                                        {/* Full spell action (non-War-Magic) */}
-                                        {isEK && (
+                                        {/* Spell action — all casters */}
+                                        {canCastSpells && (
                                             <div style={{ position: 'relative' }}>
                                                 <button
                                                     className={`action-btn spell-btn${selectedAction === 'spell' && showSpellPicker ? ' selected' : ''}${actionUsed ? ' used' : ''}`}
@@ -2035,11 +1972,6 @@ export default function CombatModal({
                                                     />
                                                 )}
                                             </div>
-                                        )}
-
-                                        {/* Non-EK placeholder */}
-                                        {!isEK && (
-                                            <button className="action-btn" disabled title="Eldritch Knight only">✦ Spell</button>
                                         )}
 
                                         <div style={{ position: 'relative' }}>
@@ -2082,7 +2014,7 @@ export default function CombatModal({
                                 <div className="economy-slot">
                                     <div className="economy-label">Bonus Action</div>
                                     <div className="economy-buttons">
-                                        {/* War Bonds summon */}
+                                        {/* War Bonds summon — EK only */}
                                         {isEK && warBonds.length > 0 && warBonds.map(bond => (
                                             <button
                                                 key={bond.id}
@@ -2095,8 +2027,8 @@ export default function CombatModal({
                                             </button>
                                         ))}
 
-                                        {/* Bonus action spells */}
-                                        {isEK && bonusSpells.length > 0 && (
+                                        {/* Bonus action spells — all casters */}
+                                        {canCastSpells && bonusSpells.length > 0 && (
                                             <div style={{ position: 'relative' }}>
                                                 <button
                                                     className={`action-btn spell-btn${bonusActionUsed ? ' used' : ''}${selectedAction === 'bonus_spell' && showSpellPicker ? ' selected' : ''}`}

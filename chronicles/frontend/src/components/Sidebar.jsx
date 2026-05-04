@@ -95,6 +95,11 @@ export default function Sidebar({
   const nextThreshold = xpToNextLevel(player.level)
   const xpPct = xpProgress(player.experience, player.level)
 
+  const isEK = player.subclass === 'Eldritch Knight'
+  const canCastSpells = isEK
+    || ['Bard', 'Cleric', 'Druid', 'Paladin'].includes(player.class)
+    || (player.class === 'Monk' && knownSpells.some(s => s.level === 0))
+
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: SIDEBAR_STYLES }} />
@@ -239,7 +244,7 @@ export default function Sidebar({
           >
             ✦ Abilities
           </button>
-          {player?.subclass === 'Eldritch Knight' && (
+          {canCastSpells && (
             <button
               className="btn-ghost"
               onClick={onSpells}
