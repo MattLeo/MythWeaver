@@ -661,6 +661,26 @@ function cantripDiceAtLevel(spell, charLevel) {
     return spell.damage_die_count || 1
 }
 
+function gfbSecondaryDamage(playerLevel, spellcastingMod) {
+    // Primary extra fire dice (also used for secondary die count):
+    //   L1-4:  0 dice, secondary = just modifier (min 0)
+    //   L5-10: 1d8 primary, secondary = 1d8 + mod
+    //   L11-16: 2d8 primary, secondary = 2d8 + mod
+    //   L17+:  3d8 primary, secondary = 3d8 + mod
+    const diceCount = playerLevel >= 17 ? 3
+        : playerLevel >= 11 ? 2
+            : playerLevel >= 5 ? 1
+                : 0
+    return { diceCount, mod: Math.max(0, spellcastingMod) }
+}
+
+function gfbPrimaryBonusDice(playerLevel) {
+    if (playerLevel >= 17) return 3
+    if (playerLevel >= 11) return 2
+    if (playerLevel >= 5) return 1
+    return 0
+}
+
 function upcastDice(spell, castLevel) {
     const base = spell.damage_die_count || 0
     const extra = (castLevel - spell.level) * (spell.slot_scale_dice || 0)
@@ -1194,6 +1214,11 @@ export default function CombatModal({
     const confirmSpellAttack = async () => {
         if (!selectedTarget || !pendingSpell) return
         const { spell, castLevel, diceCount, sides } = pendingSpell
+
+        const isGFB = spell.spell_id === 'spell_green_flame_blade'
+        // INT modifier for EK (the only class that gets GFB via class features)
+        const intMod = Math.floor((player.int - 10) / 2)
+
         startDiceRoll({
             count: 1, sides: 20,
             label: `${spell.name} — Spell Attack Roll`,
@@ -1204,34 +1229,154 @@ export default function CombatModal({
                 setPlayerAttacking(true)
                 setTimeout(() => setPlayerAttacking(false), 400)
                 try {
-                    // Use resolveAttack with the attack roll; damage applied separately
                     const result = await api.resolveAttack(campaignId, selectedTarget, roll)
                     if (result.hit) {
-                        addLog(`${player.name}'s ${spell.name} hits ${result.target_name}! (${roll + result.attack_bonus} vs AC ${result.enemy_ac})`, 'hit')
+                        addLog(
+                            `${player.name}'s ${spell.name} hits ${result.target_name}! `
+                            + `(${roll + result.attack_bonus} vs AC ${result.enemy_ac})`,
+                            'hit'
+                        )
+                        setIsCrit(result.is_crit)
+
+                        // ── Primary damage: weapon + bonus fire dice ──────────────
+                        // For GFB: weapon damage die comes from resolve_attack result,
+                        // plus extra fire dice from the cantrip scaling.
+                        const bonusDice = isGFB ? gfbPrimaryBonusDice(player.level || 1) : 0
+                        const totalDiceCount = result.is_crit
+                            ? (diceCount + bonusDice) * 2
+                            : diceCount + bonusDice
+
+                        const damageLabel = isGFB && bonusDice > 0
+                            ? `${spell.name} — Weapon + ${bonusDice}d8 Fire Damage${result.is_crit ? ' (CRIT)' : ''}`
+                            : `${spell.name} Damage${result.is_crit ? ' (CRIT — roll twice!)' : ''} (${diceCount}d${sides})`
+
                         startDiceRoll({
-                            count: result.is_crit ? diceCount * 2 : diceCount,
+                            count: totalDiceCount,
                             sides,
-                            label: `${spell.name} Damage${result.is_crit ? ' (CRIT)' : ''} (${diceCount}d${sides} ${spell.damage_type})`,
+                            label: damageLabel,
                             isAdvantage: false,
                             isSpell: true,
                             onConfirm: async (dmgRolls) => {
+                                // Apply primary damage to primary target
                                 const result2 = await api.resolveDamage(campaignId, dmgRolls, result.is_crit)
                                 setShakingEnemy(selectedTarget)
                                 setTimeout(() => setShakingEnemy(null), 500)
-                                addLog(`${spell.name} deals ${result2.damage_dealt} ${spell.damage_type} damage${result2.enemy_dead ? ' — falls!' : ''}`, result2.enemy_dead ? 'crit' : 'spell')
+                                addLog(
+                                    `${spell.name} deals ${result2.damage_dealt} damage`
+                                    + (isGFB && bonusDice > 0 ? ' (weapon + fire)' : '')
+                                    + ` to ${result.target_name}`
+                                    + (result2.enemy_dead ? ' — falls!' : ''),
+                                    result2.enemy_dead ? 'crit' : 'hit'
+                                )
                                 await refreshCombat()
                                 if (result2.all_enemies_defeated) { endCombatVictory(); return }
-                                finishSpellAction(spell)
+
+                                // ── GFB secondary target ──────────────────────────────
+                                if (isGFB) {
+                                    const { diceCount: secDice, mod: secMod } =
+                                        gfbSecondaryDamage(player.level || 1, intMod)
+
+                                    const livingOthers = enemies.filter(
+                                        e => e.is_alive && e.id !== selectedTarget
+                                    )
+
+                                    if (livingOthers.length === 0) {
+                                        // No valid secondary target — fire fizzles
+                                        addLog(
+                                            'Green fire finds no second target within 5 feet.',
+                                            'spell'
+                                        )
+                                        finishSpellAction(spell)
+                                        return
+                                    }
+
+                                    // If there's exactly one other living enemy it auto-targets;
+                                    // if multiple, the player should pick — we use the first
+                                    // for simplicity (combat UI doesn't currently support
+                                    // mid-flow target changes). This can be upgraded later.
+                                    const secondaryTarget = livingOthers[0]
+
+                                    if (secDice === 0) {
+                                        // L1-4: secondary takes modifier fire damage directly
+                                        if (secMod > 0) {
+                                            await api.setCombatTarget(campaignId, secondaryTarget.id)
+                                            const secResult = await api.resolveDamage(
+                                                campaignId,
+                                                [secMod], // pass as a single "roll" of fixed value
+                                                false
+                                            )
+                                            addLog(
+                                                `Green fire leaps to ${secondaryTarget.name} `
+                                                + `for ${secResult.damage_dealt} fire damage`
+                                                + (secResult.enemy_dead ? ' — falls!' : ''),
+                                                secResult.enemy_dead ? 'crit' : 'hit'
+                                            )
+                                            setShakingEnemy(secondaryTarget.id)
+                                            setTimeout(() => setShakingEnemy(null), 500)
+                                            await refreshCombat()
+                                            if (secResult.all_enemies_defeated) {
+                                                endCombatVictory(); return
+                                            }
+                                        } else {
+                                            addLog(
+                                                'Green fire leaps to a nearby creature but deals no damage (INT mod 0).',
+                                                'spell'
+                                            )
+                                        }
+                                        finishSpellAction(spell)
+                                    } else {
+                                        // L5+: roll secondary dice, then apply + mod
+                                        startDiceRoll({
+                                            count: secDice,
+                                            sides: 8,
+                                            label: `Green Flame — ${secDice}d8 + ${secMod} fire on ${secondaryTarget.name}`,
+                                            isAdvantage: false,
+                                            isSpell: true,
+                                            onConfirm: async (secRolls) => {
+                                                const secTotal = secRolls.reduce((a, b) => a + b, 0) + secMod
+                                                await api.setCombatTarget(campaignId, secondaryTarget.id)
+                                                const secResult = await api.resolveDamage(
+                                                    campaignId,
+                                                    [secTotal],
+                                                    false
+                                                )
+                                                setShakingEnemy(secondaryTarget.id)
+                                                setTimeout(() => setShakingEnemy(null), 500)
+                                                addLog(
+                                                    `Green fire leaps to ${secondaryTarget.name} `
+                                                    + `for ${secResult.damage_dealt} fire damage`
+                                                    + (secResult.enemy_dead ? ' — falls!' : ''),
+                                                    secResult.enemy_dead ? 'crit' : 'hit'
+                                                )
+                                                await refreshCombat()
+                                                if (secResult.all_enemies_defeated) {
+                                                    endCombatVictory(); return
+                                                }
+                                                finishSpellAction(spell)
+                                            }
+                                        })
+                                    }
+                                } else {
+                                    // Not GFB — normal spell finish
+                                    finishSpellAction(spell)
+                                }
                             }
                         })
                     } else {
-                        addLog(`${player.name}'s ${spell.name} misses ${result.target_name} (${roll + result.attack_bonus} vs AC ${result.enemy_ac})`, 'miss')
+                        addLog(
+                            `${player.name}'s ${spell.name} misses ${result.target_name} `
+                            + `(${roll + result.attack_bonus} vs AC ${result.enemy_ac})`,
+                            'miss'
+                        )
+                        setShakingEnemy(selectedTarget)
+                        setTimeout(() => setShakingEnemy(null), 500)
                         finishSpellAction(spell)
                     }
-                } catch (e) { console.error(e); cancelAction() }
+                } catch (e) { console.error('Spell attack failed:', e); cancelAction() }
             }
         })
     }
+
 
     const confirmSpellSave = async () => {
         if (!selectedTarget || !pendingSpell) return

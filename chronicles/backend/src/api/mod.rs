@@ -10,6 +10,7 @@ use crate::db::{campaign, player, world, items, companions, time, fighter, spell
 use crate::llm::{ChatMessage, prompt};
 use crate::models::*;
 use crate::AppState;
+use uuid::Uuid;
 
 const MAX_CONTEXT_MESSAGES: usize = 50;
 //const SUMMARIZE_THRESHOLD: usize = 20;
