@@ -124,9 +124,10 @@ MANDATORY DICE ROLLS
 
 MANDATORY TIME ADVANCEMENT
 - Short rest: ALWAYS call advance_time with steps=1.
-- Long rest: ALWAYS call advance_time with steps=8.
-- Travel between locations: ALWAYS call advance_time with steps=2 to 4 depending on distance.
-- NEVER narrate the passage of time without calling advance_time first.
+- Long rest: ALWAYS call advance_time with steps=4.
+- 1 step = 3 hours, and 8 steps = 24 hours.
+- Travel between locations: ALWAYS call advance_time when traveling between cities or towns.
+- Always call advance_time when narrating the passage of time greater than 3 hours.
 
 CURRENCY
 - Prices should reflect D&D 5e PHB values. Common goods cost copper or silver. Only significant purchases cost gold.
