@@ -193,6 +193,9 @@ pub struct LevelUpResult {
     pub lay_on_hands_pool: i64,
     pub paladin_channel_divinity: i64,
     pub paladin_prepared_spells: i64,
+    // Ranger
+    pub favored_enemy_uses: i64,
+    pub ranger_prepared_spells: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

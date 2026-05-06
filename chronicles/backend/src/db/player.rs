@@ -269,6 +269,7 @@ pub async fn level_up_player(
             "Druid"   => (1i64, 0i64, 0i64, 0i64, 0i64),
             "Monk"    => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
             "Paladin" => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
+            "Ranger"  => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
             _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
         };
  
@@ -277,12 +278,12 @@ pub async fn level_up_player(
  
     let bardic_die              = if player.class == "Bard" { bard_inspiration_die(new_level) } else { 0 };
     let bardic_inspiration_uses = if player.class == "Bard" { cha_mod.max(1) } else { 0 };
-    let bard_prepared_spells_n  = if player.class == "Bard" { bard_prepared_spells(new_level) } else { 0 };
+    let bard_prepared_n         = if player.class == "Bard" { bard_prepared_spells(new_level) } else { 0 };
     let bard_cantrips_n         = if player.class == "Bard" { bard_cantrips(new_level) } else { 0 };
  
     let channel_divinity_uses    = if player.class == "Cleric" { cleric_channel_divinity_uses(new_level) } else { 0 };
     let cleric_cantrips_n        = if player.class == "Cleric" { cleric_cantrips(new_level) } else { 0 };
-    let cleric_prepared_spells_n = if player.class == "Cleric" { cleric_prepared_spells(new_level) } else { 0 };
+    let cleric_prepared_n        = if player.class == "Cleric" { cleric_prepared_spells(new_level) } else { 0 };
  
     let wild_shape_uses_n  = if player.class == "Druid" { druid_wild_shape_uses(new_level) } else { 0 };
     let druid_cantrips_n   = if player.class == "Druid" { druid_cantrips(new_level) } else { 0 };
@@ -292,9 +293,12 @@ pub async fn level_up_player(
     let martial_arts_die_n   = if player.class == "Monk" { monk_martial_arts_die(new_level) } else { 0 };
     let unarmored_movement_n = if player.class == "Monk" { monk_unarmored_movement(new_level) } else { 0 };
  
-    let lay_on_hands_pool_n         = if player.class == "Paladin" { paladin_lay_on_hands(new_level) } else { 0 };
-    let paladin_cd_n                = if player.class == "Paladin" { paladin_channel_divinity_uses(new_level) } else { 0 };
-    let paladin_prepared_spells_n   = if player.class == "Paladin" { paladin_prepared_spells(new_level) } else { 0 };
+    let lay_on_hands_pool_n      = if player.class == "Paladin" { paladin_lay_on_hands(new_level) } else { 0 };
+    let paladin_cd_n             = if player.class == "Paladin" { paladin_channel_divinity_uses(new_level) } else { 0 };
+    let paladin_prepared_n       = if player.class == "Paladin" { paladin_prepared_spells(new_level) } else { 0 };
+ 
+    let favored_enemy_uses_n = if player.class == "Ranger" { ranger_favored_enemy_uses(new_level) } else { 0 };
+    let ranger_prepared_n    = if player.class == "Ranger" { ranger_prepared_spells(new_level) } else { 0 };
  
     let asi_available = match player.class.as_str() {
         "Fighter"   => matches!(new_level, 4 | 6 | 8 | 12 | 14 | 16),
@@ -304,6 +308,7 @@ pub async fn level_up_player(
         "Druid"     => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Monk"      => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Paladin"   => matches!(new_level, 4 | 8 | 12 | 16 | 19),
+        "Ranger"    => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         _           => Player::is_asi_level(new_level),
     };
  
@@ -434,39 +439,41 @@ pub async fn level_up_player(
  
     // ── Paladin ───────────────────────────────────────────────────────────────
     if player.class == "Paladin" {
-        // Update Lay on Hands pool every level
         let loh_desc = format!(
-            "Bonus Action: touch a creature and restore up to {} HP total (pool restored on Long Rest). \
-             Alternatively, expend 5 HP from the pool to remove the Poisoned condition (no HP restored). \
-             Level 14 (Restoring Touch): when using Lay on Hands, also expend 5 HP per condition removed: \
-             Blinded, Charmed, Deafened, Frightened, Paralyzed, or Stunned.",
+            "Bonus Action: touch a creature and restore HP from your pool (pool = {} HP, restored on Long Rest). \
+             Expend 5 HP to remove the Poisoned condition. Level 14: also expend 5 HP per condition removed.",
             lay_on_hands_pool_n
         );
-        sqlx::query(
-            "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
-             WHERE owner_id = ? AND name = 'Lay On Hands'"
-        )
-        .bind(lay_on_hands_pool_n).bind(lay_on_hands_pool_n).bind(&loh_desc).bind(player_id)
-        .execute(pool).await?;
- 
-        // Channel Divinity: unlock at level 3, increase to 3 uses at level 11
+        sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ?, description = ? WHERE owner_id = ? AND name = 'Lay On Hands'")
+            .bind(lay_on_hands_pool_n).bind(lay_on_hands_pool_n).bind(&loh_desc).bind(player_id).execute(pool).await?;
         if new_level == 3 {
-            let cd_desc = "Use Channel Divinity 2 times per rest (regain 1 on Short Rest, all on Long Rest). \
-                           Divine Sense: Bonus Action — detect Celestials, Fiends, and Undead within 60 ft \
-                           and consecrated/desecrated places for 10 minutes. \
+            let cd_desc = "Channel Divinity 2 times per rest (regain 1 on Short Rest). \
+                           Divine Sense: detect Celestials, Fiends, Undead within 60 ft for 10 minutes. \
                            Plus your oath's Channel Divinity feature.";
-            sqlx::query(
-                "UPDATE abilities SET max_uses = 2, current_uses = 2, description = ?
-                 WHERE owner_id = ? AND name = 'Channel Divinity'"
-            )
-            .bind(cd_desc).bind(player_id).execute(pool).await?;
+            sqlx::query("UPDATE abilities SET max_uses = 2, current_uses = 2, description = ? WHERE owner_id = ? AND name = 'Channel Divinity'")
+                .bind(cd_desc).bind(player_id).execute(pool).await?;
         }
         if new_level == 11 {
+            sqlx::query("UPDATE abilities SET max_uses = 3, current_uses = 3 WHERE owner_id = ? AND name = 'Channel Divinity'")
+                .bind(player_id).execute(pool).await?;
+        }
+    }
+ 
+    // ── Ranger ────────────────────────────────────────────────────────────────
+    if player.class == "Ranger" {
+        // Update Favored Enemy free casts at milestone levels
+        if matches!(new_level, 5 | 9 | 13 | 17) {
+            let fe_desc = format!(
+                "Hunter's Mark is always prepared. You can cast it {} times without expending a \
+                 spell slot (recharges on Long Rest). Hunter's Mark die becomes d10 at level 20.",
+                favored_enemy_uses_n
+            );
             sqlx::query(
-                "UPDATE abilities SET max_uses = 3, current_uses = 3
-                 WHERE owner_id = ? AND name = 'Channel Divinity'"
+                "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
+                 WHERE owner_id = ? AND name = 'Favored Enemy'"
             )
-            .bind(player_id).execute(pool).await?;
+            .bind(favored_enemy_uses_n).bind(favored_enemy_uses_n).bind(&fe_desc).bind(player_id)
+            .execute(pool).await?;
         }
     }
  
@@ -479,17 +486,18 @@ pub async fn level_up_player(
         "Druid"     => druid_features_at_level(new_level, player.subclass.as_deref()),
         "Monk"      => monk_features_at_level(new_level, player.subclass.as_deref()),
         "Paladin"   => paladin_features_at_level(new_level, player.subclass.as_deref()),
+        "Ranger"    => ranger_features_at_level(new_level, player.subclass.as_deref()),
         _           => class_features_generic(&player.class, new_level),
     };
  
     // ── Spell slots ───────────────────────────────────────────────────────────
     let spell_slots = match player.class.as_str() {
-        "Bard"   => bard_spell_slots(new_level),
-        "Cleric" => cleric_spell_slots(new_level),
-        "Druid"  => cleric_spell_slots(new_level),
-        // Paladin slots are seeded directly in seed_level_up_abilities_direct;
-        // return None here so the frontend uses paladin_slot_summary from constants.
-        _        => eldritch_knight_spell_slots(player.subclass.as_deref(), new_level),
+        "Bard"    => bard_spell_slots(new_level),
+        "Cleric"  => cleric_spell_slots(new_level),
+        "Druid"   => cleric_spell_slots(new_level),
+        // Paladin and Ranger use the same half-caster table;
+        // slots are seeded by seed_half_caster_spell_slots in api/mod.rs
+        _         => eldritch_knight_spell_slots(player.subclass.as_deref(), new_level),
     };
  
     Ok(LevelUpResult {
@@ -499,11 +507,11 @@ pub async fn level_up_player(
         second_wind_uses, weapon_mastery_count, extra_attacks, indomitable_max, action_surge_uses,
         rage_uses, rage_damage,
         bardic_die, bardic_inspiration_uses,
-        bard_prepared_spells: bard_prepared_spells_n,
+        bard_prepared_spells: bard_prepared_n,
         bard_cantrips: bard_cantrips_n,
         channel_divinity_uses,
         cleric_cantrips: cleric_cantrips_n,
-        cleric_prepared_spells: cleric_prepared_spells_n,
+        cleric_prepared_spells: cleric_prepared_n,
         wild_shape_uses: wild_shape_uses_n,
         druid_cantrips: druid_cantrips_n,
         druid_prepared_spells: druid_prepared_n,
@@ -512,7 +520,9 @@ pub async fn level_up_player(
         unarmored_movement: unarmored_movement_n,
         lay_on_hands_pool: lay_on_hands_pool_n,
         paladin_channel_divinity: paladin_cd_n,
-        paladin_prepared_spells: paladin_prepared_spells_n,
+        paladin_prepared_spells: paladin_prepared_n,
+        favored_enemy_uses: favored_enemy_uses_n,
+        ranger_prepared_spells: ranger_prepared_n,
     })
 }
 
@@ -1168,6 +1178,29 @@ fn class_features_generic(class: &str, level: i64) -> Vec<String> {
             20 => features.push("Subclass Feature".to_string()),
             _  => {}
         },
+        "Ranger" => match level {
+            1  => features.extend(["Spellcasting".to_string(), "Favored Enemy".to_string(), "Weapon Mastery".to_string()]),
+            2  => features.extend(["Deft Explorer".to_string(), "Fighting Style".to_string()]),
+            3  => features.push("Ranger Subclass".to_string()),
+            4  => features.push("Ability Score Improvement".to_string()),
+            5  => features.push("Extra Attack".to_string()),
+            6  => features.push("Roving".to_string()),
+            7  => features.push("Subclass Feature".to_string()),
+            8  => features.push("Ability Score Improvement".to_string()),
+            9  => features.push("Expertise".to_string()),
+            10 => features.push("Tireless".to_string()),
+            11 => features.push("Subclass Feature".to_string()),
+            12 => features.push("Ability Score Improvement".to_string()),
+            13 => features.push("Relentless Hunter".to_string()),
+            14 => features.push("Nature's Veil".to_string()),
+            15 => features.push("Subclass Feature".to_string()),
+            16 => features.push("Ability Score Improvement".to_string()),
+            17 => features.push("Precise Hunter".to_string()),
+            18 => features.push("Feral Senses".to_string()),
+            19 => features.push("Epic Boon".to_string()),
+            20 => features.push("Foe Slayer".to_string()),
+            _  => {}
+        },
         _ => {}
     }
     features
@@ -1345,6 +1378,84 @@ fn paladin_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> 
             7  => features.push("Relentless Avenger".to_string()),
             15 => features.push("Soul of Vengeance".to_string()),
             20 => features.push("Avenging Angel".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
+}
+
+// ─── Ranger progression ───────────────────────────────────────────────────────
+ 
+/// Favored Enemy free Hunter's Mark casts per level.
+pub fn ranger_favored_enemy_uses(level: i64) -> i64 {
+    match level {
+        1..=4   => 2,
+        5..=8   => 3,
+        9..=12  => 4,
+        13..=16 => 5,
+        _       => 6,
+    }
+}
+ 
+/// Same prepared spell table as Paladin.
+pub fn ranger_prepared_spells(level: i64) -> i64 {
+    let table = [0i64,2,3,4,5,6,6,7,7,9,9,10,10,11,11,12,12,14,14,15,15];
+    table.get(level as usize).copied().unwrap_or(15)
+}
+ 
+fn ranger_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Spellcasting".to_string(), "Favored Enemy".to_string(), "Weapon Mastery".to_string()]),
+        2  => features.extend(["Deft Explorer".to_string(), "Fighting Style".to_string()]),
+        3  => features.push("Ranger Subclass".to_string()),
+        4  => features.push("Ability Score Improvement".to_string()),
+        5  => features.push("Extra Attack".to_string()),
+        6  => features.push("Roving".to_string()),
+        7  => features.push("Subclass Feature".to_string()),
+        8  => features.push("Ability Score Improvement".to_string()),
+        9  => features.push("Expertise".to_string()),
+        10 => features.push("Tireless".to_string()),
+        11 => features.push("Subclass Feature".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        13 => features.push("Relentless Hunter".to_string()),
+        14 => features.push("Nature's Veil".to_string()),
+        15 => features.push("Subclass Feature".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        17 => features.push("Precise Hunter".to_string()),
+        18 => features.push("Feral Senses".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Foe Slayer".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("Beast Master") => match level {
+            3  => features.push("Primal Companion".to_string()),
+            7  => features.push("Exceptional Training".to_string()),
+            11 => features.push("Bestial Fury".to_string()),
+            15 => features.push("Share Spells".to_string()),
+            _  => {}
+        },
+        Some("Fey Wanderer") => match level {
+            3  => features.extend(["Dreadful Strikes".to_string(), "Fey Wanderer Spells".to_string(), "Otherworldly Glamour".to_string()]),
+            7  => features.push("Beguiling Twist".to_string()),
+            11 => features.push("Fey Reinforcements".to_string()),
+            15 => features.push("Misty Wanderer".to_string()),
+            _  => {}
+        },
+        Some("Gloom Stalker") => match level {
+            3  => features.extend(["Dread Ambusher".to_string(), "Gloom Stalker Spells".to_string(), "Umbral Sight".to_string()]),
+            7  => features.push("Iron Mind".to_string()),
+            11 => features.push("Stalker's Flurry".to_string()),
+            15 => features.push("Shadowy Dodge".to_string()),
+            _  => {}
+        },
+        Some("Hunter") => match level {
+            3  => features.extend(["Hunter's Lore".to_string(), "Hunter's Prey".to_string()]),
+            7  => features.push("Defensive Tactics".to_string()),
+            11 => features.push("Superior Hunter's Prey".to_string()),
+            15 => features.push("Superior Hunter's Defense".to_string()),
             _  => {}
         },
         _ => {}

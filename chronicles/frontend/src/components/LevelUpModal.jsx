@@ -3,10 +3,10 @@ import { STYLES } from '../styles.js'
 import {
     FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, BARD_SUBCLASSES,
     CLERIC_SUBCLASSES, DRUID_SUBCLASSES, MONK_SUBCLASSES, PALADIN_SUBCLASSES,
-    ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
-    FIGHTER_ASI_LEVELS,
+    ALL_MANEUVERS, STAT_KEYS, STAT_LABELS, FIGHTER_ASI_LEVELS,
     getFighterFeatures, getBarbarianFeatures, getBardFeatures,
-    getClericFeatures, getDruidFeatures, getMonkFeatures, getPaladinFeatures,
+    getClericFeatures, getDruidFeatures, getMonkFeatures, getPaladinFeatures,    
+    RANGER_SUBCLASSES, getRangerFeatures,
 } from '../constants.js'
 import { searchSpells } from '../api/client.js'
 
@@ -192,6 +192,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         wild_shape_uses, wild_shape_cr, druid_cantrips, druid_prepared_spells, druid_slot_summary,
         focus_points, martial_arts_die, unarmored_movement,
         lay_on_hands_pool, paladin_channel_divinity, paladin_prepared_spells, paladin_slot_summary,
+        favored_enemy_uses, ranger_prepared_spells, ranger_slot_summary,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
@@ -201,6 +202,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const isDruid     = player.class === 'Druid'
     const isMonk      = player.class === 'Monk'
     const isPaladin   = player.class === 'Paladin'
+    const isRanger    = player.class === 'Ranger'
 
     const isBattleMaster     = player.subclass === 'Battle Master'
     const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
@@ -306,31 +308,35 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
 
     const subclassOptions = isPaladin
         ? PALADIN_SUBCLASSES
-        : isMonk
-            ? MONK_SUBCLASSES
-            : isCleric
-                ? CLERIC_SUBCLASSES
-                : isDruid
-                    ? DRUID_SUBCLASSES
-                    : isBarbarian
-                        ? BARBARIAN_SUBCLASSES
-                        : isBard
-                            ? BARD_SUBCLASSES
-                            : FIGHTER_SUBCLASSES
-
+        : isRanger
+            ? RANGER_SUBCLASSES
+            : isMonk
+                ? MONK_SUBCLASSES
+                : isCleric
+                    ? CLERIC_SUBCLASSES
+                    : isDruid
+                        ? DRUID_SUBCLASSES
+                        : isBarbarian
+                            ? BARBARIAN_SUBCLASSES
+                            : isBard
+                                ? BARD_SUBCLASSES
+                                : FIGHTER_SUBCLASSES
+ 
     const subclassLabel = isPaladin
         ? 'Choose your Sacred Oath'
-        : isMonk
-            ? 'Choose your Monastic Tradition'
-            : isCleric
-                ? 'Choose your Divine Domain'
-                : isDruid
-                    ? 'Choose your Druid Circle'
-                    : isBarbarian
-                        ? 'Choose your Primal Path'
-                        : isBard
-                            ? 'Choose your Bard College'
-                            : 'Choose your Fighter subclass'
+        : isRanger
+            ? 'Choose your Ranger Conclave'
+            : isMonk
+                ? 'Choose your Monastic Tradition'
+                : isCleric
+                    ? 'Choose your Divine Domain'
+                    : isDruid
+                        ? 'Choose your Druid Circle'
+                        : isBarbarian
+                            ? 'Choose your Primal Path'
+                            : isBard
+                                ? 'Choose your Bard College'
+                                : 'Choose your Fighter subclass'
 
     const moonCR = player.subclass === 'Circle of the Moon' ? Math.floor(new_level / 3) : null
 
@@ -418,6 +424,24 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         {new_level >= 5 && <div className="lu-info-row"><span>Attacks per Action</span><span className="lu-info-val">{extra_attacks}</span></div>}
                                         {new_level === 6 && <div className="lu-info-row"><span>Aura of Protection</span><span className="lu-info-val">10 ft, +CHA to saves</span></div>}
                                         {new_level === 18 && <div className="lu-info-row"><span>Aura Expansion</span><span className="lu-info-val">30 ft aura</span></div>}
+                                    </>)}
+                                    
+                                    {isRanger && (<>
+                                        <div className="lu-info-row">
+                                            <span>Favored Enemy Uses</span>
+                                            <span className="lu-info-val">{favored_enemy_uses}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Prepared Spells</span>
+                                            <span className="lu-info-val">{ranger_prepared_spells}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Spell Slots</span>
+                                            <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{ranger_slot_summary}</span>
+                                        </div>
+                                        {new_level >= 5 && <div className="lu-info-row"><span>Attacks per Action</span><span className="lu-info-val">{extra_attacks}</span></div>}
+                                        {new_level === 6 && <div className="lu-info-row"><span>Roving</span><span className="lu-info-val">+10 ft, Climb & Swim Speed</span></div>}
+                                        {new_level === 14 && <div className="lu-info-row"><span>Nature's Veil Uses</span><span className="lu-info-val">{favored_enemy_uses}</span></div>}
                                     </>)}
                                 </div>
 

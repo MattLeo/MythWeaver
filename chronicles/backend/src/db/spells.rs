@@ -435,13 +435,13 @@ pub fn paladin_slot_table(level: i64) -> [i64; 5] {
     }
 }
 
-pub async fn seed_paladin_spell_slots(
+pub async fn seed_half_caster_spell_slots(
     pool: &SqlitePool,
     campaign_id: &str,
     player_id: &str,
-    paladin_level: i64,
+    class_level: i64,
 ) -> Result<()> {
-    let slots = paladin_slot_table(paladin_level);
+    let slots = paladin_slot_table(class_level);
  
     for (i, &max) in slots.iter().enumerate() {
         let level = (i + 1) as i64;

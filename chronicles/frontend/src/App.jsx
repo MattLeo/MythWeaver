@@ -21,6 +21,7 @@ import {
   getDruidFeatures,
   getMonkFeatures,
   getPaladinFeatures,
+  getRangerFeatures,
   hitDieForClass,
   proficiencyForLevel,
   FIGHTER_ASI_LEVELS,
@@ -30,6 +31,7 @@ import {
   DRUID_ASI_LEVELS,
   MONK_ASI_LEVELS,
   PALADIN_ASI_LEVELS,
+  RANGER_ASI_LEVELS,
   barbarianRageUses,
   barbarianRageDamage,
   barbarianWeaponMastery,
@@ -53,6 +55,9 @@ import {
   paladinChannelDivinityUses,
   paladinPreparedSpells,
   paladinSlotSummary,
+  rangerFavoredEnemyUses,
+  rangerPreparedSpells,
+  rangerSlotSummary,
 } from './constants.js'
 
 const PHASE = {
@@ -200,6 +205,7 @@ export default function App() {
     const isDruid     = p.class === 'Druid'
     const isMonk      = p.class === 'Monk'
     const isPaladin   = p.class === 'Paladin'
+    const isRanger    = p.class === 'Ranger'
  
     // ── Fighter scalars ─────────────────────────────────────────────────────
     const secondWindUses  = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
@@ -219,6 +225,7 @@ export default function App() {
         : (isBard && p.subclass === 'College of Valor' && newLevel >= 6) ? 2
         : (isMonk && newLevel >= 5) ? 2
         : (isPaladin && newLevel >= 5) ? 2
+        : (isRanger && newLevel >= 5) ? 2
         : 1
  
     // ── Barbarian scalars ───────────────────────────────────────────────────
@@ -251,10 +258,15 @@ export default function App() {
     const unarmoredMovement = isMonk ? monkUnarmoredMovement(newLevel) : 0
  
     // ── Paladin scalars ─────────────────────────────────────────────────────
-    const layOnHandsPool       = isPaladin ? paladinLayOnHandsPool(newLevel)       : 0
-    const paladinCdUses        = isPaladin ? paladinChannelDivinityUses(newLevel)  : 0
-    const paladinPrepared      = isPaladin ? paladinPreparedSpells(newLevel)       : 0
-    const paladinSlots         = isPaladin ? paladinSlotSummary(newLevel)          : ''
+    const layOnHandsPool    = isPaladin ? paladinLayOnHandsPool(newLevel)       : 0
+    const paladinCdUses     = isPaladin ? paladinChannelDivinityUses(newLevel)  : 0
+    const paladinPrepared   = isPaladin ? paladinPreparedSpells(newLevel)       : 0
+    const paladinSlots      = isPaladin ? paladinSlotSummary(newLevel)          : ''
+ 
+    // ── Ranger scalars ──────────────────────────────────────────────────────
+    const favoredEnemyUses  = isRanger ? rangerFavoredEnemyUses(newLevel)  : 0
+    const rangerPrepared    = isRanger ? rangerPreparedSpells(newLevel)    : 0
+    const rangerSlots       = isRanger ? rangerSlotSummary(newLevel)       : ''
  
     // ── ASI ─────────────────────────────────────────────────────────────────
     const asiAvailable = isFighter
@@ -271,7 +283,9 @@ export default function App() {
                 ? MONK_ASI_LEVELS.includes(newLevel)
                 : isPaladin
                   ? PALADIN_ASI_LEVELS.includes(newLevel)
-                  : [4, 8, 12, 16, 19].includes(newLevel)
+                  : isRanger
+                    ? RANGER_ASI_LEVELS.includes(newLevel)
+                    : [4, 8, 12, 16, 19].includes(newLevel)
  
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
  
@@ -289,7 +303,9 @@ export default function App() {
                 ? getMonkFeatures(p, newLevel)
                 : isPaladin
                   ? getPaladinFeatures(p, newLevel)
-                  : []
+                  : isRanger
+                    ? getRangerFeatures(p, newLevel)
+                    : []
  
     return {
       new_level:              newLevel,
@@ -334,6 +350,10 @@ export default function App() {
       paladin_channel_divinity: paladinCdUses,
       paladin_prepared_spells: paladinPrepared,
       paladin_slot_summary:   paladinSlots,
+      // Ranger
+      favored_enemy_uses:     favoredEnemyUses,
+      ranger_prepared_spells: rangerPrepared,
+      ranger_slot_summary:    rangerSlots,
     }
   }
 

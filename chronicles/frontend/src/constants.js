@@ -1104,6 +1104,111 @@ export function paladinSlotSummary(level) {
     return (slots[level] || slots[20]).filter(s => s > 0).join('/')
 }
 
+// ─── Ranger ───────────────────────────────────────────────────────────────────
+ 
+export const RANGER_SUBCLASSES = [
+    {
+        name: 'Beast Master',
+        desc: 'Bond with a primal beast. Your Primal Companion fights alongside you, shares your spells, and grows more powerful as you level.',
+    },
+    {
+        name: 'Fey Wanderer',
+        desc: 'Wield fey mirth and fury. Dreadful Strikes deal psychic damage, Otherworldly Glamour adds WIS to CHA checks, and fey magic grants teleportation.',
+    },
+    {
+        name: 'Gloom Stalker',
+        desc: 'Draw on shadow magic to fight your foes. Dread Ambusher rewards first strikes, Umbral Sight hides you in darkness, and Shadowy Dodge deflects attacks.',
+    },
+    {
+        name: 'Hunter',
+        desc: 'Protect nature and people from destruction. Choose between Colossus Slayer and Horde Breaker, switch at rest, and gain ever-greater prey techniques.',
+    },
+]
+ 
+export const RANGER_BASE_FEATURES = {
+    1:  ['Spellcasting', 'Favored Enemy', 'Weapon Mastery'],
+    2:  ['Deft Explorer', 'Fighting Style'],
+    3:  ['Ranger Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Extra Attack'],
+    6:  ['Roving'],
+    7:  ['Subclass Feature'],
+    8:  ['Ability Score Improvement'],
+    9:  ['Expertise'],
+    10: ['Tireless'],
+    11: ['Subclass Feature'],
+    12: ['Ability Score Improvement'],
+    13: ['Relentless Hunter'],
+    14: ["Nature's Veil"],
+    15: ['Subclass Feature'],
+    16: ['Ability Score Improvement'],
+    17: ['Precise Hunter'],
+    18: ['Feral Senses'],
+    19: ['Epic Boon'],
+    20: ['Foe Slayer'],
+}
+ 
+export const RANGER_SUBCLASS_FEATURES = {
+    'Beast Master': {
+        3:  ['Primal Companion'],
+        7:  ['Exceptional Training'],
+        11: ['Bestial Fury'],
+        15: ['Share Spells'],
+    },
+    'Fey Wanderer': {
+        3:  ['Dreadful Strikes', 'Fey Wanderer Spells', 'Otherworldly Glamour'],
+        7:  ['Beguiling Twist'],
+        11: ['Fey Reinforcements'],
+        15: ['Misty Wanderer'],
+    },
+    'Gloom Stalker': {
+        3:  ['Dread Ambusher', 'Gloom Stalker Spells', 'Umbral Sight'],
+        7:  ['Iron Mind'],
+        11: ["Stalker's Flurry"],
+        15: ['Shadowy Dodge'],
+    },
+    'Hunter': {
+        3:  ["Hunter's Lore", "Hunter's Prey"],
+        7:  ['Defensive Tactics'],
+        11: ["Superior Hunter's Prey"],
+        15: ["Superior Hunter's Defense"],
+    },
+}
+ 
+export const RANGER_ASI_LEVELS = [4, 8, 12, 16, 19]
+ 
+export function getRangerFeatures(player, newLevel) {
+    const base = (RANGER_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (RANGER_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+export function rangerFavoredEnemyUses(level) {
+    if (level >= 17) return 6
+    if (level >= 13) return 5
+    if (level >= 9)  return 4
+    if (level >= 5)  return 3
+    return 2
+}
+ 
+export function rangerPreparedSpells(level) {
+    const table = [0,2,3,4,5,6,6,7,7,9,9,10,10,11,11,12,12,14,14,15,15]
+    return table[level] || 15
+}
+ 
+export function rangerSlotSummary(level) {
+    const slots = {
+        1: [2,0,0,0,0], 2: [2,0,0,0,0], 3: [3,0,0,0,0], 4: [3,0,0,0,0],
+        5: [4,2,0,0,0], 6: [4,2,0,0,0], 7: [4,3,0,0,0], 8: [4,3,0,0,0],
+        9: [4,3,2,0,0], 10:[4,3,2,0,0], 11:[4,3,3,0,0], 12:[4,3,3,0,0],
+        13:[4,3,3,1,0], 14:[4,3,3,1,0], 15:[4,3,3,2,0], 16:[4,3,3,2,0],
+        17:[4,3,3,3,1], 18:[4,3,3,3,1], 19:[4,3,3,3,2], 20:[4,3,3,3,2],
+    }
+    return (slots[level] || slots[20]).filter(s => s > 0).join('/')
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function xpToNextLevel(level) {
