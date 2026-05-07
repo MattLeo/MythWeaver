@@ -26,10 +26,9 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite:./data/mythweaver.db".to_string());
-    let api_key = std::env::var("OPENROUTER_API_KEY")
-        .expect("OPENROUTER_API_KEY must be set");
+    let api_key = String::new(); // llama.cpp doesn't need one
     let model = std::env::var("LLM_MODEL")
-        .unwrap_or_else(|_| "inclusionai/ling-2.6-1t:free".to_string());
+        .unwrap_or_else(|_| "local".to_string()); // llama.cpp ignores this field
     let port = std::env::var("PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse::<u16>()
