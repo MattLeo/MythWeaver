@@ -14,6 +14,7 @@ const MAX_TOOL_ITERATIONS: usize = 10;
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
+const LLAMA_CPP_URL: &str = "http://localhost:8085/v1/chat/completions";
 
 #[derive(Clone)]
 pub struct LlmClient {
@@ -266,8 +267,7 @@ impl LlmClient {
         }
  
         let response = self.client
-            .post(OPENROUTER_URL)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .post(LLAMA_CPP_URL)
             .header("Content-Type", "application/json")
             .header("HTTP-Referer", "https://mythweaver.app")
             .header("X-Title", "MythWeaver Chronicles")
