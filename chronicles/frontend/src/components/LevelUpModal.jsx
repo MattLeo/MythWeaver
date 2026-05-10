@@ -7,7 +7,7 @@ import {
     getFighterFeatures, getBarbarianFeatures, getBardFeatures,
     getClericFeatures, getDruidFeatures, getMonkFeatures, getPaladinFeatures,    
     RANGER_SUBCLASSES, getRangerFeatures, ROGUE_SUBCLASSES,
-    getRogueFeatures,
+    getRogueFeatures,    SORCERER_SUBCLASSES, getSorcererFeatures,
 } from '../constants.js'
 import { searchSpells } from '../api/client.js'
 
@@ -194,7 +194,8 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         focus_points, martial_arts_die, unarmored_movement,
         lay_on_hands_pool, paladin_channel_divinity, paladin_prepared_spells, paladin_slot_summary,
         favored_enemy_uses, ranger_prepared_spells, ranger_slot_summary, sneak_attack_dice, at_slot_summary, 
-        at_prepared_spells, at_cantrips,
+        at_prepared_spells, at_cantrips, sorcery_points, sorcerer_cantrips, sorcerer_prepared_spells, 
+        sorcerer_slot_summary,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
@@ -205,6 +206,8 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const isMonk      = player.class === 'Monk'
     const isPaladin   = player.class === 'Paladin'
     const isRanger    = player.class === 'Ranger'
+    const isRogue     = player.class === 'Rogue'
+    const isSorcerer  = player.class === 'Sorcerer'
 
     const isBattleMaster     = player.subclass === 'Battle Master'
     const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
@@ -215,7 +218,6 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const isExistingEK  = player.subclass === 'Eldritch Knight'
     const isEK          = isEKChosen || isExistingEK
     const needsEKSpells = isEK && (ekNewCantrips(new_level) > 0 || ekNewPrepared(new_level) > 0)
-    const isRogue = player.class === 'Rogue'
     const isAT    = isRogue && (player.subclass === 'Arcane Trickster')
 
     const steps = useMemo(() => {
@@ -310,24 +312,26 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         ? spellResults.filter(s => s.level === 0)
         : spellResults.filter(s => s.level > 0 && s.level <= 2)
 
-    const subclassOptions = isPaladin   ? PALADIN_SUBCLASSES
-        : isRogue    ? ROGUE_SUBCLASSES
-        : isRanger   ? RANGER_SUBCLASSES
-        : isMonk     ? MONK_SUBCLASSES
-        : isCleric   ? CLERIC_SUBCLASSES
-        : isDruid    ? DRUID_SUBCLASSES
-        : isBarbarian ? BARBARIAN_SUBCLASSES
-        : isBard     ? BARD_SUBCLASSES
+    const subclassOptions = isPaladin    ? PALADIN_SUBCLASSES
+        : isSorcerer   ? SORCERER_SUBCLASSES
+        : isRogue      ? ROGUE_SUBCLASSES
+        : isRanger     ? RANGER_SUBCLASSES
+        : isMonk       ? MONK_SUBCLASSES
+        : isCleric     ? CLERIC_SUBCLASSES
+        : isDruid      ? DRUID_SUBCLASSES
+        : isBarbarian  ? BARBARIAN_SUBCLASSES
+        : isBard       ? BARD_SUBCLASSES
         : FIGHTER_SUBCLASSES
  
-    const subclassLabel = isPaladin   ? 'Choose your Sacred Oath'
-        : isRogue    ? 'Choose your Roguish Archetype'
-        : isRanger   ? 'Choose your Ranger Conclave'
-        : isMonk     ? 'Choose your Monastic Tradition'
-        : isCleric   ? 'Choose your Divine Domain'
-        : isDruid    ? 'Choose your Druid Circle'
-        : isBarbarian ? 'Choose your Primal Path'
-        : isBard     ? 'Choose your Bard College'
+    const subclassLabel = isPaladin    ? 'Choose your Sacred Oath'
+        : isSorcerer   ? 'Choose your Sorcerous Origin'
+        : isRogue      ? 'Choose your Roguish Archetype'
+        : isRanger     ? 'Choose your Ranger Conclave'
+        : isMonk       ? 'Choose your Monastic Tradition'
+        : isCleric     ? 'Choose your Divine Domain'
+        : isDruid      ? 'Choose your Druid Circle'
+        : isBarbarian  ? 'Choose your Primal Path'
+        : isBard       ? 'Choose your Bard College'
         : 'Choose your Fighter subclass'
 
     const moonCR = player.subclass === 'Circle of the Moon' ? Math.floor(new_level / 3) : null
@@ -458,6 +462,29 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                                 <span className="lu-info-val" style={{ color: '#b5a9f5' }}>{at_cantrips}</span>
                                             </div>
                                         </>)}
+                                    </>)}
+
+                                     
+                                    {isSorcerer && (<>
+                                        {sorcery_points > 0 && <div className="lu-info-row">
+                                            <span>Sorcery Points</span>
+                                            <span className="lu-info-val">{sorcery_points}</span>
+                                        </div>}
+                                        <div className="lu-info-row">
+                                            <span>Cantrips Known</span>
+                                            <span className="lu-info-val">{sorcerer_cantrips}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Prepared Spells</span>
+                                            <span className="lu-info-val">{sorcerer_prepared_spells}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Spell Slots</span>
+                                            <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{sorcerer_slot_summary}</span>
+                                        </div>
+                                        {new_level === 2 && <div className="lu-info-row"><span>Font of Magic</span><span className="lu-info-val">Slots ↔ SP</span></div>}
+                                        {new_level === 5 && <div className="lu-info-row"><span>Sorcerous Restoration</span><span className="lu-info-val">Regain SP on Short Rest</span></div>}
+                                        {new_level === 7 && <div className="lu-info-row"><span>Sorcery Incarnate</span><span className="lu-info-val">2 Metamagic per spell</span></div>}
                                     </>)}
                                 </div>
 

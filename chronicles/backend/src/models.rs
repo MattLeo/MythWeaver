@@ -200,6 +200,10 @@ pub struct LevelUpResult {
     pub sneak_attack_dice: i64,
     pub at_prepared_spells: i64,
     pub at_cantrips: i64,
+    // Sorcerer
+    pub sorcery_points: i64,
+    pub sorcerer_cantrips: i64,
+    pub sorcerer_prepared_spells: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

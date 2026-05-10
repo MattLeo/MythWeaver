@@ -288,6 +288,13 @@ pub async fn create_campaign(
         }
     }
 
+    if p.class == "Sorcerer" {
+        if let Err(e) = spells_db::seed_full_caster_spell_slots(pool, &camp.id, &p.id, 1).await {
+            tracing::warn!("Failed to seed Sorcerer spell slots: {}", e);
+        }
+    }
+
+
     if let Err(e) = player::seed_background_proficiencies(
         pool, &camp.id, &p.id,
         &req.player_background_skill_1,
@@ -510,7 +517,7 @@ pub async fn level_up(
         }
     }
 
-    if matches!(p.class.as_str(), "Bard" | "Cleric" | "Druid") {
+    if matches!(p.class.as_str(), "Bard" | "Cleric" | "Druid" | "Sorcerer") {
         if let Err(e) = spells_db::seed_full_caster_spell_slots(
             pool, &campaign_id, &p.id, result.new_level
         ).await {
@@ -1501,7 +1508,7 @@ async fn seed_class_abilities(
             ("Sneak Attack", Some("Deal extra 1d6 damage when you have advantage or an ally is adjacent to the target."), 1, "per_turn"),
             ("Cunning Action", Some("Bonus Action: Dash, Disengage, or Hide."), 1, "per_turn"),
         ],
-        "Wizard" | "Sorcerer" => vec![
+        "Wizard" => vec![
             ("Spell Slots (1st)", Some("1st level spell slots."), 2, "long_rest"),
         ],
         "Cleric" => vec![
@@ -1602,6 +1609,29 @@ async fn seed_class_abilities(
                    skill in which you lack proficiency and that doesn't already use your Proficiency Bonus."),
              1, "manual"),
         ],
+        "Sorcerer" => vec![
+            ("Sorcery Points",
+             Some("Font of Magic: convert spell slots to Sorcery Points (1 SP per slot level) or \
+                   create spell slots (L1=2SP, L2=3SP, L3=5SP, L4=6SP, L5=7SP). \
+                   0 SP at level 1 — gain 2 SP at level 2 (equals Sorcerer level thereafter). \
+                   Sorcerous Restoration (L5): once per Long Rest, regain up to half your Sorcerer \
+                   level in SP when you finish a Short Rest."),
+             0, "long_rest"),  // 0 uses until level 2
+            ("Innate Sorcery",
+             Some("Bonus Action: unleash your innate magic for 1 minute. While active: \
+                   spell save DC increases by 1; Advantage on spell attack rolls. \
+                   2 uses per Long Rest. Level 7 (Sorcery Incarnate): if you have no uses left, \
+                   spend 2 Sorcery Points to activate it; also use up to two Metamagic options \
+                   per spell while active."),
+             2, "long_rest"),
+            ("Metamagic",
+             Some("You know 2 Metamagic options (gain 2 more at L10, 2 more at L17). \
+                   Spend Sorcery Points to modify spells as you cast them. \
+                   Options: Careful (1SP), Distant (1SP), Empowered (1SP), Extended (1SP), \
+                   Heightened (2SP), Quickened (2SP), Seeking (1SP), Subtle (1SP), \
+                   Transmuted (1SP), Twinned (1SP)."),
+             1, "manual"),
+        ],
         "Warlock" => vec![
             ("Spell Slots", Some("Warlock spell slots — recover on short rest."), 1, "short_rest"),
             ("Eldritch Blast", Some("Ranged spell attack dealing 1d10 force damage."), 1, "per_turn"),
@@ -1643,6 +1673,8 @@ async fn seed_level_up_abilities_direct(
         "Monk"      => seed_level_up_abilities_monk(pool, campaign_id, player_id, new_level, subclass).await,
         "Paladin"   => seed_level_up_abilities_paladin(pool, campaign_id, player_id, new_level, subclass).await,
         "Ranger"    => seed_level_up_abilities_ranger(pool, campaign_id, player_id, new_level, subclass).await,
+        "Rogue"     => seed_level_up_abilities_rogue(pool, campaign_id, player_id, new_level, subclass).await,
+        "Sorcerer"  => seed_level_up_abilities_sorcerer(pool, campaign_id, player_id, new_level, subclass).await,
         _           => {}
     }
 }
@@ -4690,6 +4722,843 @@ async fn seed_level_up_abilities_ranger(
                               Resistance to that damage type and any other damage of the same type \
                               until the end of the current turn."),
                         1, "per_turn").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_rogue(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    let player = match player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let dex_mod = crate::models::Player::modifier(player.dex).max(1);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            // Cunning Action was seeded at creation; just a note here
+            // that it's already present via seed_class_abilities
+        }
+        3 => {
+            if !has("Steady Aim") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Steady Aim",
+                    Some("Bonus Action: give yourself Advantage on your next attack roll this turn. \
+                          You can use this only if you haven't moved this turn. After using it, \
+                          your Speed is 0 until the end of the current turn."),
+                    1, "per_turn").await;
+            }
+        }
+        5 => {
+            if !has("Cunning Strike") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Cunning Strike",
+                    Some("When you deal Sneak Attack damage, you can sacrifice dice to add effects \
+                          (save DC = 8 + DEX mod + Prof Bonus): \
+                          Poison (1d6): CON save or Poisoned for 1 minute (repeats each turn). \
+                            Requires a Poisoner's Kit on your person. \
+                          Trip (1d6): DEX save or Prone (Large or smaller targets only). \
+                          Withdraw (1d6): move up to half your Speed without provoking Opportunity Attacks. \
+                          Level 11 (Improved): use up to two effects per Sneak Attack. \
+                          Level 14 (Devious Strikes): Daze (2d6, CON save or limited actions next turn), \
+                            Knock Out (6d6, CON save or Unconscious for 1 minute), \
+                            Obscure (3d6, DEX save or Blinded until end of its next turn)."),
+                    1, "per_turn").await;
+            }
+            if !has("Uncanny Dodge") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Uncanny Dodge",
+                    Some("Reaction: when an attacker you can see hits you with an attack roll, \
+                          halve the attack's damage against you (round down)."),
+                    1, "per_turn").await;
+            }
+        }
+        7 => {
+            if !has("Evasion") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Evasion",
+                    Some("When subjected to an effect that allows a DEX save for half damage, \
+                          take no damage on a success and only half damage on a failure. \
+                          Unavailable if Incapacitated."),
+                    1, "manual").await;
+            }
+            if !has("Reliable Talent") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Reliable Talent",
+                    Some("Whenever you make an ability check using a skill or tool you have \
+                          proficiency in, treat a d20 roll of 9 or lower as a 10."),
+                    1, "manual").await;
+            }
+        }
+        11 => {
+            // Improved Cunning Strike — description update on the existing ability
+            if let Some(a) = existing.iter().find(|a| a.name == "Cunning Strike") {
+                let _ = sqlx::query(
+                    "UPDATE abilities SET description = ? WHERE id = ?"
+                )
+                .bind("Cunning Strike — Improved (level 11): you can now use up to TWO effects \
+                       when you deal Sneak Attack damage, paying the die cost for each. \
+                       Poison (1d6), Trip (1d6), Withdraw (1d6), \
+                       Daze (2d6, level 14), Knock Out (6d6, level 14), Obscure (3d6, level 14). \
+                       Save DC = 8 + DEX mod + Prof Bonus.")
+                .bind(&a.id)
+                .execute(pool)
+                .await;
+            }
+        }
+        15 => {
+            if !has("Slippery Mind") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Slippery Mind",
+                    Some("Your cunning mind is exceptionally difficult to control. You gain \
+                          proficiency in Wisdom and Charisma saving throws."),
+                    1, "manual").await;
+            }
+        }
+        18 => {
+            if !has("Elusive") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Elusive",
+                    Some("No attack roll can have Advantage against you unless you have the \
+                          Incapacitated condition."),
+                    1, "manual").await;
+            }
+        }
+        20 => {
+            if !has("Stroke of Luck") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Stroke of Luck",
+                    Some("If you fail a D20 Test, you can turn the roll into a 20. \
+                          Once per Short or Long Rest."),
+                    1, "short_rest").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Arcane Trickster") => {
+            match new_level {
+                3 => {
+                    // Seed spell slots (2×L1 at L3)
+                    let _ = spells_db::seed_arcane_trickster_spell_slots(
+                        pool, campaign_id, player_id, new_level
+                    ).await;
+ 
+                    if !has("Mage Hand Legerdemain") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Mage Hand Legerdemain",
+                            Some("When you cast Mage Hand, you can cast it as a Bonus Action and \
+                                  make the spectral hand Invisible. You can control the hand as a \
+                                  Bonus Action, and through it make DEX (Sleight of Hand) checks."),
+                            1, "manual").await;
+                    }
+ 
+                    // Learn Mage Hand if not already known
+                    if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Mage Hand").await {
+                        if let Some(id) = spell["id"].as_str() {
+                            let _ = spells_db::learn_spell(
+                                pool, campaign_id, player_id, id, "cantrip", "arcane_trickster"
+                            ).await;
+                        }
+                    }
+                }
+                9 => {
+                    if !has("Magical Ambush") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Magical Ambush",
+                            Some("If you have the Invisible condition when you cast a spell on a \
+                                  creature, that creature has Disadvantage on any saving throw it \
+                                  makes against the spell on the same turn."),
+                            1, "manual").await;
+                    }
+                }
+                13 => {
+                    if !has("Versatile Trickster") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Versatile Trickster",
+                            Some("When you use the Trip option of your Cunning Strike on a creature, \
+                                  you can also use that option on another creature within 5 feet of \
+                                  your spectral Mage Hand."),
+                            1, "manual").await;
+                    }
+                }
+                17 => {
+                    if !has("Spell Thief") {
+                        let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                            "Spell Thief",
+                            Some("Reaction: immediately after a creature casts a spell that targets \
+                                  you or includes you in its area of effect, force the creature to \
+                                  make an INT save (DC = your spell save DC). On a failed save: \
+                                  negate the spell's effect against you; steal its knowledge if it \
+                                  is level 1+ and of a castable level — you have it prepared for 8 \
+                                  hours; the creature can't cast it until the 8 hours have passed. \
+                                  Once per Long Rest."),
+                            1, "long_rest").await;
+                    }
+                }
+                _ => {}
+            }
+        }
+ 
+        Some("Assassin") => match new_level {
+            3 => {
+                if !has("Assassinate") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Assassinate",
+                        Some("Initiative: you have Advantage on Initiative rolls. \
+                              Surprising Strikes: during the first round of each combat, you have \
+                              Advantage on attack rolls against any creature that hasn't taken a turn. \
+                              If your Sneak Attack hits during that round, the target takes extra \
+                              damage equal to your Rogue level of the weapon's type."),
+                        1, "manual").await;
+                }
+                if !has("Assassin's Tools") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Assassin's Tools",
+                        Some("You gain a Disguise Kit and a Poisoner's Kit, and you have \
+                              proficiency with both."),
+                        1, "manual").await;
+                }
+            }
+            9 => {
+                if !has("Infiltration Expertise") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Infiltration Expertise",
+                        Some("Masterful Mimicry: you can unerringly mimic another person's speech, \
+                              handwriting, or both after spending at least 1 hour studying them. \
+                              Roving Aim: your Speed isn't reduced to 0 by using Steady Aim."),
+                        1, "manual").await;
+                }
+            }
+            13 => {
+                if !has("Envenom Weapons") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Envenom Weapons",
+                        Some("When you use the Poison option of Cunning Strike, the target also \
+                              takes 2d6 Poison damage whenever it fails the saving throw. \
+                              This damage ignores Resistance to Poison damage."),
+                        1, "manual").await;
+                }
+            }
+            17 => {
+                if !has("Death Strike") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Death Strike",
+                        Some("When you hit with your Sneak Attack on the first round of combat, \
+                              the target must succeed on a CON save (DC = 8 + DEX mod + Prof Bonus) \
+                              or the attack's damage is doubled against the target."),
+                        1, "per_turn").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Soulknife") => match new_level {
+            3 => {
+                // Seed Psionic Energy Dice using the superiority_dice table
+                // (same mechanical system as Battle Master and Psi Warrior)
+                let _ = sqlx::query(
+                    "INSERT OR REPLACE INTO superiority_dice
+                     (id, campaign_id, player_id, pool_name, max_dice, current_dice, die_size)
+                     VALUES (lower(hex(randomblob(16))), ?, ?, 'Soulknife', 4, 4, 6)"
+                )
+                .bind(campaign_id).bind(player_id)
+                .execute(pool).await;
+ 
+                if !has("Psionic Power") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Psionic Power",
+                        Some("You have Psionic Energy Dice (4×d6 at L3, scaling up). \
+                              Regain 1 on Short Rest, all on Long Rest. \
+                              Psi-Bolstered Knack: if you fail a proficiency check, roll and add \
+                                a Psionic Energy Die — the die is expended only if it succeeds. \
+                              Psychic Whispers (Magic action): choose creatures up to your Prof Bonus \
+                                that you can see — roll a die. For that many hours, you and those \
+                                creatures can speak telepathically within 1 mile. First use per Long \
+                                Rest is free."),
+                        1, "manual").await;
+                }
+                if !has("Psychic Blades") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Psychic Blades",
+                        Some("Whenever you take the Attack action or make an Opportunity Attack, \
+                              you can manifest a Psychic Blade (Simple Melee, Finesse, Thrown 60/120 ft, \
+                              Vex mastery). Damage: 1d6 Psychic + ability modifier. The blade vanishes \
+                              after it hits or misses. After attacking with it on your turn, you can \
+                              make a second psychic blade attack as a Bonus Action (1d4 Psychic + mod) \
+                              if your other hand is free."),
+                        1, "manual").await;
+                }
+            }
+            5 => {
+                // Update dice: 6×d8
+                let _ = sqlx::query(
+                    "UPDATE superiority_dice SET max_dice = 6, current_dice = 6, die_size = 8
+                     WHERE player_id = ? AND pool_name = 'Soulknife'"
+                ).bind(player_id).execute(pool).await;
+            }
+            9 => {
+                // Update dice: 8×d8
+                let _ = sqlx::query(
+                    "UPDATE superiority_dice SET max_dice = 8, current_dice = 8, die_size = 8
+                     WHERE player_id = ? AND pool_name = 'Soulknife'"
+                ).bind(player_id).execute(pool).await;
+ 
+                if !has("Soul Blades") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Soul Blades",
+                        Some("New Psychic Blade powers: \
+                              Homing Strikes: if you miss with a Psychic Blade attack, roll a \
+                                Psionic Energy Die and add it to the attack roll — expended only \
+                                if this causes a hit. \
+                              Psychic Teleportation (Bonus Action): manifest a blade, expend and \
+                                roll a Psionic Energy Die, throw the blade up to 10× the roll in \
+                                feet — teleport to that space."),
+                        1, "manual").await;
+                }
+            }
+            11 => {
+                // Update dice: 8×d10
+                let _ = sqlx::query(
+                    "UPDATE superiority_dice SET max_dice = 8, current_dice = 8, die_size = 10
+                     WHERE player_id = ? AND pool_name = 'Soulknife'"
+                ).bind(player_id).execute(pool).await;
+            }
+            13 => {
+                // Update dice: 10×d10
+                let _ = sqlx::query(
+                    "UPDATE superiority_dice SET max_dice = 10, current_dice = 10, die_size = 10
+                     WHERE player_id = ? AND pool_name = 'Soulknife'"
+                ).bind(player_id).execute(pool).await;
+ 
+                if !has("Psychic Veil") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Psychic Veil",
+                        Some("Magic action: gain the Invisible condition for 1 hour or until \
+                              you dismiss it (no action required). Ends early if you deal damage \
+                              to a creature or force a creature to make a saving throw. \
+                              Once per Long Rest, or expend a Psionic Energy Die to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            17 => {
+                // Update dice: 12×d12
+                let _ = sqlx::query(
+                    "UPDATE superiority_dice SET max_dice = 12, current_dice = 12, die_size = 12
+                     WHERE player_id = ? AND pool_name = 'Soulknife'"
+                ).bind(player_id).execute(pool).await;
+ 
+                if !has("Rend Mind") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Rend Mind",
+                        Some("When you deal Sneak Attack damage with your Psychic Blades, force \
+                              the target to make a WIS save (DC = 8 + DEX mod + Prof Bonus). \
+                              Fail: Stunned for 1 minute (repeats save at end of each of its turns). \
+                              Once per Long Rest, or expend 3 Psionic Energy Dice to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Thief") => match new_level {
+            3 => {
+                if !has("Fast Hands") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Fast Hands",
+                        Some("Bonus Action — choose one: \
+                              Sleight of Hand: make a DEX (Sleight of Hand) check to pick a lock \
+                                or disarm a trap with Thieves' Tools, or to pick a pocket. \
+                              Use an Object: take the Utilize action, or take the Magic action \
+                                to use a magic item that requires that action."),
+                        1, "per_turn").await;
+                }
+                if !has("Second-Story Work") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Second-Story Work",
+                        Some("Climber: you gain a Climb Speed equal to your Speed. \
+                              Jumper: you can use your Dexterity modifier instead of Strength \
+                              to determine your jump distance."),
+                        1, "manual").await;
+                }
+            }
+            9 => {
+                if !has("Supreme Sneak") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Supreme Sneak",
+                        Some("New Cunning Strike option — Stealth Attack (Cost: 1d6): if you have \
+                              the Hide action's Invisible condition, this attack doesn't end that \
+                              condition on you if you end the turn behind Three-Quarters Cover or \
+                              Total Cover."),
+                        1, "manual").await;
+                }
+            }
+            13 => {
+                if !has("Use Magic Device") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Use Magic Device",
+                        Some("Attunement: you can attune to up to four magic items at once. \
+                              Charges: when you use a magic item property that expends charges, \
+                                roll 1d6 — on a 6, use the property without expending charges. \
+                              Scrolls: you can use any Spell Scroll (INT as spellcasting ability). \
+                                Cantrips and level 1 spells: cast reliably. \
+                                Higher level: INT (Arcana) check DC 10 + spell level to cast; \
+                                on failure, the scroll disintegrates."),
+                        1, "manual").await;
+                }
+            }
+            17 => {
+                if !has("Thief's Reflexes") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Thief's Reflexes",
+                        Some("You can take two turns during the first round of any combat. \
+                              First turn at your normal Initiative, second turn at your \
+                              Initiative minus 10."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_sorcerer(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    let player = match player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let cha_mod = crate::models::Player::modifier(player.cha).max(1);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            // Sorcery Points unlock — updated in level_up_player
+            // Metamagic is already seeded at creation
+        }
+        5 => {
+            if !has("Sorcerous Restoration") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Sorcerous Restoration",
+                    Some("When you finish a Short Rest, you can regain expended Sorcery Points, \
+                          up to a maximum equal to half your Sorcerer level (round down). \
+                          Once per Long Rest."),
+                    1, "long_rest").await;
+            }
+        }
+        7 => {
+            if !has("Sorcery Incarnate") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Sorcery Incarnate",
+                    Some("If you have no uses of Innate Sorcery left, you can use it by spending \
+                          2 Sorcery Points when you take the Bonus Action to activate it. \
+                          Additionally, while Innate Sorcery is active, you can use up to TWO \
+                          Metamagic options on each spell you cast."),
+                    1, "manual").await;
+            }
+        }
+        20 => {
+            if !has("Arcane Apotheosis") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Arcane Apotheosis",
+                    Some("While your Innate Sorcery feature is active, you can use one Metamagic \
+                          option on each of your turns without spending Sorcery Points on it."),
+                    1, "manual").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Aberrant Sorcery") => match new_level {
+            3 => {
+                if !has("Telepathic Speech") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Telepathic Speech",
+                        Some("Bonus Action: choose one creature you can see within 30 ft. You and \
+                              the target can communicate telepathically while within a number of \
+                              miles equal to your CHA modifier (min 1). Lasts Sorcerer level minutes. \
+                              Ends early if you form a connection with a different creature."),
+                        1, "manual").await;
+                }
+                if !has("Psionic Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Psionic Spells",
+                        Some("Always prepared (don't count against your limit): \
+                              L3: Arms of Hadar, Calm Emotions, Detect Thoughts, Dissonant Whispers, Mind Sliver. \
+                              L5: Hunger of Hadar, Sending. \
+                              L7: Evard's Black Tentacles, Summon Aberration. \
+                              L9: Rary's Telepathic Bond, Telekinesis."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Arms of Hadar", "Calm Emotions", "Detect Thoughts", "Dissonant Whispers"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "aberrant_sorcery").await;
+                        }
+                    }
+                }
+                // Mind Sliver is a cantrip — seed it
+                if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, "Mind Sliver").await {
+                    if let Some(id) = s["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "aberrant_sorcery").await;
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Hunger of Hadar", "Sending"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "aberrant_sorcery").await;
+                        }
+                    }
+                }
+            }
+            6 => {
+                if !has("Psionic Sorcery") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Psionic Sorcery",
+                        Some("When you cast any level 1+ spell from Psionic Spells, you can cast it \
+                              by expending a spell slot as normal OR by spending a number of Sorcery \
+                              Points equal to the spell's level. If cast with Sorcery Points, it \
+                              requires no Verbal or Somatic components (and no Material components \
+                              unless consumed or have a GP cost specified)."),
+                        1, "manual").await;
+                }
+                if !has("Psychic Defenses") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Psychic Defenses",
+                        Some("You have Resistance to Psychic damage and Advantage on saving throws \
+                              to avoid or end the Charmed or Frightened condition."),
+                        1, "manual").await;
+                }
+            }
+            7 => {
+                for spell_name in &["Evard's Black Tentacles", "Summon Aberration"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "aberrant_sorcery").await;
+                        }
+                    }
+                }
+            }
+            9 => {
+                for spell_name in &["Rary's Telepathic Bond", "Telekinesis"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "aberrant_sorcery").await;
+                        }
+                    }
+                }
+            }
+            14 => {
+                if !has("Revelation in Flesh") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Revelation in Flesh",
+                        Some("Bonus Action: spend 1+ Sorcery Points to alter your body for 10 minutes. \
+                              Each SP grants one benefit: \
+                              Aquatic Adaptation — Swim Speed = 2× Speed, breathe underwater. \
+                              Glistening Flight — Fly Speed = Speed, can hover. \
+                              See the Invisible — see Invisible creatures within 60 ft not behind Total Cover. \
+                              Wormlike Movement — move through spaces as narrow as 1 inch; \
+                                spend 5 ft of movement to escape nonmagical restraints or Grappled."),
+                        1, "manual").await;
+                }
+            }
+            18 => {
+                if !has("Warping Implosion") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Warping Implosion",
+                        Some("Magic action: teleport to an unoccupied space you can see within 120 ft. \
+                              Each creature within 30 ft of your previous space must make a STR save \
+                              (DC = spell save DC). Fail: 3d10 Force damage and pulled toward your \
+                              former space (as close as possible). Success: half damage only. \
+                              Once per Long Rest, or spend 5 Sorcery Points to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Clockwork Sorcery") => match new_level {
+            3 => {
+                if !has("Restore Balance") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Restore Balance",
+                        Some("Reaction: when a creature you can see within 60 ft is about to roll \
+                              a d20 with Advantage or Disadvantage, prevent the roll from being \
+                              affected by either. Uses = CHA modifier (min 1). Recharges Long Rest."),
+                        cha_mod, "long_rest").await;
+                }
+                if !has("Clockwork Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Clockwork Spells",
+                        Some("Always prepared: L3: Aid, Alarm, Lesser Restoration, Protection from Evil and Good. \
+                              L5: Dispel Magic, Protection from Energy. \
+                              L7: Freedom of Movement, Summon Construct. \
+                              L9: Greater Restoration, Wall of Force."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Aid", "Alarm", "Lesser Restoration", "Protection from Evil and Good"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "clockwork_sorcery").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Dispel Magic", "Protection from Energy"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "clockwork_sorcery").await;
+                        }
+                    }
+                }
+            }
+            6 => {
+                if !has("Bastion of Law") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Bastion of Law",
+                        Some("Magic action: expend 1-5 Sorcery Points to create a ward on yourself \
+                              or a creature you can see within 30 ft. The ward has a number of d8s \
+                              equal to SP spent. When the warded creature takes damage, it can \
+                              expend any number of those dice, roll them, and reduce the damage by \
+                              the total. The ward lasts until Long Rest or you use this again."),
+                        1, "manual").await;
+                }
+            }
+            7 => {
+                for spell_name in &["Freedom of Movement", "Summon Construct"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "clockwork_sorcery").await;
+                        }
+                    }
+                }
+            }
+            9 => {
+                for spell_name in &["Greater Restoration", "Wall of Force"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "clockwork_sorcery").await;
+                        }
+                    }
+                }
+            }
+            14 => {
+                if !has("Trance of Order") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Trance of Order",
+                        Some("Bonus Action: enter a trance for 1 minute. While active: attack rolls \
+                              against you can't benefit from Advantage; whenever you make a D20 Test, \
+                              treat a roll of 9 or lower as a 10. Once per Long Rest, or spend 5 \
+                              Sorcery Points to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            18 => {
+                if !has("Clockwork Cavalcade") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Clockwork Cavalcade",
+                        Some("Magic action: summon order spirits in a 30-foot Cube originating from you. \
+                              They create these effects before vanishing: \
+                              Heal — restore up to 100 HP divided among creatures in the Cube. \
+                              Repair — damaged objects in the Cube are instantly repaired. \
+                              Dispel — every spell of level 6 or lower ends on targets of your choice. \
+                              Once per Long Rest, or spend 7 Sorcery Points to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Draconic Sorcery") => match new_level {
+            3 => {
+                // Draconic Resilience: +3 max HP at L3, +1 per subsequent level (handled in level_up_player)
+                let _ = sqlx::query(
+                    "UPDATE players SET max_hp = max_hp + 3, current_hp = current_hp + 3,
+                     updated_at = datetime('now') WHERE id = ?"
+                )
+                .bind(player_id).execute(pool).await;
+ 
+                if !has("Draconic Resilience") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Draconic Resilience",
+                        Some("Your draconic magic manifests physically. Your max HP increases by 3 \
+                              at level 3, plus 1 for each subsequent Sorcerer level. \
+                              Unarmored Defense: while not wearing armor, your base AC equals \
+                              10 + DEX modifier + CHA modifier."),
+                        1, "manual").await;
+                }
+                if !has("Draconic Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Draconic Spells",
+                        Some("Always prepared: L3: Alter Self, Chromatic Orb, Command, Dragon's Breath. \
+                              L5: Fear, Fly. L7: Arcane Eye, Charm Monster. \
+                              L9: Legend Lore, Summon Dragon."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Alter Self", "Chromatic Orb", "Command", "Dragon's Breath"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "draconic_sorcery").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Fear", "Fly"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "draconic_sorcery").await;
+                        }
+                    }
+                }
+            }
+            6 => {
+                if !has("Elemental Affinity") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Elemental Affinity",
+                        Some("Choose a damage type associated with dragons: Acid, Cold, Fire, \
+                              Lightning, or Poison. You have Resistance to that type. When you cast \
+                              a spell dealing damage of that type, add your CHA modifier to one \
+                              damage roll of that spell."),
+                        1, "manual").await;
+                }
+            }
+            7 => {
+                for spell_name in &["Arcane Eye", "Charm Monster"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "draconic_sorcery").await;
+                        }
+                    }
+                }
+            }
+            9 => {
+                for spell_name in &["Legend Lore", "Summon Dragon"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "draconic_sorcery").await;
+                        }
+                    }
+                }
+            }
+            14 => {
+                if !has("Dragon Wings") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Dragon Wings",
+                        Some("Bonus Action: cause draconic wings to appear on your back for 1 hour \
+                              (or dismiss freely). While active: Fly Speed of 60 feet. \
+                              Once per Long Rest, or spend 3 Sorcery Points to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            18 => {
+                if !has("Dragon Companion") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Dragon Companion",
+                        Some("You can cast Summon Dragon without a Material component. Once per Long \
+                              Rest, cast it without a spell slot. When you start casting, you can \
+                              modify it to remove the Concentration requirement (duration becomes \
+                              1 minute for that casting)."),
+                        1, "long_rest").await;
+                }
+                if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, "Summon Dragon").await {
+                    if let Some(id) = s["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "draconic_sorcery").await;
+                    }
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Wild Magic Sorcery") => match new_level {
+            3 => {
+                if !has("Wild Magic Surge") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Wild Magic Surge",
+                        Some("Once per turn, immediately after casting a Sorcerer spell with a slot, \
+                              you can roll 1d20. On a 20, roll on the Wild Magic Surge table for a \
+                              random magical effect. If the effect is a spell, it isn't affected by \
+                              your Metamagic. Level 14 (Controlled Chaos): roll twice, use either. \
+                              Level 18 (Tamed Surge): choose any effect from the table instead of \
+                              rolling (once per Long Rest)."),
+                        1, "manual").await;
+                }
+                if !has("Tides of Chaos") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Tides of Chaos",
+                        Some("Gain Advantage on one D20 Test before you roll. After doing so, you \
+                              must cast a Sorcerer spell with a slot or finish a Long Rest before \
+                              using this again. If you cast a Sorcerer spell with a slot before \
+                              finishing a Long Rest, you automatically roll on the Wild Magic Surge \
+                              table."),
+                        1, "long_rest").await;
+                }
+            }
+            6 => {
+                if !has("Bend Luck") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Bend Luck",
+                        Some("Reaction: immediately after another creature you can see rolls the d20 \
+                              for a D20 Test, spend 1 Sorcery Point to roll 1d4 and apply the number \
+                              rolled as a bonus or penalty (your choice) to that d20 roll."),
+                        1, "per_turn").await;
+                }
+            }
+            14 => {
+                if !has("Controlled Chaos") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Controlled Chaos",
+                        Some("Whenever you roll on the Wild Magic Surge table, you can roll twice \
+                              and use either number."),
+                        1, "manual").await;
+                }
+            }
+            18 => {
+                if !has("Tamed Surge") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Tamed Surge",
+                        Some("Immediately after casting a Sorcerer spell with a slot, you can create \
+                              an effect of your choice from the Wild Magic Surge table instead of \
+                              rolling. You can choose any effect except the final row, and if it \
+                              involves a roll, you must make it. Once per Long Rest."),
+                        1, "long_rest").await;
                 }
             }
             _ => {}

@@ -97,7 +97,7 @@ export default function Sidebar({
 
   const isEK = player.subclass === 'Eldritch Knight'
   const canCastSpells = isEK
-    || ['Bard', 'Cleric', 'Druid', 'Paladin'].includes(player.class)
+    || ['Bard', 'Cleric', 'Druid', 'Paladin', 'Sorcerer'].includes(player.class)
     || (player.class === 'Monk' && player.knownSpells && player.knownSpells.some(s => s.level === 0))
     || (player.class === 'Rogue' && player.subclass === 'Arcane Trickster')
 

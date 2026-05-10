@@ -1379,3 +1379,116 @@ export function atPreparedSpells(rogueLevel) {
 export function atCantrips(rogueLevel) {
     return rogueLevel >= 10 ? 4 : 3
 }
+
+// ─── Sorcerer ─────────────────────────────────────────────────────────────────
+
+export const SORCERER_SUBCLASSES = [
+    {
+        name: 'Aberrant Sorcery',
+        desc: 'Wield unnatural psionic power. Telepathic Speech, psionic spells cast without components, and a space-warping Warping Implosion at level 18.',
+    },
+    {
+        name: 'Clockwork Sorcery',
+        desc: 'Channel cosmic forces of order. Restore Balance to cancel Advantage/Disadvantage, Bastion of Law shields allies, and Trance of Order at level 14.',
+    },
+    {
+        name: 'Draconic Sorcery',
+        desc: 'Breathe the magic of dragons. Bonus HP and natural armor at level 3, elemental damage affinity at level 6, and draconic wings at level 14.',
+    },
+    {
+        name: 'Wild Magic Sorcery',
+        desc: 'Unleash chaotic magic. Wild Magic Surges on nat 20s, Tides of Chaos for guaranteed Advantage, and Bend Luck to manipulate others\' rolls.',
+    },
+]
+
+export const SORCERER_BASE_FEATURES = {
+    1:  ['Spellcasting', 'Innate Sorcery'],
+    2:  ['Font of Magic', 'Metamagic'],
+    3:  ['Sorcerer Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Sorcerous Restoration'],
+    6:  ['Subclass Feature'],
+    7:  ['Sorcery Incarnate'],
+    8:  ['Ability Score Improvement'],
+    9:  [],
+    10: ['Metamagic'],
+    11: [],
+    12: ['Ability Score Improvement'],
+    13: [],
+    14: ['Subclass Feature'],
+    15: [],
+    16: ['Ability Score Improvement'],
+    17: ['Metamagic'],
+    18: ['Subclass Feature'],
+    19: ['Epic Boon'],
+    20: ['Arcane Apotheosis'],
+}
+
+export const SORCERER_SUBCLASS_FEATURES = {
+    'Aberrant Sorcery': {
+        3:  ['Psionic Spells', 'Telepathic Speech'],
+        6:  ['Psionic Sorcery', 'Psychic Defenses'],
+        14: ['Revelation in Flesh'],
+        18: ['Warping Implosion'],
+    },
+    'Clockwork Sorcery': {
+        3:  ['Clockwork Spells', 'Restore Balance'],
+        6:  ['Bastion of Law'],
+        14: ['Trance of Order'],
+        18: ['Clockwork Cavalcade'],
+    },
+    'Draconic Sorcery': {
+        3:  ['Draconic Resilience', 'Draconic Spells'],
+        6:  ['Elemental Affinity'],
+        14: ['Dragon Wings'],
+        18: ['Dragon Companion'],
+    },
+    'Wild Magic Sorcery': {
+        3:  ['Wild Magic Surge', 'Tides of Chaos'],
+        6:  ['Bend Luck'],
+        14: ['Controlled Chaos'],
+        18: ['Tamed Surge'],
+    },
+}
+
+export const SORCERER_ASI_LEVELS = [4, 8, 12, 16]
+
+export function getSorcererFeatures(player, newLevel) {
+    const base = (SORCERER_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (SORCERER_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+
+// Sorcery Points = Sorcerer level (0 at L1, starts at L2)
+export function sorcererSorceryPoints(level) {
+    return level >= 2 ? level : 0
+}
+
+// Cantrips: 4 at L1, 5 at L4, 6 at L10
+export function sorcererCantrips(level) {
+    if (level >= 10) return 6
+    if (level >= 4)  return 5
+    return 4
+}
+
+// Prepared spells from PHB table
+export function sorcererPreparedSpells(level) {
+    const table = [0,2,4,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22]
+    return table[level] || 22
+}
+
+// Full caster slots (shared with Bard/Cleric/Druid)
+export function sorcererSlotSummary(level) {
+    const table = {
+        1:[2,0,0,0,0,0,0,0,0], 2:[3,0,0,0,0,0,0,0,0], 3:[4,2,0,0,0,0,0,0,0],
+        4:[4,3,0,0,0,0,0,0,0], 5:[4,3,2,0,0,0,0,0,0], 6:[4,3,3,0,0,0,0,0,0],
+        7:[4,3,3,1,0,0,0,0,0], 8:[4,3,3,2,0,0,0,0,0], 9:[4,3,3,3,1,0,0,0,0],
+        10:[4,3,3,3,2,0,0,0,0], 11:[4,3,3,3,2,1,0,0,0], 12:[4,3,3,3,2,1,0,0,0],
+        13:[4,3,3,3,2,1,1,0,0], 14:[4,3,3,3,2,1,1,0,0], 15:[4,3,3,3,2,1,1,1,0],
+        16:[4,3,3,3,2,1,1,1,0], 17:[4,3,3,3,2,1,1,1,1], 18:[4,3,3,3,3,1,1,1,1],
+        19:[4,3,3,3,3,2,1,1,1], 20:[4,3,3,3,3,2,2,1,1],
+    }
+    return (table[level] || table[20]).filter(s => s > 0).join('/')
+}

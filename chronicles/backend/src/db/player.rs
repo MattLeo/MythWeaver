@@ -271,6 +271,7 @@ pub async fn level_up_player(
             "Paladin" => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
             "Ranger"  => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
             "Rogue" => (1i64, 0i64, 0i64, 0i64, 0i64),
+            "Sorcerer" => (1i64, 0i64, 0i64, 0i64, 0i64),
             _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
         };
  
@@ -300,7 +301,15 @@ pub async fn level_up_player(
  
     let favored_enemy_uses_n = if player.class == "Ranger" { ranger_favored_enemy_uses(new_level) } else { 0 };
     let ranger_prepared_n    = if player.class == "Ranger" { ranger_prepared_spells(new_level) } else { 0 };
- 
+
+    let sneak_attack_dice_n  = if player.class == "Rogue" { rogue_sneak_attack_dice(new_level) } else { 0 };
+    let at_prepared_n       = if player.class == "Rogue" { rogue_arcane_trickster_prepared(new_level) } else { 0 };
+    let at_cantrips_n       = if player.class == "Rogue" { rogue_arcane_trickster_cantrips(new_level) } else { 0 };
+
+    let sorcery_points_n       = if player.class == "Sorcerer" { sorcerer_sorcery_points(new_level) } else { 0 };
+    let sorcerer_cantrips_n    = if player.class == "Sorcerer" { sorcerer_cantrips(new_level) } else { 0 };
+    let sorcerer_prepared_n    = if player.class == "Sorcerer" { sorcerer_prepared_spells(new_level) } else { 0 };
+
     let asi_available = match player.class.as_str() {
         "Fighter"   => matches!(new_level, 4 | 6 | 8 | 12 | 14 | 16),
         "Barbarian" => matches!(new_level, 4 | 8 | 12 | 16 | 19),
@@ -310,6 +319,8 @@ pub async fn level_up_player(
         "Monk"      => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Paladin"   => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Ranger"    => matches!(new_level, 4 | 8 | 12 | 16 | 19),
+        "Rogue"     => matches!(new_level, 4 | 8 | 10 | 12 | 16 | 19),
+        "Sorcerer" => matches!(new_level, 4 | 8 | 12 | 16),
         _           => Player::is_asi_level(new_level),
     };
  
@@ -498,6 +509,35 @@ pub async fn level_up_player(
         .execute(pool).await?;
     }
 
+    // ── Sorcerer ──────────────────────────────────────────────────────────────
+
+    if player.class == "Sorcerer" && new_level >= 2 {
+        let sp_desc = format!(
+            "You have {} Sorcery Points (restored on Long Rest; regain up to {} on Short Rest at L5+). \
+             Font of Magic: convert slots to SP (1 SP per slot level) or spend SP to create slots \
+             (L1=2SP, L2=3SP, L3=5SP, L4=6SP, L5=7SP). \
+             Metamagic: spend SP to modify spells. \
+             Innate Sorcery (2 uses/Long Rest): +1 spell save DC and Advantage on spell attack rolls \
+             for 1 minute. Level 7: use it by spending 2 SP if out of uses.",
+            sorcery_points_n,
+            new_level / 2
+        );
+        sqlx::query(
+            "UPDATE abilities SET max_uses = ?, current_uses = ?, description = ?
+             WHERE owner_id = ? AND name = 'Sorcery Points'"
+        )
+        .bind(sorcery_points_n).bind(sorcery_points_n).bind(&sp_desc).bind(player_id)
+        .execute(pool).await?;
+ 
+        // Draconic Resilience: +1 max HP per level above 3 (already got +3 at L3)
+        if player.subclass.as_deref() == Some("Draconic Sorcery") && new_level > 3 {
+            sqlx::query(
+                "UPDATE players SET max_hp = max_hp + 1, current_hp = current_hp + 1,
+                 updated_at = datetime('now') WHERE id = ?"
+            )
+            .bind(player_id).execute(pool).await?;
+        }
+    }
  
     // ── Feature list ──────────────────────────────────────────────────────────
     let new_features = match player.class.as_str() {
@@ -510,6 +550,7 @@ pub async fn level_up_player(
         "Paladin"   => paladin_features_at_level(new_level, player.subclass.as_deref()),
         "Ranger"    => ranger_features_at_level(new_level, player.subclass.as_deref()),
         "Rogue"     => rogue_features_at_level(new_level, player.subclass.as_deref()),
+        "Sorcerer"  => sorcerer_features_at_level(new_level, player.subclass.as_deref()),
         _           => class_features_generic(&player.class, new_level),
     };
  
@@ -549,6 +590,9 @@ pub async fn level_up_player(
         sneak_attack_dice: sneak_attack_dice_n,
         at_prepared_spells: at_prepared_n,
         at_cantrips: at_cantrips_n,
+        sorcery_points: sorcery_points_n,
+        sorcerer_cantrips: sorcerer_cantrips_n,
+        sorcerer_prepared_spells: sorcerer_prepared_n,
     })
 }
 
@@ -1243,6 +1287,25 @@ fn class_features_generic(class: &str, level: i64) -> Vec<String> {
             20 => features.push("Foe Slayer".to_string()),
             _  => {}
         },
+        "Sorcerer" => match level {
+            1  => features.extend(["Spellcasting".to_string(), "Innate Sorcery".to_string()]),
+            2  => features.extend(["Font of Magic".to_string(), "Metamagic".to_string()]),
+            3  => features.push("Sorcerer Subclass".to_string()),
+            4  => features.push("Ability Score Improvement".to_string()),
+            5  => features.push("Sorcerous Restoration".to_string()),
+            6  => features.push("Subclass Feature".to_string()),
+            7  => features.push("Sorcery Incarnate".to_string()),
+            8  => features.push("Ability Score Improvement".to_string()),
+            10 => features.push("Metamagic".to_string()),
+            12 => features.push("Ability Score Improvement".to_string()),
+            14 => features.push("Subclass Feature".to_string()),
+            16 => features.push("Ability Score Improvement".to_string()),
+            17 => features.push("Metamagic".to_string()),
+            18 => features.push("Subclass Feature".to_string()),
+            19 => features.push("Epic Boon".to_string()),
+            20 => features.push("Arcane Apotheosis".to_string()),
+            _  => {}
+        },
         _ => {}
     }
     features
@@ -1582,6 +1645,79 @@ fn rogue_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
             9  => features.push("Supreme Sneak".to_string()),
             13 => features.push("Use Magic Device".to_string()),
             17 => features.push("Thief's Reflexes".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
+}
+
+// ─── Sorcerer progression ─────────────────────────────────────────────────────
+ 
+/// Sorcery Points = Sorcerer level (0 at L1, starts at L2).
+pub fn sorcerer_sorcery_points(level: i64) -> i64 {
+    if level >= 2 { level } else { 0 }
+}
+ 
+/// Cantrips: 4 at L1, 5 at L4, 6 at L10.
+pub fn sorcerer_cantrips(level: i64) -> i64 {
+    if level >= 10 { 6 } else if level >= 4 { 5 } else { 4 }
+}
+ 
+/// Prepared spells from PHB table.
+pub fn sorcerer_prepared_spells(level: i64) -> i64 {
+    let table = [0i64,2,4,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22];
+    table.get(level as usize).copied().unwrap_or(22)
+}
+ 
+fn sorcerer_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Spellcasting".to_string(), "Innate Sorcery".to_string()]),
+        2  => features.extend(["Font of Magic".to_string(), "Metamagic".to_string()]),
+        3  => features.push("Sorcerer Subclass".to_string()),
+        4  => features.push("Ability Score Improvement".to_string()),
+        5  => features.push("Sorcerous Restoration".to_string()),
+        6  => features.push("Subclass Feature".to_string()),
+        7  => features.push("Sorcery Incarnate".to_string()),
+        8  => features.push("Ability Score Improvement".to_string()),
+        10 => features.push("Metamagic".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        14 => features.push("Subclass Feature".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        17 => features.push("Metamagic".to_string()),
+        18 => features.push("Subclass Feature".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Arcane Apotheosis".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("Aberrant Sorcery") => match level {
+            3  => features.extend(["Psionic Spells".to_string(), "Telepathic Speech".to_string()]),
+            6  => features.extend(["Psionic Sorcery".to_string(), "Psychic Defenses".to_string()]),
+            14 => features.push("Revelation in Flesh".to_string()),
+            18 => features.push("Warping Implosion".to_string()),
+            _  => {}
+        },
+        Some("Clockwork Sorcery") => match level {
+            3  => features.extend(["Clockwork Spells".to_string(), "Restore Balance".to_string()]),
+            6  => features.push("Bastion of Law".to_string()),
+            14 => features.push("Trance of Order".to_string()),
+            18 => features.push("Clockwork Cavalcade".to_string()),
+            _  => {}
+        },
+        Some("Draconic Sorcery") => match level {
+            3  => features.extend(["Draconic Resilience".to_string(), "Draconic Spells".to_string()]),
+            6  => features.push("Elemental Affinity".to_string()),
+            14 => features.push("Dragon Wings".to_string()),
+            18 => features.push("Dragon Companion".to_string()),
+            _  => {}
+        },
+        Some("Wild Magic Sorcery") => match level {
+            3  => features.extend(["Wild Magic Surge".to_string(), "Tides of Chaos".to_string()]),
+            6  => features.push("Bend Luck".to_string()),
+            14 => features.push("Controlled Chaos".to_string()),
+            18 => features.push("Tamed Surge".to_string()),
             _  => {}
         },
         _ => {}
