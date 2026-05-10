@@ -272,6 +272,7 @@ pub async fn level_up_player(
             "Ranger"  => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
             "Rogue" => (1i64, 0i64, 0i64, 0i64, 0i64),
             "Sorcerer" => (1i64, 0i64, 0i64, 0i64, 0i64),
+            "Warlock" => (1i64, 0i64, 0i64, 0i64, 0i64),
             _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
         };
  
@@ -310,6 +311,12 @@ pub async fn level_up_player(
     let sorcerer_cantrips_n    = if player.class == "Sorcerer" { sorcerer_cantrips(new_level) } else { 0 };
     let sorcerer_prepared_n    = if player.class == "Sorcerer" { sorcerer_prepared_spells(new_level) } else { 0 };
 
+    let warlock_slot_level_n    = if player.class == "Warlock" { warlock_slot_level(new_level) } else { 0 };
+    let warlock_slot_count_n    = if player.class == "Warlock" { warlock_slot_count(new_level) } else { 0 };
+    let warlock_prepared_n      = if player.class == "Warlock" { warlock_prepared_spells(new_level) } else { 0 };
+    let warlock_cantrips_n      = if player.class == "Warlock" { warlock_cantrips(new_level) } else { 0 };
+    let warlock_invocations_n   = if player.class == "Warlock" { warlock_invocations(new_level) } else { 0 };
+
     let asi_available = match player.class.as_str() {
         "Fighter"   => matches!(new_level, 4 | 6 | 8 | 12 | 14 | 16),
         "Barbarian" => matches!(new_level, 4 | 8 | 12 | 16 | 19),
@@ -321,6 +328,7 @@ pub async fn level_up_player(
         "Ranger"    => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Rogue"     => matches!(new_level, 4 | 8 | 10 | 12 | 16 | 19),
         "Sorcerer" => matches!(new_level, 4 | 8 | 12 | 16),
+        "Warlock" => matches!(new_level, 4 | 8 | 12 | 16),
         _           => Player::is_asi_level(new_level),
     };
  
@@ -551,6 +559,7 @@ pub async fn level_up_player(
         "Ranger"    => ranger_features_at_level(new_level, player.subclass.as_deref()),
         "Rogue"     => rogue_features_at_level(new_level, player.subclass.as_deref()),
         "Sorcerer"  => sorcerer_features_at_level(new_level, player.subclass.as_deref()),
+        "Warlock" => warlock_features_at_level(new_level, player.subclass.as_deref()),
         _           => class_features_generic(&player.class, new_level),
     };
  
@@ -593,6 +602,11 @@ pub async fn level_up_player(
         sorcery_points: sorcery_points_n,
         sorcerer_cantrips: sorcerer_cantrips_n,
         sorcerer_prepared_spells: sorcerer_prepared_n,
+        warlock_slot_level: warlock_slot_level_n,
+        warlock_slot_count: warlock_slot_count_n,
+        warlock_prepared_spells: warlock_prepared_n,
+        warlock_cantrips: warlock_cantrips_n,
+        warlock_invocations: warlock_invocations_n,
     })
 }
 
@@ -1718,6 +1732,110 @@ fn sorcerer_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String>
             6  => features.push("Bend Luck".to_string()),
             14 => features.push("Controlled Chaos".to_string()),
             18 => features.push("Tamed Surge".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
+}
+
+// ─── Warlock progression ──────────────────────────────────────────────────────
+ 
+/// Pact Magic slot level — all slots are the same level.
+pub fn warlock_slot_level(level: i64) -> i64 {
+    match level {
+        1..=2   => 1,
+        3..=4   => 2,
+        5..=6   => 3,
+        7..=8   => 4,
+        _       => 5,
+    }
+}
+ 
+/// Number of Pact Magic spell slots.
+pub fn warlock_slot_count(level: i64) -> i64 {
+    match level {
+        1       => 1,
+        2..=10  => 2,
+        11..=16 => 3,
+        _       => 4,
+    }
+}
+ 
+/// Prepared spells from PHB table.
+pub fn warlock_prepared_spells(level: i64) -> i64 {
+    let table = [0i64,2,3,4,5,6,7,8,9,10,10,11,11,12,12,13,13,14,14,15,15];
+    table.get(level as usize).copied().unwrap_or(15)
+}
+ 
+/// Cantrips: 2 at L1, 3 at L4, 4 at L10.
+pub fn warlock_cantrips(level: i64) -> i64 {
+    if level >= 10 { 4 } else if level >= 4 { 3 } else { 2 }
+}
+ 
+/// Eldritch Invocations known.
+pub fn warlock_invocations(level: i64) -> i64 {
+    match level {
+        1       => 1,
+        2..=4   => 3,
+        5..=6   => 5,
+        7..=8   => 6,
+        9..=11  => 7,
+        12..=14 => 8,
+        15..=17 => 9,
+        _       => 10,
+    }
+}
+ 
+fn warlock_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Eldritch Invocations".to_string(), "Pact Magic".to_string()]),
+        2  => features.push("Magical Cunning".to_string()),
+        3  => features.push("Warlock Subclass".to_string()),
+        4  => features.push("Ability Score Improvement".to_string()),
+        6  => features.push("Subclass Feature".to_string()),
+        8  => features.push("Ability Score Improvement".to_string()),
+        9  => features.push("Contact Patron".to_string()),
+        10 => features.push("Subclass Feature".to_string()),
+        11 => features.push("Mystic Arcanum (Level 6 Spell)".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        13 => features.push("Mystic Arcanum (Level 7 Spell)".to_string()),
+        14 => features.push("Subclass Feature".to_string()),
+        15 => features.push("Mystic Arcanum (Level 8 Spell)".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        17 => features.push("Mystic Arcanum (Level 9 Spell)".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Eldritch Master".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("Archfey Patron") => match level {
+            3  => features.extend(["Archfey Spells".to_string(), "Steps of the Fey".to_string()]),
+            6  => features.push("Misty Escape".to_string()),
+            10 => features.push("Beguiling Defenses".to_string()),
+            14 => features.push("Bewitching Magic".to_string()),
+            _  => {}
+        },
+        Some("Celestial Patron") => match level {
+            3  => features.extend(["Celestial Spells".to_string(), "Healing Light".to_string()]),
+            6  => features.push("Radiant Soul".to_string()),
+            10 => features.push("Celestial Resilience".to_string()),
+            14 => features.push("Searing Vengeance".to_string()),
+            _  => {}
+        },
+        Some("Fiend Patron") => match level {
+            3  => features.extend(["Dark One's Blessing".to_string(), "Fiend Spells".to_string()]),
+            6  => features.push("Dark One's Own Luck".to_string()),
+            10 => features.push("Fiendish Resilience".to_string()),
+            14 => features.push("Hurl Through Hell".to_string()),
+            _  => {}
+        },
+        Some("Great Old One Patron") => match level {
+            3  => features.extend(["Awakened Mind".to_string(), "Great Old One Spells".to_string(), "Psychic Spells".to_string()]),
+            6  => features.push("Clairvoyant Combatant".to_string()),
+            10 => features.extend(["Eldritch Hex".to_string(), "Thought Shield".to_string()]),
+            14 => features.push("Create Thrall".to_string()),
             _  => {}
         },
         _ => {}

@@ -896,8 +896,8 @@ export default function CombatModal({
 
     // Any class with a spell list — determines whether spell UI is shown
     const canCastSpells = isEK
-        || ['Bard', 'Cleric', 'Druid', 'Paladin', 'Sorcerer'].includes(player?.class)
-        || player?.class === 'Monk'
+        || ['Bard', 'Cleric', 'Druid', 'Paladin', 'Sorcerer', 'Warlock'].includes(player?.class)
+        || (player?.class === 'Monk' && player?.knownSpells && player?.knownSpells.some(s => s.level === 0))
         || (player?.class === 'Rogue' && player?.subclass === 'Arcane Trickster')
 
     // ── Load ──────────────────────────────────────────────────────────────────

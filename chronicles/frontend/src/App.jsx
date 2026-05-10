@@ -16,11 +16,13 @@ import {
   isLevelUpAvailable,
   getFighterFeatures, getBarbarianFeatures, getBardFeatures,
   getClericFeatures, getDruidFeatures, getMonkFeatures,
-  getPaladinFeatures, getRangerFeatures, getRogueFeatures, getSorcererFeatures,
+  getPaladinFeatures, getRangerFeatures, getRogueFeatures,
+  getSorcererFeatures, getWarlockFeatures,
   hitDieForClass, proficiencyForLevel,
   FIGHTER_ASI_LEVELS, BARBARIAN_ASI_LEVELS, BARD_ASI_LEVELS,
   CLERIC_ASI_LEVELS, DRUID_ASI_LEVELS, MONK_ASI_LEVELS,
-  PALADIN_ASI_LEVELS, RANGER_ASI_LEVELS, ROGUE_ASI_LEVELS, SORCERER_ASI_LEVELS,
+  PALADIN_ASI_LEVELS, RANGER_ASI_LEVELS, ROGUE_ASI_LEVELS,
+  SORCERER_ASI_LEVELS, WARLOCK_ASI_LEVELS,
   barbarianRageUses, barbarianRageDamage, barbarianWeaponMastery,
   bardInspirationDie, bardPreparedSpells, bardCantrips, bardSlotSummary,
   clericChannelDivinityUses, clericCantrips, clericPreparedSpells, clericSlotSummary,
@@ -30,7 +32,9 @@ import {
   rangerFavoredEnemyUses, rangerPreparedSpells, rangerSlotSummary,
   rogueSneakAttackDice, atSlotSummary, atPreparedSpells, atCantrips,
   sorcererSorceryPoints, sorcererCantrips, sorcererPreparedSpells, sorcererSlotSummary,
+  warlockSlotLevel, warlockSlotCount, warlockPreparedSpells, warlockCantrips, warlockInvocations,
 } from './constants.js'
+
 
 const PHASE = {
   TITLE: 'title',
@@ -180,6 +184,7 @@ export default function App() {
     const isRanger    = p.class === 'Ranger'
     const isRogue     = p.class === 'Rogue'
     const isSorcerer  = p.class === 'Sorcerer'
+    const isWarlock   = p.class === 'Warlock'
  
     // ── Fighter ──────────────────────────────────────────────────────────────
     const secondWindUses  = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
@@ -248,6 +253,13 @@ export default function App() {
     const sorcererKnownCantrips = isSorcerer ? sorcererCantrips(newLevel) : 0
     const sorcererPrepared   = isSorcerer ? sorcererPreparedSpells(newLevel) : 0
     const sorcererSlots      = isSorcerer ? sorcererSlotSummary(newLevel) : ''
+
+        // ── Warlock ───────────────────────────────────────────────────────────────
+    const warlockSlotLvl    = isWarlock ? warlockSlotLevel(newLevel)    : 0
+    const warlockSlotCnt    = isWarlock ? warlockSlotCount(newLevel)    : 0
+    const warlockPrepared   = isWarlock ? warlockPreparedSpells(newLevel) : 0
+    const warlockKnownCantrips = isWarlock ? warlockCantrips(newLevel)  : 0
+    const warlockInvCount   = isWarlock ? warlockInvocations(newLevel)  : 0
  
     // ── ASI ───────────────────────────────────────────────────────────────────
     const asiAvailable = isFighter   ? FIGHTER_ASI_LEVELS.includes(newLevel)
@@ -260,6 +272,7 @@ export default function App() {
       : isRanger     ? RANGER_ASI_LEVELS.includes(newLevel)
       : isRogue      ? ROGUE_ASI_LEVELS.includes(newLevel)
       : isSorcerer   ? SORCERER_ASI_LEVELS.includes(newLevel)
+      : isWarlock    ? WARLOCK_ASI_LEVELS.includes(newLevel)
       : [4, 8, 12, 16, 19].includes(newLevel)
  
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
@@ -274,6 +287,7 @@ export default function App() {
       : isRanger     ? getRangerFeatures(p, newLevel)
       : isRogue      ? getRogueFeatures(p, newLevel)
       : isSorcerer   ? getSorcererFeatures(p, newLevel)
+      : isWarlock    ? getWarlockFeatures(p, newLevel)
       : []
  
     return {
@@ -297,10 +311,10 @@ export default function App() {
       favored_enemy_uses: favoredEnemyUses, ranger_prepared_spells: rangerPrepared, ranger_slot_summary: rangerSlots,
       sneak_attack_dice: sneakAttackDice, at_slot_summary: rogueAtSlots,
       at_prepared_spells: rogueAtPrepared, at_cantrips: rogueAtCantrips,
-      sorcery_points: sorceryPoints,
-      sorcerer_cantrips: sorcererKnownCantrips,
-      sorcerer_prepared_spells: sorcererPrepared,
-      sorcerer_slot_summary: sorcererSlots,
+      sorcery_points: sorceryPoints, sorcerer_cantrips: sorcererKnownCantrips, sorcerer_prepared_spells: sorcererPrepared,
+      sorcerer_slot_summary: sorcererSlots, warlock_slot_level: warlockSlotLvl, warlock_slot_count:    warlockSlotCnt,
+      warlock_prepared_spells: warlockPrepared, warlock_cantrips: warlockKnownCantrips,
+      warlock_invocations: warlockInvCount,
     }
   }
 

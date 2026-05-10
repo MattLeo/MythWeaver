@@ -7,7 +7,8 @@ import {
     getFighterFeatures, getBarbarianFeatures, getBardFeatures,
     getClericFeatures, getDruidFeatures, getMonkFeatures, getPaladinFeatures,    
     RANGER_SUBCLASSES, getRangerFeatures, ROGUE_SUBCLASSES,
-    getRogueFeatures,    SORCERER_SUBCLASSES, getSorcererFeatures,
+    getRogueFeatures, SORCERER_SUBCLASSES, getSorcererFeatures,
+    WARLOCK_SUBCLASSES, getWarlockFeatures,
 } from '../constants.js'
 import { searchSpells } from '../api/client.js'
 
@@ -195,7 +196,8 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         lay_on_hands_pool, paladin_channel_divinity, paladin_prepared_spells, paladin_slot_summary,
         favored_enemy_uses, ranger_prepared_spells, ranger_slot_summary, sneak_attack_dice, at_slot_summary, 
         at_prepared_spells, at_cantrips, sorcery_points, sorcerer_cantrips, sorcerer_prepared_spells, 
-        sorcerer_slot_summary,
+        sorcerer_slot_summary, warlock_slot_level, warlock_slot_count, warlock_prepared_spells,
+        warlock_cantrips, warlock_invocations,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
@@ -208,6 +210,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const isRanger    = player.class === 'Ranger'
     const isRogue     = player.class === 'Rogue'
     const isSorcerer  = player.class === 'Sorcerer'
+    const isWarlock   = player.class === 'Warlock'
 
     const isBattleMaster     = player.subclass === 'Battle Master'
     const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
@@ -313,6 +316,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         : spellResults.filter(s => s.level > 0 && s.level <= 2)
 
     const subclassOptions = isPaladin    ? PALADIN_SUBCLASSES
+        : isWarlock    ? WARLOCK_SUBCLASSES
         : isSorcerer   ? SORCERER_SUBCLASSES
         : isRogue      ? ROGUE_SUBCLASSES
         : isRanger     ? RANGER_SUBCLASSES
@@ -324,6 +328,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         : FIGHTER_SUBCLASSES
  
     const subclassLabel = isPaladin    ? 'Choose your Sacred Oath'
+        : isWarlock    ? 'Choose your Otherworldly Patron'
         : isSorcerer   ? 'Choose your Sorcerous Origin'
         : isRogue      ? 'Choose your Roguish Archetype'
         : isRanger     ? 'Choose your Ranger Conclave'
@@ -485,6 +490,33 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         {new_level === 2 && <div className="lu-info-row"><span>Font of Magic</span><span className="lu-info-val">Slots ↔ SP</span></div>}
                                         {new_level === 5 && <div className="lu-info-row"><span>Sorcerous Restoration</span><span className="lu-info-val">Regain SP on Short Rest</span></div>}
                                         {new_level === 7 && <div className="lu-info-row"><span>Sorcery Incarnate</span><span className="lu-info-val">2 Metamagic per spell</span></div>}
+                                    </>)}
+
+                                    {isWarlock && (<>
+                                        <div className="lu-info-row">
+                                            <span>Pact Magic Slots</span>
+                                            <span className="lu-info-val" style={{ color: '#c4a7e7' }}>
+                                                {warlock_slot_count}×L{warlock_slot_level}
+                                            </span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Prepared Spells</span>
+                                            <span className="lu-info-val" style={{ color: '#c4a7e7' }}>{warlock_prepared_spells}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Cantrips Known</span>
+                                            <span className="lu-info-val">{warlock_cantrips}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Eldritch Invocations</span>
+                                            <span className="lu-info-val">{warlock_invocations}</span>
+                                        </div>
+                                        {new_level === 2  && <div className="lu-info-row"><span>Magical Cunning</span><span className="lu-info-val">Unlocked</span></div>}
+                                        {new_level === 9  && <div className="lu-info-row"><span>Contact Patron</span><span className="lu-info-val">Unlocked</span></div>}
+                                        {new_level === 11 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L6 spell</span></div>}
+                                        {new_level === 13 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L7 spell</span></div>}
+                                        {new_level === 15 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L8 spell</span></div>}
+                                        {new_level === 17 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L9 spell</span></div>}
                                     </>)}
                                 </div>
 

@@ -293,7 +293,20 @@ pub async fn create_campaign(
             tracing::warn!("Failed to seed Sorcerer spell slots: {}", e);
         }
     }
-
+    
+    if p.class == "Warlock" {
+        if let Err(e) = spells_db::seed_warlock_spell_slots(pool, &camp.id, &p.id, 1).await {
+            tracing::warn!("Failed to seed Warlock spell slots: {}", e);
+        }
+        // Learn Eldritch Blast as a cantrip
+        if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Eldritch Blast").await {
+            if let Some(spell_id) = spell["id"].as_str() {
+                let _ = spells_db::learn_spell(
+                    pool, &camp.id, &p.id, spell_id, "cantrip", "warlock"
+                ).await;
+            }
+        }
+    }
 
     if let Err(e) = player::seed_background_proficiencies(
         pool, &camp.id, &p.id,
@@ -531,6 +544,14 @@ pub async fn level_up(
             pool, &campaign_id, &p.id, result.new_level
         ).await {
             tracing::warn!("Failed to update half-caster spell slots: {}", e);
+        }
+    }
+
+    if p.class == "Warlock" {
+        if let Err(e) = spells_db::seed_warlock_spell_slots(
+            pool, &campaign_id, &p.id, result.new_level
+        ).await {
+            tracing::warn!("Failed to update Warlock spell slots: {}", e);
         }
     }
 
@@ -1633,8 +1654,27 @@ async fn seed_class_abilities(
              1, "manual"),
         ],
         "Warlock" => vec![
-            ("Spell Slots", Some("Warlock spell slots — recover on short rest."), 1, "short_rest"),
-            ("Eldritch Blast", Some("Ranged spell attack dealing 1d10 force damage."), 1, "per_turn"),
+            ("Pact Magic",
+             Some("All Pact Magic slots are the same level. Regain ALL slots on Short or Long Rest. \
+                   Slot count and level scale with Warlock level: \
+                   L1: 1×L1, L2: 2×L1, L3-4: 2×L2, L5-6: 2×L3, L7-8: 2×L4, \
+                   L9-10: 2×L5, L11-16: 3×L5, L17-20: 4×L5. \
+                   Magical Cunning (L2): 1-minute rite to regain up to half your max slots. Once per Long Rest. \
+                   Eldritch Master (L20): Magical Cunning regains ALL slots instead."),
+             1, "short_rest"),
+            ("Eldritch Invocations",
+             Some("You know 1 invocation at level 1. Gain more as you level (see PHB table). \
+                   Notable options: Agonizing Blast (+CHA to damage cantrip), Pact of the Blade \
+                   (conjure melee weapon, use CHA for attacks), Pact of the Chain (enhanced familiar), \
+                   Pact of the Tome (Book of Shadows with cantrips and rituals), Devil's Sight \
+                   (see in magical darkness 120 ft), Thirsting Blade (Extra Attack with pact weapon), \
+                   Mystic Arcanum spells (L6-9 once/LR). Replace one invocation per level-up."),
+             1, "manual"),
+            ("Eldritch Blast",
+             Some("Ranged spell attack: one beam dealing 1d10 Force damage per hit. \
+                   Gain additional beams at levels 5 (2 beams), 11 (3 beams), 17 (4 beams). \
+                   Agonizing Blast invocation: add CHA modifier to each beam's damage."),
+             1, "per_turn"),
         ],
         _ => vec![],
     };
@@ -1675,6 +1715,7 @@ async fn seed_level_up_abilities_direct(
         "Ranger"    => seed_level_up_abilities_ranger(pool, campaign_id, player_id, new_level, subclass).await,
         "Rogue"     => seed_level_up_abilities_rogue(pool, campaign_id, player_id, new_level, subclass).await,
         "Sorcerer"  => seed_level_up_abilities_sorcerer(pool, campaign_id, player_id, new_level, subclass).await,
+        "Warlock"   => seed_level_up_abilities_warlock(pool, campaign_id, player_id, new_level, subclass).await,
         _           => {}
     }
 }
@@ -5559,6 +5600,555 @@ async fn seed_level_up_abilities_sorcerer(
                               rolling. You can choose any effect except the final row, and if it \
                               involves a roll, you must make it. Once per Long Rest."),
                         1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_warlock(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    let player = match player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let cha_mod = crate::models::Player::modifier(player.cha).max(1);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            if !has("Magical Cunning") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Magical Cunning",
+                    Some("You can perform an esoteric rite for 1 minute. At the end, regain \
+                          expended Pact Magic slots up to half your maximum (round up). \
+                          Once per Long Rest. \
+                          Level 20 (Eldritch Master): Magical Cunning regains ALL expended slots."),
+                    1, "long_rest").await;
+            }
+        }
+        9 => {
+            if !has("Contact Patron") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Contact Patron",
+                    Some("You always have Contact Other Plane prepared. With this feature, \
+                          cast it without expending a spell slot to contact your patron, \
+                          and automatically succeed on the saving throw. Once per Long Rest."),
+                    1, "long_rest").await;
+            }
+            // Learn Contact Other Plane as always-prepared
+            if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Contact Other Plane").await {
+                if let Some(id) = spell["id"].as_str() {
+                    let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "warlock").await;
+                }
+            }
+        }
+        11 => {
+            if !has("Mystic Arcanum (Level 6)") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Mystic Arcanum (Level 6)",
+                    Some("Your patron grants a magical secret. Choose one level 6 Warlock spell. \
+                          Cast it once without expending a spell slot per Long Rest. \
+                          At levels 13 (L7), 15 (L8), and 17 (L9), gain additional arcanum spells. \
+                          Regain all uses on Long Rest. Can replace one arcanum per level-up."),
+                    1, "long_rest").await;
+            }
+        }
+        13 => {
+            if !has("Mystic Arcanum (Level 7)") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Mystic Arcanum (Level 7)",
+                    Some("Choose one level 7 Warlock spell as an arcanum. Cast it once without \
+                          expending a spell slot per Long Rest."),
+                    1, "long_rest").await;
+            }
+        }
+        15 => {
+            if !has("Mystic Arcanum (Level 8)") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Mystic Arcanum (Level 8)",
+                    Some("Choose one level 8 Warlock spell as an arcanum. Cast it once without \
+                          expending a spell slot per Long Rest."),
+                    1, "long_rest").await;
+            }
+        }
+        17 => {
+            if !has("Mystic Arcanum (Level 9)") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Mystic Arcanum (Level 9)",
+                    Some("Choose one level 9 Warlock spell as an arcanum. Cast it once without \
+                          expending a spell slot per Long Rest."),
+                    1, "long_rest").await;
+            }
+        }
+        20 => {
+            if !has("Eldritch Master") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Eldritch Master",
+                    Some("When you use Magical Cunning, you regain ALL your expended Pact Magic \
+                          spell slots instead of half."),
+                    1, "manual").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Archfey Patron") => match new_level {
+            3 => {
+                if !has("Steps of the Fey") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Steps of the Fey",
+                        Some("Cast Misty Step without expending a spell slot. \
+                              Uses = CHA modifier (min 1). Recharges on Long Rest. \
+                              Each time you cast it, choose one additional effect: \
+                              Refreshing Step — you or a creature within 10 ft gain 1d10 Temp HP. \
+                              Taunting Step — creatures within 5 ft of the space you left make WIS \
+                                save or have Disadvantage on attacks against creatures other than you \
+                                until your next turn. \
+                              Level 6 additional options: \
+                              Disappearing Step — Invisible until start of next turn or until you \
+                                attack/damage/cast. \
+                              Dreadful Step — creatures within 5 ft of space you left or appear \
+                                make WIS save or take 2d10 Psychic."),
+                        cha_mod, "long_rest").await;
+                }
+                if !has("Archfey Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Archfey Spells",
+                        Some("Always prepared: L3: Calm Emotions, Faerie Fire, Misty Step, \
+                              Phantasmal Force, Sleep. L5: Blink, Plant Growth. \
+                              L7: Dominate Beast, Greater Invisibility. \
+                              L9: Dominate Person, Seeming."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Calm Emotions", "Faerie Fire", "Misty Step", "Phantasmal Force", "Sleep"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "archfey_patron").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Blink", "Plant Growth"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "archfey_patron").await;
+                        }
+                    }
+                }
+            }
+            6 => {
+                if !has("Misty Escape") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Misty Escape",
+                        Some("You can cast Misty Step as a Reaction when you take damage. \
+                              Two new Steps of the Fey options are now available: \
+                              Disappearing Step (Invisible until start of next turn or until \
+                                you attack/damage/cast) and Dreadful Step (2d10 Psychic damage \
+                                to creatures within 5 ft of departure or arrival point, WIS save)."),
+                        1, "manual").await;
+                }
+            }
+            7 => {
+                for spell_name in &["Dominate Beast", "Greater Invisibility"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "archfey_patron").await;
+                        }
+                    }
+                }
+            }
+            9 => {
+                for spell_name in &["Dominate Person", "Seeming"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "archfey_patron").await;
+                        }
+                    }
+                }
+            }
+            10 => {
+                if !has("Beguiling Defenses") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Beguiling Defenses",
+                        Some("You are immune to the Charmed condition. \
+                              Reaction: when a creature you can see hits you with an attack roll, \
+                              reduce damage taken by half (round down) and force the attacker to make \
+                              a WIS save (DC = spell save DC). On a failed save, attacker takes \
+                              Psychic damage equal to the damage you take. \
+                              Once per Long Rest, or expend a Pact Magic slot to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            14 => {
+                if !has("Bewitching Magic") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Bewitching Magic",
+                        Some("Immediately after you cast an Enchantment or Illusion spell using \
+                              an action and a spell slot, you can cast Misty Step as part of the \
+                              same action without expending a spell slot."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Celestial Patron") => match new_level {
+            3 => {
+                if !has("Healing Light") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Healing Light",
+                        Some("Pool of d6s = 1 + Warlock level. Bonus Action: heal yourself or \
+                              a creature you can see within 60 ft by expending dice (max dice = \
+                              CHA modifier, min 1). Roll the dice and restore that many HP. \
+                              Pool fully restores on Long Rest."),
+                        new_level + 1, "long_rest").await;
+                }
+                if !has("Celestial Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Celestial Spells",
+                        Some("Always prepared: L3: Aid, Cure Wounds, Guiding Bolt, Lesser Restoration, \
+                              Light, Sacred Flame. L5: Daylight, Revivify. \
+                              L7: Guardian of Faith, Wall of Fire. \
+                              L9: Greater Restoration, Summon Celestial."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Aid", "Cure Wounds", "Guiding Bolt", "Lesser Restoration"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "celestial_patron").await;
+                        }
+                    }
+                }
+                // Light and Sacred Flame are cantrips
+                for spell_name in &["Light", "Sacred Flame"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "cantrip", "celestial_patron").await;
+                        }
+                    }
+                }
+            }
+            4 => {
+                // Update Healing Light pool (increases every level)
+                if let Some(a) = existing.iter().find(|a| a.name == "Healing Light") {
+                    let new_pool = new_level + 1;
+                    let _ = sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?")
+                        .bind(new_pool).bind(new_pool).bind(&a.id)
+                        .execute(pool).await;
+                }
+            }
+            5 => {
+                for spell_name in &["Daylight", "Revivify"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "celestial_patron").await;
+                        }
+                    }
+                }
+                // Update Healing Light pool
+                if let Some(a) = existing.iter().find(|a| a.name == "Healing Light") {
+                    let new_pool = new_level + 1;
+                    let _ = sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?")
+                        .bind(new_pool).bind(new_pool).bind(&a.id).execute(pool).await;
+                }
+            }
+            6 => {
+                if !has("Radiant Soul") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Radiant Soul",
+                        Some("You have Resistance to Radiant damage. Once per turn, when a spell \
+                              you cast deals Radiant or Fire damage, add your CHA modifier to that \
+                              spell's damage against one target."),
+                        1, "manual").await;
+                }
+                // Update Healing Light pool
+                if let Some(a) = existing.iter().find(|a| a.name == "Healing Light") {
+                    let new_pool = new_level + 1;
+                    let _ = sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?")
+                        .bind(new_pool).bind(new_pool).bind(&a.id).execute(pool).await;
+                }
+            }
+            7 => {
+                for spell_name in &["Guardian of Faith", "Wall of Fire"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "celestial_patron").await;
+                        }
+                    }
+                }
+                // Update Healing Light pool
+                if let Some(a) = existing.iter().find(|a| a.name == "Healing Light") {
+                    let new_pool = new_level + 1;
+                    let _ = sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?")
+                        .bind(new_pool).bind(new_pool).bind(&a.id).execute(pool).await;
+                }
+            }
+            8..=20 => {
+                // Update Healing Light pool every level
+                if let Some(a) = existing.iter().find(|a| a.name == "Healing Light") {
+                    let new_pool = new_level + 1;
+                    let _ = sqlx::query("UPDATE abilities SET max_uses = ?, current_uses = ? WHERE id = ?")
+                        .bind(new_pool).bind(new_pool).bind(&a.id).execute(pool).await;
+                }
+                match new_level {
+                    9 => {
+                        for spell_name in &["Greater Restoration", "Summon Celestial"] {
+                            if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                                if let Some(id) = s["id"].as_str() {
+                                    let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "celestial_patron").await;
+                                }
+                            }
+                        }
+                    }
+                    10 => {
+                        if !has("Celestial Resilience") {
+                            let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                                "Celestial Resilience",
+                                Some("Whenever you use Magical Cunning or finish a Short or Long Rest, \
+                                      gain Temporary HP = Warlock level + CHA modifier. \
+                                      Additionally, choose up to 5 creatures you can see — each gains \
+                                      Temporary HP = half your Warlock level + CHA modifier."),
+                                1, "manual").await;
+                        }
+                    }
+                    14 => {
+                        if !has("Searing Vengeance") {
+                            let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                                "Searing Vengeance",
+                                Some("When you or an ally within 60 ft is about to make a Death Saving \
+                                      Throw, unleash radiant energy: the creature regains HP equal to \
+                                      half its max HP and can end the Prone condition. Each creature of \
+                                      your choice within 30 ft of it takes 2d8 + CHA modifier Radiant \
+                                      damage and has the Blinded condition until end of current turn. \
+                                      Once per Long Rest."),
+                                1, "long_rest").await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Fiend Patron") => match new_level {
+            3 => {
+                if !has("Dark One's Blessing") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Dark One's Blessing",
+                        Some("When you or someone within 10 ft of you reduces an enemy to 0 HP, \
+                              you gain Temporary HP equal to your CHA modifier + Warlock level \
+                              (minimum 1)."),
+                        1, "manual").await;
+                }
+                if !has("Fiend Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Fiend Spells",
+                        Some("Always prepared: L3: Burning Hands, Command, Scorching Ray, Suggestion. \
+                              L5: Fireball, Stinking Cloud. L7: Fire Shield, Wall of Fire. \
+                              L9: Geas, Insect Plague."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Burning Hands", "Command", "Scorching Ray", "Suggestion"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "fiend_patron").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Fireball", "Stinking Cloud"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "fiend_patron").await;
+                        }
+                    }
+                }
+            }
+            6 => {
+                if !has("Dark One's Own Luck") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Dark One's Own Luck",
+                        Some("When you make an ability check or saving throw, add 1d10 to the roll \
+                              (after seeing the roll, before effects occur). \
+                              Uses = CHA modifier (min 1), max once per roll. Recharges on Long Rest."),
+                        cha_mod, "long_rest").await;
+                }
+            }
+            7 => {
+                for spell_name in &["Fire Shield", "Wall of Fire"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "fiend_patron").await;
+                        }
+                    }
+                }
+            }
+            9 => {
+                for spell_name in &["Geas", "Insect Plague"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "fiend_patron").await;
+                        }
+                    }
+                }
+            }
+            10 => {
+                if !has("Fiendish Resilience") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Fiendish Resilience",
+                        Some("Choose one damage type (other than Force) whenever you finish a \
+                              Short or Long Rest. You have Resistance to that damage type until \
+                              you choose a different one."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Hurl Through Hell") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Hurl Through Hell",
+                        Some("Once per turn when you hit a creature with an attack roll, try to \
+                              transport it through the Lower Planes. Target makes a CHA save (DC = \
+                              spell save DC) or disappears through a nightmare landscape until end \
+                              of your next turn. Non-Fiends take 8d10 Psychic damage and have the \
+                              Incapacitated condition until they return to their space. \
+                              Once per Long Rest, or expend a Pact Magic slot to restore."),
+                        1, "long_rest").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Great Old One Patron") => match new_level {
+            3 => {
+                if !has("Awakened Mind") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Awakened Mind",
+                        Some("Bonus Action: choose one creature you can see within 30 ft. You and \
+                              the target can communicate telepathically while within CHA modifier \
+                              miles of each other (min 1 mile). Requires a shared language. \
+                              Lasts Warlock level minutes. Ends early if you connect to a different \
+                              creature."),
+                        1, "manual").await;
+                }
+                if !has("Psychic Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Psychic Spells",
+                        Some("When you cast a Warlock spell that deals damage, you can change its \
+                              damage type to Psychic. When you cast a Warlock spell that is an \
+                              Enchantment or Illusion, you can do so without Verbal or Somatic \
+                              components."),
+                        1, "manual").await;
+                }
+                if !has("Great Old One Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Great Old One Spells",
+                        Some("Always prepared: L3: Detect Thoughts, Dissonant Whispers, \
+                              Phantasmal Force, Tasha's Hideous Laughter. \
+                              L5: Clairvoyance, Hunger of Hadar. \
+                              L7: Confusion, Summon Aberration. \
+                              L9: Modify Memory, Telekinesis."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Detect Thoughts", "Dissonant Whispers", "Phantasmal Force", "Tasha's Hideous Laughter"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "great_old_one").await;
+                        }
+                    }
+                }
+            }
+            5 => {
+                for spell_name in &["Clairvoyance", "Hunger of Hadar"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "great_old_one").await;
+                        }
+                    }
+                }
+            }
+            6 => {
+                if !has("Clairvoyant Combatant") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Clairvoyant Combatant",
+                        Some("When you form a telepathic bond with Awakened Mind, force that creature \
+                              to make a WIS save (DC = spell save DC). On a failed save, the creature \
+                              has Disadvantage on attack rolls against you, and you have Advantage on \
+                              attack rolls against it for the bond's duration. \
+                              Once per Short or Long Rest, or expend a Pact Magic slot to restore."),
+                        1, "short_rest").await;
+                }
+            }
+            7 => {
+                for spell_name in &["Confusion", "Summon Aberration"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "great_old_one").await;
+                        }
+                    }
+                }
+            }
+            9 => {
+                for spell_name in &["Modify Memory", "Telekinesis"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "great_old_one").await;
+                        }
+                    }
+                }
+            }
+            10 => {
+                if !has("Eldritch Hex") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Eldritch Hex",
+                        Some("You always have the Hex spell prepared. When you cast Hex and choose \
+                              an ability, the target also has Disadvantage on saving throws of the \
+                              chosen ability for the duration of the spell."),
+                        1, "manual").await;
+                }
+                if !has("Thought Shield") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Thought Shield",
+                        Some("Your thoughts can't be read by telepathy or other means unless you \
+                              allow it. You have Resistance to Psychic damage. Whenever a creature \
+                              deals Psychic damage to you, that creature takes the same amount of \
+                              damage that you take."),
+                        1, "manual").await;
+                }
+                if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Hex").await {
+                    if let Some(id) = spell["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "great_old_one").await;
+                    }
+                }
+            }
+            14 => {
+                if !has("Create Thrall") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Create Thrall",
+                        Some("When you cast Summon Aberration, you can modify it to not require \
+                              Concentration (duration becomes 1 minute). The summoned Aberration \
+                              gains Temporary HP = Warlock level + CHA modifier. The first time \
+                              each turn the Aberration hits a creature under your Hex, it deals \
+                              extra Psychic damage equal to Hex's bonus damage."),
+                        1, "manual").await;
                 }
             }
             _ => {}

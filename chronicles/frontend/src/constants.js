@@ -1492,3 +1492,120 @@ export function sorcererSlotSummary(level) {
     }
     return (table[level] || table[20]).filter(s => s > 0).join('/')
 }
+
+// ─── Warlock ──────────────────────────────────────────────────────────────────
+ 
+export const WARLOCK_SUBCLASSES = [
+    {
+        name: 'Archfey Patron',
+        desc: 'Bargain with whimsical fey. Misty Step at will, Misty Escape reactions, and the ability to weave teleportation into your spellcasting at level 14.',
+    },
+    {
+        name: 'Celestial Patron',
+        desc: 'Call on the power of the heavens. Healing Light pool to restore HP, Radiant Soul damage boost, and Searing Vengeance to save dying allies.',
+    },
+    {
+        name: 'Fiend Patron',
+        desc: 'Make a deal with the lower planes. Temp HP on kills, Dark One\'s Own Luck to boost rolls, and Hurl Through Hell at level 14.',
+    },
+    {
+        name: 'Great Old One Patron',
+        desc: 'Unearth forbidden lore of ineffable beings. Telepathic Awakened Mind, Psychic Spells without components, and Create Thrall at level 14.',
+    },
+]
+ 
+export const WARLOCK_BASE_FEATURES = {
+    1:  ['Eldritch Invocations', 'Pact Magic'],
+    2:  ['Magical Cunning'],
+    3:  ['Warlock Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  [],
+    6:  ['Subclass Feature'],
+    7:  [],
+    8:  ['Ability Score Improvement'],
+    9:  ['Contact Patron'],
+    10: ['Subclass Feature'],
+    11: ['Mystic Arcanum (Level 6 Spell)'],
+    12: ['Ability Score Improvement'],
+    13: ['Mystic Arcanum (Level 7 Spell)'],
+    14: ['Subclass Feature'],
+    15: ['Mystic Arcanum (Level 8 Spell)'],
+    16: ['Ability Score Improvement'],
+    17: ['Mystic Arcanum (Level 9 Spell)'],
+    18: [],
+    19: ['Epic Boon'],
+    20: ['Eldritch Master'],
+}
+ 
+export const WARLOCK_SUBCLASS_FEATURES = {
+    'Archfey Patron': {
+        3:  ['Archfey Spells', 'Steps of the Fey'],
+        6:  ['Misty Escape'],
+        10: ['Beguiling Defenses'],
+        14: ['Bewitching Magic'],
+    },
+    'Celestial Patron': {
+        3:  ['Celestial Spells', 'Healing Light'],
+        6:  ['Radiant Soul'],
+        10: ['Celestial Resilience'],
+        14: ['Searing Vengeance'],
+    },
+    'Fiend Patron': {
+        3:  ["Dark One's Blessing", 'Fiend Spells'],
+        6:  ["Dark One's Own Luck"],
+        10: ['Fiendish Resilience'],
+        14: ['Hurl Through Hell'],
+    },
+    'Great Old One Patron': {
+        3:  ['Awakened Mind', 'Great Old One Spells', 'Psychic Spells'],
+        6:  ['Clairvoyant Combatant'],
+        10: ['Eldritch Hex', 'Thought Shield'],
+        14: ['Create Thrall'],
+    },
+}
+ 
+export const WARLOCK_ASI_LEVELS = [4, 8, 12, 16]
+ 
+export function getWarlockFeatures(player, newLevel) {
+    const base = (WARLOCK_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (WARLOCK_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+// Pact Magic slot level (all slots are the same level)
+export function warlockSlotLevel(level) {
+    if (level >= 9) return 5
+    if (level >= 7) return 4
+    if (level >= 5) return 3
+    if (level >= 3) return 2
+    return 1
+}
+ 
+// Number of Pact Magic spell slots
+export function warlockSlotCount(level) {
+    if (level >= 17) return 4
+    if (level >= 11) return 3
+    if (level >= 2)  return 2
+    return 1
+}
+ 
+// Prepared spells from PHB table
+export function warlockPreparedSpells(level) {
+    const table = [0,2,3,4,5,6,7,8,9,10,10,11,11,12,12,13,13,14,14,15,15]
+    return table[level] || 15
+}
+ 
+// Cantrips: 2 at L1, 3 at L4, 4 at L10
+export function warlockCantrips(level) {
+    if (level >= 10) return 4
+    if (level >= 4)  return 3
+    return 2
+}
+ 
+// Eldritch Invocations known from PHB table
+export function warlockInvocations(level) {
+    const table = [0,1,3,3,3,5,5,6,6,7,7,7,8,8,8,9,9,9,10,10,10]
+    return table[level] || 10
+}

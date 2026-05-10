@@ -544,6 +544,55 @@ pub async fn seed_arcane_trickster_spell_slots(
     Ok(())
 }
 
+pub fn warlock_slot_table(warlock_level: i64) -> (i64, i64) {
+    // Returns (slot_count, slot_level)
+    let slot_level = match warlock_level {
+        1..=2   => 1,
+        3..=4   => 2,
+        5..=6   => 3,
+        7..=8   => 4,
+        _       => 5,
+    };
+    let slot_count = match warlock_level {
+        1       => 1,
+        2..=10  => 2,
+        11..=16 => 3,
+        _       => 4,
+    };
+    (slot_count, slot_level)
+}
+ 
+pub async fn seed_warlock_spell_slots(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    warlock_level: i64,
+) -> Result<()> {
+    let (slot_count, slot_level) = warlock_slot_table(warlock_level);
+ 
+    // Delete ALL existing Pact Magic slots (1-5) since the active level may change.
+    // We keep only the current level's slots.
+    for level in 1i64..=5 {
+        sqlx::query!(
+            "DELETE FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+            player_id, level
+        )
+        .execute(pool).await?;
+    }
+ 
+    // Insert the single slot level with the correct count
+    let id = Uuid::new_v4().to_string();
+    sqlx::query!(
+        "INSERT INTO spell_slots
+         (id, campaign_id, player_id, slot_level, current_slots, max_slots)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        id, campaign_id, player_id, slot_level, slot_count, slot_count
+    )
+    .execute(pool).await?;
+ 
+    Ok(())
+}
+
 /// EK spell slot table: returns (level1, level2, level3, level4) max slots
 pub fn ek_slot_table(fighter_level: i64) -> (i64, i64, i64, i64) {
     match fighter_level {
