@@ -8,7 +8,8 @@ import {
     getClericFeatures, getDruidFeatures, getMonkFeatures, getPaladinFeatures,    
     RANGER_SUBCLASSES, getRangerFeatures, ROGUE_SUBCLASSES,
     getRogueFeatures, SORCERER_SUBCLASSES, getSorcererFeatures,
-    WARLOCK_SUBCLASSES, getWarlockFeatures,
+    WARLOCK_SUBCLASSES, getWarlockFeatures, WIZARD_SUBCLASSES,
+    getWizardFeatures,
 } from '../constants.js'
 import { searchSpells } from '../api/client.js'
 
@@ -197,7 +198,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         favored_enemy_uses, ranger_prepared_spells, ranger_slot_summary, sneak_attack_dice, at_slot_summary, 
         at_prepared_spells, at_cantrips, sorcery_points, sorcerer_cantrips, sorcerer_prepared_spells, 
         sorcerer_slot_summary, warlock_slot_level, warlock_slot_count, warlock_prepared_spells,
-        warlock_cantrips, warlock_invocations,
+        warlock_cantrips, warlock_invocations, wizard_cantrips, wizard_prepared_spells, wizard_slot_summary,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
@@ -211,6 +212,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const isRogue     = player.class === 'Rogue'
     const isSorcerer  = player.class === 'Sorcerer'
     const isWarlock   = player.class === 'Warlock'
+    const isWizard    = player.class === 'Wizard'
 
     const isBattleMaster     = player.subclass === 'Battle Master'
     const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
@@ -316,6 +318,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         : spellResults.filter(s => s.level > 0 && s.level <= 2)
 
     const subclassOptions = isPaladin    ? PALADIN_SUBCLASSES
+        : isWizard     ? WIZARD_SUBCLASSES
         : isWarlock    ? WARLOCK_SUBCLASSES
         : isSorcerer   ? SORCERER_SUBCLASSES
         : isRogue      ? ROGUE_SUBCLASSES
@@ -328,6 +331,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         : FIGHTER_SUBCLASSES
  
     const subclassLabel = isPaladin    ? 'Choose your Sacred Oath'
+        : isWizard     ? 'Choose your Arcane Tradition'
         : isWarlock    ? 'Choose your Otherworldly Patron'
         : isSorcerer   ? 'Choose your Sorcerous Origin'
         : isRogue      ? 'Choose your Roguish Archetype'
@@ -517,6 +521,28 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         {new_level === 13 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L7 spell</span></div>}
                                         {new_level === 15 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L8 spell</span></div>}
                                         {new_level === 17 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L9 spell</span></div>}
+                                    </>)}
+
+                                    {isWizard && (<>
+                                        <div className="lu-info-row">
+                                            <span>Cantrips Known</span>
+                                            <span className="lu-info-val">{wizard_cantrips}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Prepared Spells</span>
+                                            <span className="lu-info-val">{wizard_prepared_spells}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Spell Slots</span>
+                                            <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{wizard_slot_summary}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>New Spellbook Spells</span>
+                                            <span className="lu-info-val">{new_level === 1 ? 6 : 2}</span>
+                                        </div>
+                                        {new_level === 5  && <div className="lu-info-row"><span>Memorize Spell</span><span className="lu-info-val">Short Rest swap</span></div>}
+                                        {new_level === 18 && <div className="lu-info-row"><span>Spell Mastery</span><span className="lu-info-val">L1+L2 at will</span></div>}
+                                        {new_level === 20 && <div className="lu-info-row"><span>Signature Spells</span><span className="lu-info-val">2×L3 free/rest</span></div>}
                                     </>)}
                                 </div>
 

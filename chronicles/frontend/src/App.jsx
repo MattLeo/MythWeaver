@@ -17,12 +17,12 @@ import {
   getFighterFeatures, getBarbarianFeatures, getBardFeatures,
   getClericFeatures, getDruidFeatures, getMonkFeatures,
   getPaladinFeatures, getRangerFeatures, getRogueFeatures,
-  getSorcererFeatures, getWarlockFeatures,
+  getSorcererFeatures, getWarlockFeatures, getWizardFeatures,
   hitDieForClass, proficiencyForLevel,
   FIGHTER_ASI_LEVELS, BARBARIAN_ASI_LEVELS, BARD_ASI_LEVELS,
   CLERIC_ASI_LEVELS, DRUID_ASI_LEVELS, MONK_ASI_LEVELS,
   PALADIN_ASI_LEVELS, RANGER_ASI_LEVELS, ROGUE_ASI_LEVELS,
-  SORCERER_ASI_LEVELS, WARLOCK_ASI_LEVELS,
+  SORCERER_ASI_LEVELS, WARLOCK_ASI_LEVELS, WIZARD_ASI_LEVELS,
   barbarianRageUses, barbarianRageDamage, barbarianWeaponMastery,
   bardInspirationDie, bardPreparedSpells, bardCantrips, bardSlotSummary,
   clericChannelDivinityUses, clericCantrips, clericPreparedSpells, clericSlotSummary,
@@ -33,8 +33,8 @@ import {
   rogueSneakAttackDice, atSlotSummary, atPreparedSpells, atCantrips,
   sorcererSorceryPoints, sorcererCantrips, sorcererPreparedSpells, sorcererSlotSummary,
   warlockSlotLevel, warlockSlotCount, warlockPreparedSpells, warlockCantrips, warlockInvocations,
+  wizardCantrips, wizardPreparedSpells, wizardSlotSummary,
 } from './constants.js'
-
 
 const PHASE = {
   TITLE: 'title',
@@ -165,7 +165,7 @@ export default function App() {
     setShowLevelUp(true)
   }
 
-  const buildLevelUpPreview = (p) => {
+   const buildLevelUpPreview = (p) => {
     const newLevel = p.level + 1
     const conMod   = Math.floor((p.con - 10) / 2)
     const chaMod   = Math.floor((p.cha - 10) / 2)
@@ -185,6 +185,7 @@ export default function App() {
     const isRogue     = p.class === 'Rogue'
     const isSorcerer  = p.class === 'Sorcerer'
     const isWarlock   = p.class === 'Warlock'
+    const isWizard    = p.class === 'Wizard'
  
     // ── Fighter ──────────────────────────────────────────────────────────────
     const secondWindUses  = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
@@ -202,66 +203,49 @@ export default function App() {
       : (isRanger && newLevel >= 5) ? 2
       : 1
  
-    // ── Barbarian ─────────────────────────────────────────────────────────────
     const rageUses   = isBarbarian ? barbarianRageUses(newLevel)   : 0
     const rageDamage = isBarbarian ? barbarianRageDamage(newLevel) : 0
- 
-    // ── Bard ──────────────────────────────────────────────────────────────────
     const bardicDie             = isBard ? bardInspirationDie(newLevel) : 0
     const bardicInspirationUses = isBard ? Math.max(1, chaMod) : 0
     const bardPrepared          = isBard ? bardPreparedSpells(newLevel) : 0
     const bardKnownCantrips     = isBard ? bardCantrips(newLevel) : 0
     const bardSlots             = isBard ? bardSlotSummary(newLevel) : ''
- 
-    // ── Cleric ────────────────────────────────────────────────────────────────
-    const channelDivinityUses = isCleric ? clericChannelDivinityUses(newLevel) : 0
-    const clericKnownCantrips = isCleric ? clericCantrips(newLevel) : 0
-    const clericPrepared      = isCleric ? clericPreparedSpells(newLevel) : 0
-    const clericSlots         = isCleric ? clericSlotSummary(newLevel) : ''
- 
-    // ── Druid ─────────────────────────────────────────────────────────────────
-    const wildShapeUses      = isDruid ? druidWildShapeUses(newLevel) : 0
-    const wildShapeCR        = isDruid ? druidWildShapeCR(newLevel) : ''
-    const druidKnownCantrips = isDruid ? druidCantrips(newLevel) : 0
-    const druidPrepared      = isDruid ? druidPreparedSpells(newLevel) : 0
-    const druidSlots         = isDruid ? druidSlotSummary(newLevel) : ''
- 
-    // ── Monk ──────────────────────────────────────────────────────────────────
-    const focusPoints       = isMonk ? monkFocusPoints(newLevel) : 0
-    const martialArtsDie    = isMonk ? monkMartialArtsDie(newLevel) : 0
-    const unarmoredMovement = isMonk ? monkUnarmoredMovement(newLevel) : 0
- 
-    // ── Paladin ───────────────────────────────────────────────────────────────
-    const layOnHandsPool  = isPaladin ? paladinLayOnHandsPool(newLevel) : 0
-    const paladinCdUses   = isPaladin ? paladinChannelDivinityUses(newLevel) : 0
-    const paladinPrepared = isPaladin ? paladinPreparedSpells(newLevel) : 0
-    const paladinSlots    = isPaladin ? paladinSlotSummary(newLevel) : ''
- 
-    // ── Ranger ────────────────────────────────────────────────────────────────
-    const favoredEnemyUses = isRanger ? rangerFavoredEnemyUses(newLevel) : 0
-    const rangerPrepared   = isRanger ? rangerPreparedSpells(newLevel) : 0
-    const rangerSlots      = isRanger ? rangerSlotSummary(newLevel) : ''
- 
-    // ── Rogue ─────────────────────────────────────────────────────────────────
-    const sneakAttackDice = isRogue ? rogueSneakAttackDice(newLevel) : 0
-    const rogueAtSlots    = isRogue && p.subclass === 'Arcane Trickster' ? atSlotSummary(newLevel) : ''
-    const rogueAtPrepared = isRogue && p.subclass === 'Arcane Trickster' ? atPreparedSpells(newLevel) : 0
-    const rogueAtCantrips = isRogue && p.subclass === 'Arcane Trickster' ? atCantrips(newLevel) : 0
- 
-    // ── Sorcerer ──────────────────────────────────────────────────────────────
-    const sorceryPoints      = isSorcerer ? sorcererSorceryPoints(newLevel) : 0
+    const channelDivinityUses   = isCleric ? clericChannelDivinityUses(newLevel) : 0
+    const clericKnownCantrips   = isCleric ? clericCantrips(newLevel) : 0
+    const clericPrepared        = isCleric ? clericPreparedSpells(newLevel) : 0
+    const clericSlots           = isCleric ? clericSlotSummary(newLevel) : ''
+    const wildShapeUses         = isDruid ? druidWildShapeUses(newLevel) : 0
+    const wildShapeCR           = isDruid ? druidWildShapeCR(newLevel) : ''
+    const druidKnownCantrips    = isDruid ? druidCantrips(newLevel) : 0
+    const druidPrepared         = isDruid ? druidPreparedSpells(newLevel) : 0
+    const druidSlots            = isDruid ? druidSlotSummary(newLevel) : ''
+    const focusPoints           = isMonk ? monkFocusPoints(newLevel) : 0
+    const martialArtsDie        = isMonk ? monkMartialArtsDie(newLevel) : 0
+    const unarmoredMovement     = isMonk ? monkUnarmoredMovement(newLevel) : 0
+    const layOnHandsPool        = isPaladin ? paladinLayOnHandsPool(newLevel) : 0
+    const paladinCdUses         = isPaladin ? paladinChannelDivinityUses(newLevel) : 0
+    const paladinPrepared       = isPaladin ? paladinPreparedSpells(newLevel) : 0
+    const paladinSlots          = isPaladin ? paladinSlotSummary(newLevel) : ''
+    const favoredEnemyUses      = isRanger ? rangerFavoredEnemyUses(newLevel) : 0
+    const rangerPrepared        = isRanger ? rangerPreparedSpells(newLevel) : 0
+    const rangerSlots           = isRanger ? rangerSlotSummary(newLevel) : ''
+    const sneakAttackDice       = isRogue ? rogueSneakAttackDice(newLevel) : 0
+    const rogueAtSlots          = isRogue && p.subclass === 'Arcane Trickster' ? atSlotSummary(newLevel) : ''
+    const rogueAtPrepared       = isRogue && p.subclass === 'Arcane Trickster' ? atPreparedSpells(newLevel) : 0
+    const rogueAtCantrips       = isRogue && p.subclass === 'Arcane Trickster' ? atCantrips(newLevel) : 0
+    const sorceryPoints         = isSorcerer ? sorcererSorceryPoints(newLevel) : 0
     const sorcererKnownCantrips = isSorcerer ? sorcererCantrips(newLevel) : 0
-    const sorcererPrepared   = isSorcerer ? sorcererPreparedSpells(newLevel) : 0
-    const sorcererSlots      = isSorcerer ? sorcererSlotSummary(newLevel) : ''
-
-        // ── Warlock ───────────────────────────────────────────────────────────────
-    const warlockSlotLvl    = isWarlock ? warlockSlotLevel(newLevel)    : 0
-    const warlockSlotCnt    = isWarlock ? warlockSlotCount(newLevel)    : 0
-    const warlockPrepared   = isWarlock ? warlockPreparedSpells(newLevel) : 0
-    const warlockKnownCantrips = isWarlock ? warlockCantrips(newLevel)  : 0
-    const warlockInvCount   = isWarlock ? warlockInvocations(newLevel)  : 0
+    const sorcererPrepared      = isSorcerer ? sorcererPreparedSpells(newLevel) : 0
+    const sorcererSlots         = isSorcerer ? sorcererSlotSummary(newLevel) : ''
+    const warlockSlotLvl        = isWarlock ? warlockSlotLevel(newLevel) : 0
+    const warlockSlotCnt        = isWarlock ? warlockSlotCount(newLevel) : 0
+    const warlockPrepared       = isWarlock ? warlockPreparedSpells(newLevel) : 0
+    const warlockKnownCantrips  = isWarlock ? warlockCantrips(newLevel) : 0
+    const warlockInvCount       = isWarlock ? warlockInvocations(newLevel) : 0
+    const wizardKnownCantrips   = isWizard ? wizardCantrips(newLevel) : 0
+    const wizardPrepared        = isWizard ? wizardPreparedSpells(newLevel) : 0
+    const wizardSlots           = isWizard ? wizardSlotSummary(newLevel) : ''
  
-    // ── ASI ───────────────────────────────────────────────────────────────────
     const asiAvailable = isFighter   ? FIGHTER_ASI_LEVELS.includes(newLevel)
       : isBarbarian  ? BARBARIAN_ASI_LEVELS.includes(newLevel)
       : isBard       ? BARD_ASI_LEVELS.includes(newLevel)
@@ -273,6 +257,7 @@ export default function App() {
       : isRogue      ? ROGUE_ASI_LEVELS.includes(newLevel)
       : isSorcerer   ? SORCERER_ASI_LEVELS.includes(newLevel)
       : isWarlock    ? WARLOCK_ASI_LEVELS.includes(newLevel)
+      : isWizard     ? WIZARD_ASI_LEVELS.includes(newLevel)
       : [4, 8, 12, 16, 19].includes(newLevel)
  
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
@@ -288,6 +273,7 @@ export default function App() {
       : isRogue      ? getRogueFeatures(p, newLevel)
       : isSorcerer   ? getSorcererFeatures(p, newLevel)
       : isWarlock    ? getWarlockFeatures(p, newLevel)
+      : isWizard     ? getWizardFeatures(p, newLevel)
       : []
  
     return {
@@ -311,10 +297,12 @@ export default function App() {
       favored_enemy_uses: favoredEnemyUses, ranger_prepared_spells: rangerPrepared, ranger_slot_summary: rangerSlots,
       sneak_attack_dice: sneakAttackDice, at_slot_summary: rogueAtSlots,
       at_prepared_spells: rogueAtPrepared, at_cantrips: rogueAtCantrips,
-      sorcery_points: sorceryPoints, sorcerer_cantrips: sorcererKnownCantrips, sorcerer_prepared_spells: sorcererPrepared,
-      sorcerer_slot_summary: sorcererSlots, warlock_slot_level: warlockSlotLvl, warlock_slot_count:    warlockSlotCnt,
+      sorcery_points: sorceryPoints, sorcerer_cantrips: sorcererKnownCantrips,
+      sorcerer_prepared_spells: sorcererPrepared, sorcerer_slot_summary: sorcererSlots,
+      warlock_slot_level: warlockSlotLvl, warlock_slot_count: warlockSlotCnt,
       warlock_prepared_spells: warlockPrepared, warlock_cantrips: warlockKnownCantrips,
-      warlock_invocations: warlockInvCount,
+      warlock_invocations: warlockInvCount, wizard_cantrips: wizardKnownCantrips,
+      wizard_prepared_spells: wizardPrepared, wizard_slot_summary: wizardSlots,
     }
   }
 

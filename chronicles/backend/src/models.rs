@@ -210,6 +210,9 @@ pub struct LevelUpResult {
     pub warlock_prepared_spells: i64,
     pub warlock_cantrips: i64,
     pub warlock_invocations: i64,
+    // Wizard
+    pub wizard_cantrips: i64,
+    pub wizard_prepared_spells: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1609,3 +1609,111 @@ export function warlockInvocations(level) {
     const table = [0,1,3,3,3,5,5,6,6,7,7,7,8,8,8,9,9,9,10,10,10]
     return table[level] || 10
 }
+
+// ─── Wizard ───────────────────────────────────────────────────────────────────
+
+export const WIZARD_SUBCLASSES = [
+    {
+        name: 'Abjurer',
+        desc: 'Shield companions and banish foes. Arcane Ward absorbs damage, Projected Ward extends it to allies, and Spell Resistance grants Advantage on saves against spells.',
+    },
+    {
+        name: 'Diviner',
+        desc: 'Learn the secrets of the multiverse. Portent dice let you replace any d20 roll, Expert Divination recovers slots when you scry, and The Third Eye expands your senses.',
+    },
+    {
+        name: 'Evoker',
+        desc: 'Create explosive elemental effects. Potent Cantrip ensures misses still deal damage, Sculpt Spells protects allies in your blasts, and Overchannel maximizes spell damage.',
+    },
+    {
+        name: 'Illusionist',
+        desc: 'Weave subtle spells of deception. Cast illusions without verbal components, summon spectral creatures with Phantasmal Creatures, and make illusions real with Illusory Reality.',
+    },
+]
+
+export const WIZARD_BASE_FEATURES = {
+    1:  ['Spellcasting', 'Ritual Adept', 'Arcane Recovery'],
+    2:  ['Scholar'],
+    3:  ['Wizard Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Memorize Spell'],
+    6:  ['Subclass Feature'],
+    7:  [],
+    8:  ['Ability Score Improvement'],
+    9:  [],
+    10: ['Subclass Feature'],
+    11: [],
+    12: ['Ability Score Improvement'],
+    13: [],
+    14: ['Subclass Feature'],
+    15: [],
+    16: ['Ability Score Improvement'],
+    17: [],
+    18: ['Spell Mastery'],
+    19: ['Epic Boon'],
+    20: ['Signature Spells'],
+}
+
+export const WIZARD_SUBCLASS_FEATURES = {
+    'Abjurer': {
+        3:  ['Abjuration Savant', 'Arcane Ward'],
+        6:  ['Projected Ward'],
+        10: ['Spell Breaker'],
+        14: ['Spell Resistance'],
+    },
+    'Diviner': {
+        3:  ['Divination Savant', 'Portent'],
+        6:  ['Expert Divination'],
+        10: ['The Third Eye'],
+        14: ['Greater Portent'],
+    },
+    'Evoker': {
+        3:  ['Evocation Savant', 'Potent Cantrip'],
+        6:  ['Sculpt Spells'],
+        10: ['Empowered Evocation'],
+        14: ['Overchannel'],
+    },
+    'Illusionist': {
+        3:  ['Illusion Savant', 'Improved Illusions'],
+        6:  ['Phantasmal Creatures'],
+        10: ['Illusory Self'],
+        14: ['Illusory Reality'],
+    },
+}
+
+export const WIZARD_ASI_LEVELS = [4, 8, 12, 16]
+
+export function getWizardFeatures(player, newLevel) {
+    const base = (WIZARD_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (WIZARD_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+
+// Cantrips: 3 at L1, 4 at L4, 5 at L10
+export function wizardCantrips(level) {
+    if (level >= 10) return 5
+    if (level >= 4)  return 4
+    return 3
+}
+
+// Prepared spells from PHB table (INT mod added by player, tracked here as base)
+export function wizardPreparedSpells(level) {
+    const table = [0,4,5,6,7,9,10,11,12,14,15,16,16,17,18,19,21,22,23,24,25]
+    return table[level] || 25
+}
+
+// Full caster slot summary (shared with Bard/Cleric/Druid/Sorcerer)
+export function wizardSlotSummary(level) {
+    const table = {
+        1:[2,0,0,0,0,0,0,0,0], 2:[3,0,0,0,0,0,0,0,0], 3:[4,2,0,0,0,0,0,0,0],
+        4:[4,3,0,0,0,0,0,0,0], 5:[4,3,2,0,0,0,0,0,0], 6:[4,3,3,0,0,0,0,0,0],
+        7:[4,3,3,1,0,0,0,0,0], 8:[4,3,3,2,0,0,0,0,0], 9:[4,3,3,3,1,0,0,0,0],
+        10:[4,3,3,3,2,0,0,0,0], 11:[4,3,3,3,2,1,0,0,0], 12:[4,3,3,3,2,1,0,0,0],
+        13:[4,3,3,3,2,1,1,0,0], 14:[4,3,3,3,2,1,1,0,0], 15:[4,3,3,3,2,1,1,1,0],
+        16:[4,3,3,3,2,1,1,1,0], 17:[4,3,3,3,2,1,1,1,1], 18:[4,3,3,3,3,1,1,1,1],
+        19:[4,3,3,3,3,2,1,1,1], 20:[4,3,3,3,3,2,2,1,1],
+    }
+    return (table[level] || table[20]).filter(s => s > 0).join('/')
+}

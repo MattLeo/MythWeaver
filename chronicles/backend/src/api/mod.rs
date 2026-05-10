@@ -308,6 +308,12 @@ pub async fn create_campaign(
         }
     }
 
+    if p.class == "Wizard" {
+        if let Err(e) = spells_db::seed_full_caster_spell_slots(pool, &camp.id, &p.id, 1).await {
+            tracing::warn!("Failed to seed Wizard spell slots: {}", e);
+        }
+    }
+
     if let Err(e) = player::seed_background_proficiencies(
         pool, &camp.id, &p.id,
         &req.player_background_skill_1,
@@ -530,7 +536,7 @@ pub async fn level_up(
         }
     }
 
-    if matches!(p.class.as_str(), "Bard" | "Cleric" | "Druid" | "Sorcerer") {
+    if matches!(p.class.as_str(), "Bard" | "Cleric" | "Druid" | "Sorcerer" | "Wizard") {
         if let Err(e) = spells_db::seed_full_caster_spell_slots(
             pool, &campaign_id, &p.id, result.new_level
         ).await {
@@ -1676,6 +1682,25 @@ async fn seed_class_abilities(
                    Agonizing Blast invocation: add CHA modifier to each beam's damage."),
              1, "per_turn"),
         ],
+        "Wizard" => vec![
+            ("Arcane Recovery",
+             Some("When you finish a Short Rest, recover expended spell slots with combined level \
+                   ≤ half your Wizard level (round up). No slot of level 6 or higher. \
+                   Once per Long Rest. \
+                   Example: level 4 Wizard can recover up to 2 levels of slots."),
+             1, "long_rest"),
+            ("Ritual Adept",
+             Some("You can cast any spell as a Ritual if it has the Ritual tag and is in your \
+                   spellbook. You don't need to have the spell prepared, but must read from the book."),
+             1, "manual"),
+            ("Spellbook",
+             Some("Your spellbook contains your known spells. Starts with 6 level 1 spells. \
+                   Add 2 Wizard spells per level-up (of a level you can cast). \
+                   You can also copy spells from scrolls or other spellbooks (2 hr + 50 GP per level). \
+                   INT is your spellcasting ability. Use an Arcane Focus or your spellbook as \
+                   a Spellcasting Focus."),
+             1, "manual"),
+        ],
         _ => vec![],
     };
 
@@ -1716,6 +1741,7 @@ async fn seed_level_up_abilities_direct(
         "Rogue"     => seed_level_up_abilities_rogue(pool, campaign_id, player_id, new_level, subclass).await,
         "Sorcerer"  => seed_level_up_abilities_sorcerer(pool, campaign_id, player_id, new_level, subclass).await,
         "Warlock"   => seed_level_up_abilities_warlock(pool, campaign_id, player_id, new_level, subclass).await,
+        "Wizard"    => seed_level_up_abilities_wizard(pool, campaign_id, player_id, new_level, subclass).await,
         _           => {}
     }
 }
@@ -6148,6 +6174,340 @@ async fn seed_level_up_abilities_warlock(
                               gains Temporary HP = Warlock level + CHA modifier. The first time \
                               each turn the Aberration hits a creature under your Hex, it deals \
                               extra Psychic damage equal to Hex's bonus damage."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        _ => {}
+    }
+}
+
+async fn seed_level_up_abilities_wizard(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    let has = |name: &str| existing.iter().any(|a| a.name == name);
+ 
+    let player = match player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+    let int_mod = crate::models::Player::modifier(player.int).max(1);
+ 
+    // ── Base class features ───────────────────────────────────────────────────
+ 
+    match new_level {
+        2 => {
+            if !has("Scholar") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Scholar",
+                    Some("You have Expertise in one of the following skills in which you have \
+                          proficiency: Arcana, History, Investigation, Medicine, Nature, or Religion."),
+                    1, "manual").await;
+            }
+        }
+        5 => {
+            if !has("Memorize Spell") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Memorize Spell",
+                    Some("Whenever you finish a Short Rest, you can study your spellbook and \
+                          replace one of the level 1+ Wizard spells you have prepared for your \
+                          Spellcasting feature with another level 1+ spell from your spellbook."),
+                    1, "manual").await;
+            }
+        }
+        18 => {
+            if !has("Spell Mastery") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Spell Mastery",
+                    Some("Choose one level 1 spell and one level 2 spell from your spellbook that \
+                          have a casting time of an action. You always have those spells prepared \
+                          and can cast them at their lowest level without expending a spell slot. \
+                          To cast either at a higher level, you must expend a slot. \
+                          On Long Rest, you can replace one chosen spell with an eligible spell \
+                          of the same level from your spellbook."),
+                    1, "manual").await;
+            }
+        }
+        20 => {
+            if !has("Signature Spells") {
+                let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                    "Signature Spells",
+                    Some("Choose two level 3 spells from your spellbook as your signature spells. \
+                          You always have them prepared. You can cast each once at level 3 without \
+                          expending a spell slot per Short or Long Rest. To cast at a higher level, \
+                          expend a slot."),
+                    2, "short_rest").await;
+            }
+        }
+        _ => {}
+    }
+ 
+    // ── Subclass features ─────────────────────────────────────────────────────
+ 
+    match subclass {
+ 
+        Some("Abjurer") => match new_level {
+            3 => {
+                if !has("Abjuration Savant") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Abjuration Savant",
+                        Some("Choose two Abjuration spells (level 1-2) to add to your spellbook for \
+                              free. Whenever you gain access to a new spell slot level in this class, \
+                              add one Abjuration Wizard spell of that level to your spellbook for free."),
+                        1, "manual").await;
+                }
+                if !has("Arcane Ward") {
+                    let wiz_level = new_level;
+                    let ward_max = 2 * wiz_level + int_mod;
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Arcane Ward",
+                        Some(&format!(
+                            "When you cast an Abjuration spell with a slot, simultaneously create \
+                             a magical ward with HP max = 2×Wizard level + INT modifier ({} HP). \
+                             Lasts until Long Rest. Damage hits the ward first (applying your \
+                             Resistances/Vulnerabilities). If ward drops to 0, you take overflow. \
+                             Recharge: casting an Abjuration spell with a slot restores 2× the \
+                             slot level HP. Or Bonus Action: expend a slot to restore 2× slot level HP. \
+                             Can't create a new ward until Long Rest.",
+                            ward_max
+                        )),
+                        1, "long_rest").await;
+                }
+            }
+            6 => {
+                if !has("Projected Ward") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Projected Ward",
+                        Some("Reaction: when a creature you can see within 30 ft takes damage, \
+                              cause your Arcane Ward to absorb that damage instead. If this reduces \
+                              the ward to 0 HP, the warded creature takes any remaining damage \
+                              (applying its own Resistances/Vulnerabilities)."),
+                        1, "per_turn").await;
+                }
+            }
+            10 => {
+                if !has("Spell Breaker") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Spell Breaker",
+                        Some("You always have Counterspell and Dispel Magic prepared. \
+                              You can cast Dispel Magic as a Bonus Action. \
+                              You add your Proficiency Bonus to its ability check. \
+                              When you cast either spell with a slot and the spell fails to stop \
+                              a spell, the slot isn't expended."),
+                        1, "manual").await;
+                }
+                for spell_name in &["Counterspell", "Dispel Magic"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "abjurer").await;
+                        }
+                    }
+                }
+            }
+            14 => {
+                if !has("Spell Resistance") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Spell Resistance",
+                        Some("You have Advantage on saving throws against spells. \
+                              You have Resistance to the damage of spells."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Diviner") => match new_level {
+            3 => {
+                if !has("Divination Savant") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Divination Savant",
+                        Some("Choose two Divination spells (level 1-2) to add to your spellbook for \
+                              free. Whenever you gain access to a new spell slot level, add one \
+                              Divination Wizard spell of that level to your spellbook for free."),
+                        1, "manual").await;
+                }
+                if !has("Portent") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Portent",
+                        Some("When you finish a Long Rest, roll two d20s and record the results. \
+                              Before a D20 Test, you can replace it with one of your portent rolls \
+                              (before the roll, once per turn). Each portent roll can be used once. \
+                              Unused rolls are lost on your next Long Rest. \
+                              Level 14 (Greater Portent): roll THREE d20s instead of two."),
+                        2, "long_rest").await;
+                }
+            }
+            6 => {
+                if !has("Expert Divination") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Expert Divination",
+                        Some("When you cast a Divination spell using a level 2+ spell slot, regain \
+                              one expended spell slot. The recovered slot must be lower level than \
+                              the one you expended and no higher than level 5."),
+                        1, "manual").await;
+                }
+            }
+            10 => {
+                if !has("The Third Eye") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "The Third Eye",
+                        Some("Bonus Action: choose one benefit lasting until you start a Short or \
+                              Long Rest. Can't use this feature again until you finish a Short or \
+                              Long Rest. \
+                              Darkvision — gain Darkvision 120 ft. \
+                              Greater Comprehension — read any language. \
+                              See Invisibility — cast See Invisibility without expending a slot."),
+                        1, "short_rest").await;
+                }
+            }
+            14 => {
+                if !has("Greater Portent") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Greater Portent",
+                        Some("Your Portent feature now rolls three d20s each Long Rest instead \
+                              of two, giving you an additional foretelling roll."),
+                        1, "manual").await;
+                }
+                // Update Portent to 3 uses
+                if let Some(a) = existing.iter().find(|a| a.name == "Portent") {
+                    let _ = sqlx::query("UPDATE abilities SET max_uses = 3, current_uses = 3 WHERE id = ?")
+                        .bind(&a.id).execute(pool).await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Evoker") => match new_level {
+            3 => {
+                if !has("Evocation Savant") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Evocation Savant",
+                        Some("Choose two Evocation spells (level 1-2) to add to your spellbook for \
+                              free. Whenever you gain access to a new spell slot level, add one \
+                              Evocation Wizard spell of that level to your spellbook for free."),
+                        1, "manual").await;
+                }
+                if !has("Potent Cantrip") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Potent Cantrip",
+                        Some("When you cast a cantrip at a creature and miss the attack roll or \
+                              the target succeeds on its saving throw, the target takes half the \
+                              cantrip's damage (if any) but suffers no additional effects."),
+                        1, "manual").await;
+                }
+            }
+            6 => {
+                if !has("Sculpt Spells") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Sculpt Spells",
+                        Some("When you cast an Evocation spell that affects other creatures you can \
+                              see, choose a number of them equal to 1 plus the spell's level. Chosen \
+                              creatures automatically succeed on their saving throw against the spell \
+                              and take no damage if they would normally take half on a successful save."),
+                        1, "manual").await;
+                }
+            }
+            10 => {
+                if !has("Empowered Evocation") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Empowered Evocation",
+                        Some("Whenever you cast a Wizard spell from the Evocation school, add your \
+                              Intelligence modifier to one damage roll of that spell."),
+                        1, "manual").await;
+                }
+            }
+            14 => {
+                if !has("Overchannel") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Overchannel",
+                        Some("When you cast a Wizard spell with a slot of levels 1-5 that deals \
+                              damage, you can deal maximum damage with that spell on the turn you cast it. \
+                              First use per Long Rest: no adverse effect. \
+                              Each subsequent use before Long Rest: take 2d12 Necrotic damage per \
+                              spell slot level immediately after casting (ignores Resistance/Immunity). \
+                              Each further use adds 1d12 Necrotic per slot level to the cost."),
+                        1, "manual").await;
+                }
+            }
+            _ => {}
+        },
+ 
+        Some("Illusionist") => match new_level {
+            3 => {
+                if !has("Illusion Savant") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Illusion Savant",
+                        Some("Choose two Illusion spells (level 1-2) to add to your spellbook for \
+                              free. Whenever you gain access to a new spell slot level, add one \
+                              Illusion Wizard spell of that level to your spellbook for free."),
+                        1, "manual").await;
+                }
+                if !has("Improved Illusions") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Improved Illusions",
+                        Some("You can cast Illusion spells without providing Verbal components. \
+                              If an Illusion spell you cast has a range of 10+ feet, the range \
+                              increases by 60 feet. \
+                              You know the Minor Illusion cantrip (if already known, learn a \
+                              different Wizard cantrip; doesn't count against your cantrip total). \
+                              You can create both a sound and an image with a single casting of \
+                              Minor Illusion, and cast it as a Bonus Action."),
+                        1, "manual").await;
+                }
+                // Learn Minor Illusion as a bonus cantrip
+                if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Minor Illusion").await {
+                    if let Some(id) = spell["id"].as_str() {
+                        let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "cantrip", "illusionist").await;
+                    }
+                }
+            }
+            6 => {
+                if !has("Phantasmal Creatures") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Phantasmal Creatures",
+                        Some("You always have Summon Beast and Summon Fey prepared. When casting \
+                              either, you can change its school to Illusion (summoned creature \
+                              appears spectral). \
+                              Free cast (no slot): cast the Illusion version once per Long Rest \
+                              each, but the summoned creature has half its Hit Points. \
+                              Casting with a slot works normally."),
+                        2, "long_rest").await;
+                }
+                for spell_name in &["Summon Beast", "Summon Fey"] {
+                    if let Ok(Some(s)) = spells_db::get_spell_by_name(pool, spell_name).await {
+                        if let Some(id) = s["id"].as_str() {
+                            let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "illusionist").await;
+                        }
+                    }
+                }
+            }
+            10 => {
+                if !has("Illusory Self") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Illusory Self",
+                        Some("Reaction: when a creature hits you with an attack roll, interpose \
+                              an illusory duplicate — the attack automatically misses and the \
+                              illusion dissipates. Once per Short or Long Rest, or expend a \
+                              level 2+ spell slot to restore."),
+                        1, "short_rest").await;
+                }
+            }
+            14 => {
+                if !has("Illusory Reality") {
+                    let _ = world::create_ability(pool, campaign_id, "player", player_id,
+                        "Illusory Reality",
+                        Some("When you cast an Illusion spell with a slot, choose one inanimate, \
+                              nonmagical object that is part of the illusion and make it real as a \
+                              Bonus Action on your turn. The object remains real for 1 minute. \
+                              It can't deal damage or give any conditions during that time. \
+                              Example: create an illusory bridge and make it real to cross a chasm."),
                         1, "manual").await;
                 }
             }

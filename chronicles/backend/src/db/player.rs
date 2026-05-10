@@ -273,6 +273,7 @@ pub async fn level_up_player(
             "Rogue" => (1i64, 0i64, 0i64, 0i64, 0i64),
             "Sorcerer" => (1i64, 0i64, 0i64, 0i64, 0i64),
             "Warlock" => (1i64, 0i64, 0i64, 0i64, 0i64),
+            "Wizard" => (1i64, 0i64, 0i64, 0i64, 0i64),
             _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
         };
  
@@ -317,6 +318,9 @@ pub async fn level_up_player(
     let warlock_cantrips_n      = if player.class == "Warlock" { warlock_cantrips(new_level) } else { 0 };
     let warlock_invocations_n   = if player.class == "Warlock" { warlock_invocations(new_level) } else { 0 };
 
+    let wizard_cantrips_n   = if player.class == "Wizard" { wizard_cantrips(new_level) } else { 0 };
+    let wizard_prepared_n   = if player.class == "Wizard" { wizard_prepared_spells(new_level) } else { 0 };
+
     let asi_available = match player.class.as_str() {
         "Fighter"   => matches!(new_level, 4 | 6 | 8 | 12 | 14 | 16),
         "Barbarian" => matches!(new_level, 4 | 8 | 12 | 16 | 19),
@@ -327,8 +331,9 @@ pub async fn level_up_player(
         "Paladin"   => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Ranger"    => matches!(new_level, 4 | 8 | 12 | 16 | 19),
         "Rogue"     => matches!(new_level, 4 | 8 | 10 | 12 | 16 | 19),
-        "Sorcerer" => matches!(new_level, 4 | 8 | 12 | 16),
-        "Warlock" => matches!(new_level, 4 | 8 | 12 | 16),
+        "Sorcerer"  => matches!(new_level, 4 | 8 | 12 | 16),
+        "Warlock"   => matches!(new_level, 4 | 8 | 12 | 16),
+        "Wizard"    => matches!(new_level, 4 | 8 | 12 | 16),
         _           => Player::is_asi_level(new_level),
     };
  
@@ -559,7 +564,8 @@ pub async fn level_up_player(
         "Ranger"    => ranger_features_at_level(new_level, player.subclass.as_deref()),
         "Rogue"     => rogue_features_at_level(new_level, player.subclass.as_deref()),
         "Sorcerer"  => sorcerer_features_at_level(new_level, player.subclass.as_deref()),
-        "Warlock" => warlock_features_at_level(new_level, player.subclass.as_deref()),
+        "Warlock"   => warlock_features_at_level(new_level, player.subclass.as_deref()),
+        "Wizard"    => wizard_features_at_level(new_level, player.subclass.as_deref()),
         _           => class_features_generic(&player.class, new_level),
     };
  
@@ -568,6 +574,7 @@ pub async fn level_up_player(
         "Bard"    => bard_spell_slots(new_level),
         "Cleric"  => cleric_spell_slots(new_level),
         "Druid"   => cleric_spell_slots(new_level),
+        "Wizard"  => bard_spell_slots(new_level),
         // Paladin and Ranger use the same half-caster table;
         // slots are seeded by seed_half_caster_spell_slots in api/mod.rs
         _         => eldritch_knight_spell_slots(player.subclass.as_deref(), new_level),
@@ -607,6 +614,8 @@ pub async fn level_up_player(
         warlock_prepared_spells: warlock_prepared_n,
         warlock_cantrips: warlock_cantrips_n,
         warlock_invocations: warlock_invocations_n,
+        wizard_cantrips: wizard_cantrips_n,
+        wizard_prepared_spells: wizard_prepared_n,
     })
 }
 
@@ -1836,6 +1845,74 @@ fn warlock_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> 
             6  => features.push("Clairvoyant Combatant".to_string()),
             10 => features.extend(["Eldritch Hex".to_string(), "Thought Shield".to_string()]),
             14 => features.push("Create Thrall".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
+}
+
+// ─── Wizard progression ──────────────────────────────────────────────────────
+
+// ─── Wizard progression ───────────────────────────────────────────────────────
+ 
+/// Cantrips: 3 at L1, 4 at L4, 5 at L10.
+pub fn wizard_cantrips(level: i64) -> i64 {
+    if level >= 10 { 5 } else if level >= 4 { 4 } else { 3 }
+}
+ 
+/// Prepared spells from PHB table (Wizard has highest count of any class).
+pub fn wizard_prepared_spells(level: i64) -> i64 {
+    let table = [0i64,4,5,6,7,9,10,11,12,14,15,16,16,17,18,19,21,22,23,24,25];
+    table.get(level as usize).copied().unwrap_or(25)
+}
+ 
+fn wizard_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Spellcasting".to_string(), "Ritual Adept".to_string(), "Arcane Recovery".to_string()]),
+        2  => features.push("Scholar".to_string()),
+        3  => features.push("Wizard Subclass".to_string()),
+        4  => features.push("Ability Score Improvement".to_string()),
+        5  => features.push("Memorize Spell".to_string()),
+        6  => features.push("Subclass Feature".to_string()),
+        8  => features.push("Ability Score Improvement".to_string()),
+        10 => features.push("Subclass Feature".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        14 => features.push("Subclass Feature".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        18 => features.push("Spell Mastery".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Signature Spells".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("Abjurer") => match level {
+            3  => features.extend(["Abjuration Savant".to_string(), "Arcane Ward".to_string()]),
+            6  => features.push("Projected Ward".to_string()),
+            10 => features.push("Spell Breaker".to_string()),
+            14 => features.push("Spell Resistance".to_string()),
+            _  => {}
+        },
+        Some("Diviner") => match level {
+            3  => features.extend(["Divination Savant".to_string(), "Portent".to_string()]),
+            6  => features.push("Expert Divination".to_string()),
+            10 => features.push("The Third Eye".to_string()),
+            14 => features.push("Greater Portent".to_string()),
+            _  => {}
+        },
+        Some("Evoker") => match level {
+            3  => features.extend(["Evocation Savant".to_string(), "Potent Cantrip".to_string()]),
+            6  => features.push("Sculpt Spells".to_string()),
+            10 => features.push("Empowered Evocation".to_string()),
+            14 => features.push("Overchannel".to_string()),
+            _  => {}
+        },
+        Some("Illusionist") => match level {
+            3  => features.extend(["Illusion Savant".to_string(), "Improved Illusions".to_string()]),
+            6  => features.push("Phantasmal Creatures".to_string()),
+            10 => features.push("Illusory Self".to_string()),
+            14 => features.push("Illusory Reality".to_string()),
             _  => {}
         },
         _ => {}
