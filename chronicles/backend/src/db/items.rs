@@ -196,6 +196,34 @@ pub async fn recalculate_ac(pool: &SqlitePool, player_id: &str) -> Result<i64> {
         10 + dex_mod
     };
 
+        // Defense fighting style: +1 AC while wearing any armor
+    let has_defense_fs = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM player_feats WHERE player_id = ? AND feat_id = 'feat_fs_defense'"
+    )
+    .bind(player_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0) > 0;
+ 
+    if has_defense_fs && is_wearing_armor {
+        final_ac += 1;
+    }
+ 
+    // Medium Armor Master: use DEX +3 instead of +2 if DEX >= 16
+    let has_mam = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM player_feats WHERE player_id = ? AND feat_id = 'feat_medium_armor_master'"
+    )
+    .bind(player_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0) > 0;
+ 
+    if has_mam && equipped_armor_type == "medium" && dex >= 16 {
+        // Replace the cap of +2 DEX bonus with +3
+        // (this needs to be factored in where DEX is applied to medium armor)
+        final_ac += 1;  // +1 on top of the normal +2 cap
+    }
+
     let shield_bonus = if shield.is_some() { 2 } else { 0 };
 
     // Sum up magic AC bonuses from all equipped items

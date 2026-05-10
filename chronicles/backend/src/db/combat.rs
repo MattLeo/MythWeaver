@@ -233,7 +233,21 @@ pub async fn submit_player_initiative(
         .ok_or_else(|| anyhow::anyhow!("No active encounter"))?;
 
     let dex_mod = Player::modifier(player.dex);
-    let final_roll = roll_result + dex_mod;
+    let mut final_roll = roll_result + dex_mod;
+ 
+    // Alert feat: add Proficiency Bonus to initiative
+    let has_alert = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM player_feats WHERE player_id = ? AND feat_id = 'feat_alert'"
+    )
+    .bind(&player.id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0) > 0;
+ 
+    if has_alert {
+        final_roll += player.proficiency_bonus;
+        tracing::debug!("Alert feat: +{} to initiative", player.proficiency_bonus);
+    }
 
     let enemies = get_combat_enemies(pool, &enc.id).await?;
 
@@ -793,7 +807,33 @@ async fn resolve_enemy_turn(
     if is_crit { damage += roll(die_size); }
     damage = damage.max(1);
 
-    let new_hp = (player.current_hp - damage).max(0);
+    let reduced_damage = {
+        let is_bps = matches!(enemy.damage_type.as_str(), "bludgeoning" | "piercing" | "slashing");
+        let has_ham = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM player_feats WHERE player_id = ? AND feat_id = 'feat_heavy_armor_master'"
+        )
+        .bind(&player.id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0) > 0;
+
+        let in_heavy = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM items WHERE owner_id = ? AND equipped_slot = 'armor' AND armor_type = 'heavy'"
+        )
+        .bind(&player.id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0) > 0;
+
+        if is_bps && has_ham && in_heavy {
+            (damage - player.proficiency_bonus).max(0)
+        } else {
+            damage
+        }
+    };
+
+let new_hp = (player.current_hp - reduced_damage).max(0);
+
     crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
 
     Ok(AutoTurnResult {
@@ -1040,7 +1080,33 @@ pub async fn attempt_flee(
         if opp_hits {
             let die_size = parse_die_size(&enemy.damage_die);
             let dmg = (roll(die_size) + enemy.damage_bonus).max(1);
-            let new_hp = (player.current_hp - dmg).max(0);
+
+            let reduced_damage = {
+                let is_bps = matches!(enemy.damage_type.as_str(), "bludgeoning" | "piercing" | "slashing");
+                let has_ham = sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM player_feats WHERE player_id = ? AND feat_id = 'feat_heavy_armor_master'"
+                )
+                .bind(&player.id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0) > 0;
+
+                let in_heavy = sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM items WHERE owner_id = ? AND equipped_slot = 'armor' AND armor_type = 'heavy'"
+                )
+                .bind(&player.id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0) > 0;
+
+                if is_bps && has_ham && in_heavy {
+                    (dmg - player.proficiency_bonus).max(0)
+                } else {
+                    dmg
+                }
+            };
+
+            let new_hp = (player.current_hp - reduced_damage).max(0);
             crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
             format!("{} strikes as an opportunity attack for {} damage!", enemy.name, dmg)
         } else {

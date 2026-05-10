@@ -6,7 +6,17 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::db::{campaign, player, world, items, companions, time, fighter, spells as spells_db};
+use crate::db::{
+    campaign, 
+    player, 
+    world, 
+    items, 
+    companions, 
+    time, 
+    fighter, 
+    spells as spells_db,
+    feats as feats_db
+};
 use crate::llm::{ChatMessage, prompt};
 use crate::models::*;
 use crate::AppState;
@@ -325,6 +335,20 @@ pub async fn create_campaign(
 
     seed_species_abilities(pool, &camp.id, &p.id, &p.race, p.species_subtype.as_deref(), &p).await;
 
+    // ── Background feat ───────────────────────────────────────────────────────
+    if let Some(ref feat_id) = req.background_feat_id {
+        let _ = feats_db::take_feat(
+            pool, &camp.id, &p.id, feat_id,
+            "background", 1,
+            req.background_feat_choices.as_deref(),
+        ).await;
+        apply_feat_effects(
+            pool, &camp.id, &p.id, feat_id,
+            req.background_feat_choices.as_deref(),
+            1,
+        ).await;
+    }
+
     if let Err(e) = time::init_campaign_time(pool, &camp.id).await {
         tracing::warn!("Failed to init campaign time: {}", e);
     }
@@ -416,6 +440,7 @@ pub async fn get_player_state(
     let known_spells = spells_db::get_known_spells(pool, &p.id).await.unwrap_or_default();
     let war_bonds = spells_db::get_war_bonds(pool, &p.id).await.unwrap_or_default();
     let concentration = spells_db::get_concentration(pool, &p.id).await.unwrap_or(None);
+    let player_feats = feats_db::get_player_feats(pool, &p.id).await.unwrap_or_default();
  
     (StatusCode::OK, Json(json!({
         "player": p,
@@ -431,8 +456,8 @@ pub async fn get_player_state(
         "known_spells": known_spells,
         "war_bonds": war_bonds,
         "concentration": concentration,
+        "feats": player_feats,   // ← add this
     })))
-
 }
 
 pub async fn list_campaigns(
@@ -513,7 +538,26 @@ pub async fn level_up(
         }
     }
 
-    if let Some(ref stat1) = req.asi_stat1 {
+    // ── ASI or Feat ───────────────────────────────────────────────────────────
+    if let Some(ref feat_id) = req.feat_id {
+        // Player chose a feat instead of an ASI
+        if let Err(e) = feats_db::take_feat(
+            pool, &campaign_id, &p.id, feat_id,
+            "asi", result.new_level,
+            req.feat_choices.as_deref(),
+        ).await {
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
+        }
+        apply_feat_effects(
+            pool, &campaign_id, &p.id, feat_id,
+            req.feat_choices.as_deref(),
+            result.new_level,
+        ).await;
+        // Always recalculate AC in case a stat or armor proficiency changed
+        let _ = items::recalculate_ac(pool, &p.id).await;
+ 
+    } else if let Some(ref stat1) = req.asi_stat1 {
+        // Player chose the standard ASI
         let stat2 = req.asi_stat2.as_deref();
         if let Err(e) = player::apply_asi(pool, &p.id, stat1, stat2).await {
             return (StatusCode::INTERNAL_SERVER_ERROR,
@@ -7076,5 +7120,622 @@ pub async fn seed_ek_slots_handler(
             (StatusCode::OK, Json(json!({"message": "Spell slots seeded", "spell_slots": slots})))
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+async fn apply_feat_effects(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    feat_id: &str,
+    choices_json: Option<&str>,
+    level: i64,
+) {
+    let choices: serde_json::Value = choices_json
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(serde_json::json!({}));
+ 
+    let player = match player::get_player(pool, player_id).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+ 
+    // ── Helper: apply stat increase ───────────────────────────────────────────
+    let apply_stat = |stat: &str| async move {
+        let _ = player::apply_asi(pool, player_id, stat, None).await;
+    };
+ 
+    // ── Helper: add proficiency ───────────────────────────────────────────────
+    let add_prof = |prof_type: &str, name: &str| async move {
+        let id = uuid::Uuid::new_v4().to_string();
+        let _ = sqlx::query(
+            "INSERT OR IGNORE INTO proficiencies
+             (id, campaign_id, player_id, proficiency_type, name, source)
+             VALUES (?, ?, ?, ?, ?, 'feat')"
+        )
+        .bind(&id).bind(campaign_id).bind(player_id)
+        .bind(prof_type).bind(name)
+        .execute(pool).await;
+    };
+ 
+    // ── Helper: seed ability reference ────────────────────────────────────────
+    let add_ability = |name: &str, desc: &str, uses: i64, refresh: &str| async move {
+        let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+        if !existing.iter().any(|a| a.name == name) {
+            let _ = world::create_ability(
+                pool, campaign_id, "player", player_id, name, Some(desc), uses, refresh
+            ).await;
+        }
+    };
+ 
+    // ── Apply effects per feat ────────────────────────────────────────────────
+    match feat_id {
+ 
+        // ── Origin feats ──────────────────────────────────────────────────────
+ 
+        "feat_alert" => {
+            add_ability("Alert",
+                "Add your Proficiency Bonus to Initiative rolls. After rolling Initiative, \
+                 you can swap your Initiative with one willing ally (neither Incapacitated).",
+                1, "manual").await;
+        }
+ 
+        "feat_crafter" => {
+            add_ability("Crafter",
+                "Proficiency with 3 Artisan's Tools of your choice. 20% discount on nonmagical items. \
+                 Fast Crafting: on Long Rest, craft one item from the Fast Crafting table (lasts until next Long Rest).",
+                1, "long_rest").await;
+        }
+ 
+        "feat_healer" => {
+            add_ability("Healer",
+                "Battle Medic: Utilize action — expend a Healer's Kit use to let a creature within 5 ft \
+                 expend one Hit Die; roll it, creature regains HP = roll + Prof Bonus. \
+                 Healing Rerolls: when you roll a 1 on any healing die (spell or this feat), reroll (must use new roll).",
+                1, "manual").await;
+        }
+ 
+        "feat_lucky" => {
+            let prof = player::Player::proficiency_for_level(player.level);
+            add_ability("Lucky",
+                "Luck Points (= Prof Bonus, regain on Long Rest). \
+                 Spend 1 to give yourself Advantage on a D20 Test (before rolling). \
+                 Spend 1 to impose Disadvantage on an attack roll against you.",
+                prof, "long_rest").await;
+        }
+ 
+        "feat_magic_initiate" => {
+            // Spells are selected by the player in the UI and passed via choices
+            // choices: { "cantrip1": "spell_id", "cantrip2": "spell_id", "spell1": "spell_id",
+            //            "spell_list": "cleric|druid|wizard", "ability": "int|wis|cha" }
+            if let Some(c1) = choices["cantrip1"].as_str() {
+                let _ = spells_db::learn_spell(pool, campaign_id, player_id, c1, "cantrip", "feat_magic_initiate").await;
+            }
+            if let Some(c2) = choices["cantrip2"].as_str() {
+                let _ = spells_db::learn_spell(pool, campaign_id, player_id, c2, "cantrip", "feat_magic_initiate").await;
+            }
+            if let Some(s1) = choices["spell1"].as_str() {
+                let _ = spells_db::learn_spell(pool, campaign_id, player_id, s1, "always_prepared", "feat_magic_initiate").await;
+            }
+        }
+ 
+        "feat_musician" => {
+            add_ability("Encouraging Song",
+                "When you finish a Short or Long Rest, play a Musical Instrument you have proficiency with \
+                 to give Heroic Inspiration to a number of allies equal to your Proficiency Bonus who hear the song.",
+                1, "short_rest").await;
+        }
+ 
+        "feat_savage_attacker" => {
+            add_ability("Savage Attacker",
+                "Once per turn when you hit a target with a weapon, roll the weapon's damage dice twice \
+                 and use either roll against the target.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_tough" => {
+            // +2 HP per character level immediately, then +2 per subsequent level (handled at level-up)
+            let hp_bonus = 2 * level;
+            let _ = sqlx::query(
+                "UPDATE players SET max_hp = max_hp + ?, current_hp = current_hp + ?,
+                 updated_at = datetime('now') WHERE id = ?"
+            )
+            .bind(hp_bonus).bind(hp_bonus).bind(player_id)
+            .execute(pool).await;
+ 
+            add_ability("Tough",
+                "Your max HP increases by 2 each time you gain a character level (already applied at all previous levels).",
+                1, "manual").await;
+        }
+ 
+        // ── General feats ─────────────────────────────────────────────────────
+ 
+        "feat_asi" => {
+            // choices: { "stat1": "str", "amount1": 2 } OR { "stat1": "str", "amount1": 1, "stat2": "dex", "amount2": 1 }
+            if let Some(stat1) = choices["stat1"].as_str() {
+                let amount1 = choices["amount1"].as_i64().unwrap_or(1);
+                for _ in 0..amount1 {
+                    let _ = player::apply_asi(pool, player_id, stat1, None).await;
+                }
+            }
+            if let Some(stat2) = choices["stat2"].as_str() {
+                let _ = player::apply_asi(pool, player_id, stat2, None).await;
+            }
+        }
+ 
+        // Feats that grant +1 to a chosen stat + ability reference:
+        "feat_actor" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Actor",
+                "Advantage on CHA (Deception or Performance) checks while disguised as a specific person. \
+                 Mimicry: can mimic sounds/speech of other creatures.",
+                1, "manual").await;
+        }
+ 
+        "feat_athlete" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Athlete",
+                "Climb Speed = your Speed. Hop Up: stand from Prone with only 5 ft of movement. \
+                 Jumping: make running Long or High Jump after moving only 5 feet.",
+                1, "manual").await;
+        }
+ 
+        "feat_charger" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Charger",
+                "Improved Dash: Speed +10 ft when Dashing. \
+                 Charge Attack: after moving 10+ ft straight toward a target, choose +1d8 damage \
+                 OR push it 10 ft (once per turn, Attack action only).",
+                1, "per_turn").await;
+        }
+ 
+        "feat_chef" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Chef",
+                "Replenishing Meal (Short Rest): cook food for Prof Bonus + 4 creatures — those who eat \
+                 and spend Hit Dice regain extra 1d8 HP. \
+                 Bolstering Treats: Prof Bonus treats (8 hr duration) — Bonus Action to eat one for Temp HP = Prof Bonus.",
+                1, "short_rest").await;
+        }
+ 
+        "feat_crossbow_expert" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Crossbow Expert",
+                "Ignore Loading property on crossbows (can load without a free hand). \
+                 No Disadvantage on crossbow attacks within 5 ft of an enemy. \
+                 Light crossbow dual wielding: add ability modifier to extra attack damage.",
+                1, "manual").await;
+        }
+ 
+        "feat_crusher" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Crusher",
+                "Once per turn when you deal Bludgeoning damage, move target 5 ft to unoccupied space \
+                 (must be no more than one size larger). \
+                 Enhanced Critical: on Bludgeoning crit, attack rolls against that creature have Advantage \
+                 until start of your next turn.",
+                1, "manual").await;
+        }
+ 
+        "feat_defensive_duelist" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Defensive Duelist",
+                "Reaction: when holding a Finesse weapon and hit by a melee attack, add Prof Bonus to your AC, \
+                 potentially causing the attack to miss. Bonus lasts until start of your next turn.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_dual_wielder" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Dual Wielder",
+                "Enhanced Dual Wielding: when attacking with a Light weapon (Attack action), make an extra \
+                 attack as Bonus Action with a different non-Two-Handed Melee weapon (no ability modifier to damage). \
+                 Quick Draw: draw/stow two non-Two-Handed weapons at once.",
+                1, "manual").await;
+        }
+ 
+        "feat_durable" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Durable",
+                "Advantage on Death Saving Throws. \
+                 Speedy Recovery: Bonus Action — expend one Hit Point Die and regain that many HP.",
+                1, "manual").await;
+        }
+ 
+        "feat_elemental_adept" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            let damage_type = choices["damage_type"].as_str().unwrap_or("fire");
+            add_ability(&format!("Elemental Adept ({})", capitalize(damage_type)),
+                &format!("Your spells ignore Resistance to {} damage. When you roll damage for a {} spell, \
+                 treat any 1 on a damage die as a 2.", damage_type, damage_type),
+                1, "manual").await;
+        }
+ 
+        "feat_fey_touched" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            // Learn Misty Step always-prepared
+            if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Misty Step").await {
+                if let Some(id) = spell["id"].as_str() {
+                    let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "feat_fey_touched").await;
+                }
+            }
+            // Learn chosen divination/enchantment spell always-prepared
+            if let Some(spell_id) = choices["spell"].as_str() {
+                let _ = spells_db::learn_spell(pool, campaign_id, player_id, spell_id, "always_prepared", "feat_fey_touched").await;
+            }
+            add_ability("Fey Touched",
+                "Always have Misty Step and one Divination or Enchantment spell prepared. \
+                 Cast each once per Long Rest without a slot. Also castable with spell slots.",
+                1, "long_rest").await;
+        }
+ 
+        "feat_grappler" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Grappler",
+                "Punch and Grab: when you hit with an Unarmed Strike (Attack action), use both Damage \
+                 and Grapple options (once per turn). \
+                 Advantage on attacks against creatures you have Grappled. \
+                 No extra movement to move a Grappled creature your size or smaller.",
+                1, "manual").await;
+        }
+ 
+        "feat_great_weapon_master" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Great Weapon Master",
+                "Heavy Weapon Mastery: when you hit with a Heavy weapon (Attack action), deal extra damage = Prof Bonus. \
+                 Hew: immediately after a Critical Hit with a Melee weapon or reducing a creature to 0 HP, \
+                 make one attack as a Bonus Action.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_heavily_armored" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_prof("armor", "heavy").await;
+            let _ = items::recalculate_ac(pool, player_id).await;
+        }
+ 
+        "feat_heavy_armor_master" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Heavy Armor Master",
+                "When hit by an attack while wearing Heavy armor, reduce Bludgeoning, Piercing, and Slashing \
+                 damage by an amount equal to your Proficiency Bonus.",
+                1, "manual").await;
+        }
+ 
+        "feat_inspiring_leader" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Inspiring Leader",
+                "After a Short or Long Rest, give an inspiring performance. Choose up to 6 allies within 30 ft — \
+                 each gains Temp HP = character level + WIS or CHA modifier (whichever was increased).",
+                1, "short_rest").await;
+        }
+ 
+        "feat_keen_mind" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Keen Mind",
+                "Expertise or proficiency in Arcana, History, Investigation, Nature, or Religion (chosen). \
+                 Quick Study: take the Study action as a Bonus Action.",
+                1, "manual").await;
+        }
+ 
+        "feat_lightly_armored" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_prof("armor", "light").await;
+            add_prof("armor", "shield").await;
+            let _ = items::recalculate_ac(pool, player_id).await;
+        }
+ 
+        "feat_mage_slayer" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Mage Slayer",
+                "Concentration Breaker: when you damage a concentrating creature, it has Disadvantage on \
+                 its Concentration save. \
+                 Guarded Mind (1/Short Rest): when you fail an INT, WIS, or CHA save, succeed instead.",
+                1, "short_rest").await;
+        }
+ 
+        "feat_martial_weapon_training" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_prof("weapon", "martial").await;
+        }
+ 
+        "feat_medium_armor_master" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Medium Armor Master",
+                "While wearing Medium armor, add 3 (instead of 2) to AC if DEX 16 or higher.",
+                1, "manual").await;
+            let _ = items::recalculate_ac(pool, player_id).await;
+        }
+ 
+        "feat_moderately_armored" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_prof("armor", "medium").await;
+            let _ = items::recalculate_ac(pool, player_id).await;
+        }
+ 
+        "feat_mounted_combatant" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Mounted Combatant",
+                "Mounted Strike: Advantage on attacks against unmounted creatures within 5 ft of mount \
+                 (at least one size smaller than mount). \
+                 Leap Aside: mount takes no damage on DEX save for half damage (and half on fail). \
+                 Veer: redirect attacks targeting your mount to hit you instead.",
+                1, "manual").await;
+        }
+ 
+        "feat_observant" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Observant",
+                "Proficiency or Expertise in Insight, Investigation, or Perception (chosen). \
+                 Quick Search: take the Search action as a Bonus Action.",
+                1, "manual").await;
+        }
+ 
+        "feat_piercer" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Piercer",
+                "Puncture: once per turn when you deal Piercing damage, reroll one damage die (must use new roll). \
+                 Enhanced Critical: on Piercing crit, roll one additional damage die.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_poisoner" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_prof("tool", "poisoner's kit").await;
+            add_ability("Poisoner",
+                "Potent Poison: your spells and poison attacks ignore Resistance to Poison damage. \
+                 Brew Poison (1 hr + 50 GP): create Prof Bonus doses. Apply as Bonus Action. \
+                 On hit: CON save or 2d8 Poison damage + Poisoned until end of your next turn.",
+                1, "manual").await;
+        }
+ 
+        "feat_polearm_master" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Polearm Master",
+                "Pole Strike: after attacking with a Quarterstaff, Spear, or Heavy+Reach weapon (Attack action), \
+                 Bonus Action to attack with the other end (1d4 Bludgeoning). \
+                 Reactive Strike: Reaction to attack a creature that enters your reach with such a weapon.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_resilient" => {
+            if let Some(s) = choices["stat"].as_str() {
+                apply_stat(s).await;
+                // Grant saving throw proficiency in the chosen stat
+                add_prof("saving_throw", s).await;
+            }
+        }
+ 
+        "feat_ritual_caster" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Ritual Caster",
+                "Always prepared: ritual spells chosen (equal to Prof Bonus, from level 1 with Ritual tag). \
+                 Quick Ritual (1/Long Rest): cast a prepared ritual at normal action speed without expending a slot.",
+                1, "long_rest").await;
+        }
+ 
+        "feat_sentinel" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Sentinel",
+                "Guardian: Opportunity Attack when a creature within 5 ft takes Disengage or hits a \
+                 target other than you. \
+                 Halt: when you hit a creature with an Opportunity Attack, its Speed becomes 0 for the rest of the turn.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_shadow_touched" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Invisibility").await {
+                if let Some(id) = spell["id"].as_str() {
+                    let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "feat_shadow_touched").await;
+                }
+            }
+            if let Some(spell_id) = choices["spell"].as_str() {
+                let _ = spells_db::learn_spell(pool, campaign_id, player_id, spell_id, "always_prepared", "feat_shadow_touched").await;
+            }
+            add_ability("Shadow Touched",
+                "Always have Invisibility and one Illusion or Necromancy spell prepared. \
+                 Cast each once per Long Rest without a slot. Also castable with spell slots.",
+                1, "long_rest").await;
+        }
+ 
+        "feat_sharpshooter" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Sharpshooter",
+                "Bypass Cover: ranged weapon attacks ignore Half Cover and Three-Quarters Cover. \
+                 Firing in Melee: no Disadvantage on ranged attacks within 5 ft of an enemy. \
+                 Long Shots: no Disadvantage at long range.",
+                1, "manual").await;
+        }
+ 
+        "feat_shield_master" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Shield Master",
+                "Shield Bash: after hitting with a Melee weapon (Attack action), bash with your Shield — \
+                 STR save or push 5 ft / Prone (once per turn). \
+                 Interpose Shield: Reaction on DEX save for half damage — take no damage on success.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_skill_expert" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+        }
+ 
+        "feat_skulker" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Skulker",
+                "Blindsight 10 feet. \
+                 Fog of War: Advantage on DEX (Stealth) checks as part of the Hide action in combat. \
+                 Sniper: missing a hidden attack roll doesn't reveal your location.",
+                1, "manual").await;
+        }
+ 
+        "feat_slasher" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Slasher",
+                "Hamstring: once per turn when you deal Slashing damage, reduce target Speed by 10 ft \
+                 until start of your next turn. \
+                 Enhanced Critical: on Slashing crit, target has Disadvantage on attack rolls until start of your next turn.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_speedy" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            // Persistent +10 Speed — update the player's base speed
+            let _ = sqlx::query(
+                "UPDATE players SET speed = speed + 10, updated_at = datetime('now') WHERE id = ?"
+            )
+            .bind(player_id).execute(pool).await;
+            add_ability("Speedy",
+                "Speed +10 ft (applied permanently). \
+                 Dash over Difficult Terrain: Difficult Terrain doesn't cost extra when Dashing. \
+                 Agile Movement: Opportunity Attacks have Disadvantage against you.",
+                1, "manual").await;
+        }
+ 
+        "feat_spell_sniper" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Spell Sniper",
+                "Bypass Cover: spell attack rolls ignore Half Cover and Three-Quarters Cover. \
+                 Casting in Melee: no Disadvantage on spell attacks within 5 ft of an enemy. \
+                 Increased Range: spells with 10+ ft range requiring attack rolls gain +60 ft range.",
+                1, "manual").await;
+        }
+ 
+        "feat_telekinetic" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Mage Hand").await {
+                if let Some(id) = spell["id"].as_str() {
+                    let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "cantrip", "feat_telekinetic").await;
+                }
+            }
+            add_ability("Telekinetic",
+                "Mage Hand: cast without Verbal/Somatic, can be Invisible, range and distance +30 ft. \
+                 Telekinetic Shove (Bonus Action): one creature within 30 ft makes STR save or moves \
+                 5 ft toward or away from you (your choice).",
+                1, "per_turn").await;
+        }
+ 
+        "feat_telepathic" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Detect Thoughts").await {
+                if let Some(id) = spell["id"].as_str() {
+                    let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "feat_telepathic").await;
+                }
+            }
+            add_ability("Telepathic",
+                "Telepathic Utterance: speak telepathically to any creature you can see within 60 ft \
+                 (one-way; requires shared language). \
+                 Detect Thoughts: always prepared, cast once/LR without a slot.",
+                1, "long_rest").await;
+        }
+ 
+        "feat_war_caster" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("War Caster",
+                "Concentration: Advantage on CON saves to maintain Concentration. \
+                 Reactive Spell: Reaction when a creature leaves your reach — cast a spell at it instead \
+                 of making an Opportunity Attack (action casting time, targets only that creature). \
+                 Somatic Components: perform Somatic components even with weapons or Shield in hand.",
+                1, "manual").await;
+        }
+ 
+        "feat_weapon_master" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Weapon Master",
+                "Use the Mastery property of one Simple or Martial weapon you have proficiency with. \
+                 Change your weapon choice after each Long Rest.",
+                1, "manual").await;
+        }
+ 
+        // ── Epic Boon feats ───────────────────────────────────────────────────
+ 
+        "feat_boon_fortitude" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            let _ = sqlx::query(
+                "UPDATE players SET max_hp = max_hp + 40, current_hp = current_hp + 40,
+                 updated_at = datetime('now') WHERE id = ?"
+            )
+            .bind(player_id).execute(pool).await;
+            add_ability("Boon of Fortitude",
+                "HP maximum +40 (applied). When you regain HP, also regain additional HP = CON modifier (once per turn).",
+                1, "manual").await;
+        }
+ 
+        "feat_boon_speed" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            let _ = sqlx::query(
+                "UPDATE players SET speed = speed + 30, updated_at = datetime('now') WHERE id = ?"
+            )
+            .bind(player_id).execute(pool).await;
+            add_ability("Boon of Speed",
+                "Speed +30 ft (applied). \
+                 Escape Artist: Bonus Action — take Disengage, which also ends the Grappled condition. \
+                 Quickness: Speed +30 ft.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_boon_spell_recall" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Boon of Spell Recall",
+                "Free Casting: whenever you cast a spell with a level 1-4 spell slot, roll 1d4. \
+                 If the result matches the slot's level, the slot isn't expended.",
+                1, "manual").await;
+        }
+ 
+        "feat_boon_night_spirit" => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            add_ability("Boon of the Night Spirit",
+                "Merge with Shadows: while in Dim Light or Darkness, Bonus Action to become Invisible \
+                 (ends on Action/Bonus Action/Reaction). \
+                 Shadowy Form: while in Dim Light or Darkness, Resistance to all damage except Psychic and Radiant.",
+                1, "per_turn").await;
+        }
+ 
+        // All remaining Epic Boon feats: apply stat + seed ability reference
+        feat_id if feat_id.starts_with("feat_boon_") => {
+            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            // The mechanical reference ability is already tracked in the player_feats table;
+            // seed a named ability for LLM DM reference
+            if let Ok(feat) = sqlx::query!("SELECT name, description FROM feats WHERE id = ?", feat_id)
+                .fetch_one(pool).await
+            {
+                add_ability(&feat.name, &feat.description, 1, "long_rest").await;
+            }
+        }
+ 
+        // ── Fighting Style feats ──────────────────────────────────────────────
+        // These are mechanical modifiers — seed as reference abilities.
+        // The actual bonuses (e.g. +2 to ranged attacks) are tracked in the ability
+        // description for the LLM DM. The combat backend applies them as follows:
+        // - Archery: +2 to ranged attack rolls → checked in resolve_player_attack
+        // - Defense: +1 AC in armor → recalculate_ac checks this
+        // - Dueling: +2 damage with single melee weapon → checked in resolve_player_damage
+        feat_id if feat_id.starts_with("feat_fs_") => {
+            if let Ok(feat) = sqlx::query!("SELECT name, description FROM feats WHERE id = ?", feat_id)
+                .fetch_one(pool).await
+            {
+                add_ability(&feat.name, &feat.description, 1, "manual").await;
+            }
+            // Defense fighting style gives a persistent +1 AC — recalculate
+            if feat_id == "feat_fs_defense" {
+                let _ = items::recalculate_ac(pool, player_id).await;
+            }
+        }
+ 
+        _ => {
+            tracing::warn!("apply_feat_effects: unhandled feat '{}'", feat_id);
+        }
+    }
+ 
+    // Always recalculate AC in case armor proficiency changed
+    let _ = items::recalculate_ac(pool, player_id).await;
+}
+ 
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
