@@ -6,7 +6,8 @@ import {
     ALL_MANEUVERS, STAT_KEYS, STAT_LABELS, FIGHTER_ASI_LEVELS,
     getFighterFeatures, getBarbarianFeatures, getBardFeatures,
     getClericFeatures, getDruidFeatures, getMonkFeatures, getPaladinFeatures,    
-    RANGER_SUBCLASSES, getRangerFeatures,
+    RANGER_SUBCLASSES, getRangerFeatures, ROGUE_SUBCLASSES,
+    getRogueFeatures,
 } from '../constants.js'
 import { searchSpells } from '../api/client.js'
 
@@ -192,7 +193,8 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         wild_shape_uses, wild_shape_cr, druid_cantrips, druid_prepared_spells, druid_slot_summary,
         focus_points, martial_arts_die, unarmored_movement,
         lay_on_hands_pool, paladin_channel_divinity, paladin_prepared_spells, paladin_slot_summary,
-        favored_enemy_uses, ranger_prepared_spells, ranger_slot_summary,
+        favored_enemy_uses, ranger_prepared_spells, ranger_slot_summary, sneak_attack_dice, at_slot_summary, 
+        at_prepared_spells, at_cantrips,
     } = levelUpResult
 
     const isFighter   = player.class === 'Fighter'
@@ -213,6 +215,8 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const isExistingEK  = player.subclass === 'Eldritch Knight'
     const isEK          = isEKChosen || isExistingEK
     const needsEKSpells = isEK && (ekNewCantrips(new_level) > 0 || ekNewPrepared(new_level) > 0)
+    const isRogue = player.class === 'Rogue'
+    const isAT    = isRogue && (player.subclass === 'Arcane Trickster')
 
     const steps = useMemo(() => {
         const s = ['summary']
@@ -306,37 +310,25 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         ? spellResults.filter(s => s.level === 0)
         : spellResults.filter(s => s.level > 0 && s.level <= 2)
 
-    const subclassOptions = isPaladin
-        ? PALADIN_SUBCLASSES
-        : isRanger
-            ? RANGER_SUBCLASSES
-            : isMonk
-                ? MONK_SUBCLASSES
-                : isCleric
-                    ? CLERIC_SUBCLASSES
-                    : isDruid
-                        ? DRUID_SUBCLASSES
-                        : isBarbarian
-                            ? BARBARIAN_SUBCLASSES
-                            : isBard
-                                ? BARD_SUBCLASSES
-                                : FIGHTER_SUBCLASSES
+    const subclassOptions = isPaladin   ? PALADIN_SUBCLASSES
+        : isRogue    ? ROGUE_SUBCLASSES
+        : isRanger   ? RANGER_SUBCLASSES
+        : isMonk     ? MONK_SUBCLASSES
+        : isCleric   ? CLERIC_SUBCLASSES
+        : isDruid    ? DRUID_SUBCLASSES
+        : isBarbarian ? BARBARIAN_SUBCLASSES
+        : isBard     ? BARD_SUBCLASSES
+        : FIGHTER_SUBCLASSES
  
-    const subclassLabel = isPaladin
-        ? 'Choose your Sacred Oath'
-        : isRanger
-            ? 'Choose your Ranger Conclave'
-            : isMonk
-                ? 'Choose your Monastic Tradition'
-                : isCleric
-                    ? 'Choose your Divine Domain'
-                    : isDruid
-                        ? 'Choose your Druid Circle'
-                        : isBarbarian
-                            ? 'Choose your Primal Path'
-                            : isBard
-                                ? 'Choose your Bard College'
-                                : 'Choose your Fighter subclass'
+    const subclassLabel = isPaladin   ? 'Choose your Sacred Oath'
+        : isRogue    ? 'Choose your Roguish Archetype'
+        : isRanger   ? 'Choose your Ranger Conclave'
+        : isMonk     ? 'Choose your Monastic Tradition'
+        : isCleric   ? 'Choose your Divine Domain'
+        : isDruid    ? 'Choose your Druid Circle'
+        : isBarbarian ? 'Choose your Primal Path'
+        : isBard     ? 'Choose your Bard College'
+        : 'Choose your Fighter subclass'
 
     const moonCR = player.subclass === 'Circle of the Moon' ? Math.floor(new_level / 3) : null
 
@@ -442,6 +434,30 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         {new_level >= 5 && <div className="lu-info-row"><span>Attacks per Action</span><span className="lu-info-val">{extra_attacks}</span></div>}
                                         {new_level === 6 && <div className="lu-info-row"><span>Roving</span><span className="lu-info-val">+10 ft, Climb & Swim Speed</span></div>}
                                         {new_level === 14 && <div className="lu-info-row"><span>Nature's Veil Uses</span><span className="lu-info-val">{favored_enemy_uses}</span></div>}
+                                    </>)}
+
+                                    {isRogue && (<>
+                                        <div className="lu-info-row">
+                                            <span>Sneak Attack</span>
+                                            <span className="lu-info-val">{sneak_attack_dice}d6</span>
+                                        </div>
+                                        {new_level === 2 && <div className="lu-info-row"><span>Cunning Action</span><span className="lu-info-val">Dash/Disengage/Hide</span></div>}
+                                        {new_level === 5 && <div className="lu-info-row"><span>Cunning Strike</span><span className="lu-info-val">Unlocked</span></div>}
+                                        {new_level === 7 && <div className="lu-info-row"><span>Reliable Talent</span><span className="lu-info-val">9 or lower = 10</span></div>}
+                                        {isAT && at_slot_summary && (<>
+                                            <div className="lu-info-row">
+                                                <span>Spell Slots</span>
+                                                <span className="lu-info-val" style={{ fontSize: '.72rem', color: '#b5a9f5' }}>{at_slot_summary}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Prepared Spells</span>
+                                                <span className="lu-info-val" style={{ color: '#b5a9f5' }}>{at_prepared_spells}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Cantrips Known</span>
+                                                <span className="lu-info-val" style={{ color: '#b5a9f5' }}>{at_cantrips}</span>
+                                            </div>
+                                        </>)}
                                     </>)}
                                 </div>
 

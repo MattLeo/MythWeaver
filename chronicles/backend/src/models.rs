@@ -196,6 +196,10 @@ pub struct LevelUpResult {
     // Ranger
     pub favored_enemy_uses: i64,
     pub ranger_prepared_spells: i64,
+    // Rogue
+    pub sneak_attack_dice: i64,
+    pub at_prepared_spells: i64,
+    pub at_cantrips: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

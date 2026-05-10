@@ -483,6 +483,67 @@ pub async fn seed_half_caster_spell_slots(
     Ok(())
 }
 
+pub fn at_slot_table(rogue_level: i64) -> [i64; 4] {
+    match rogue_level {
+        3 | 4   => [2,0,0,0],
+        5 | 6   => [3,0,0,0],
+        7 | 8 | 9 => [4,2,0,0],
+        10 | 11 | 12 => [4,3,0,0],
+        13 | 14 | 15 => [4,3,2,0],
+        16 | 17 | 18 => [4,3,3,0],
+        19 | 20 => [4,3,3,1],
+        _       => [0,0,0,0],
+    }
+}
+ 
+pub async fn seed_arcane_trickster_spell_slots(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    rogue_level: i64,
+) -> Result<()> {
+    let slots = at_slot_table(rogue_level);
+ 
+    for (i, &max) in slots.iter().enumerate() {
+        let level = (i + 1) as i64;
+ 
+        if max == 0 {
+            sqlx::query!(
+                "DELETE FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+                player_id, level
+            )
+            .execute(pool).await?;
+            continue;
+        }
+ 
+        let existing = sqlx::query!(
+            "SELECT id, current_slots FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+            player_id, level
+        )
+        .fetch_optional(pool).await?;
+ 
+        if let Some(row) = existing {
+            let new_current = row.current_slots.min(max);
+            sqlx::query!(
+                "UPDATE spell_slots SET max_slots = ?, current_slots = ?, updated_at = datetime('now') WHERE id = ?",
+                max, new_current, row.id
+            )
+            .execute(pool).await?;
+        } else {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query!(
+                "INSERT INTO spell_slots
+                 (id, campaign_id, player_id, slot_level, current_slots, max_slots)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                id, campaign_id, player_id, level, max, max
+            )
+            .execute(pool).await?;
+        }
+    }
+ 
+    Ok(())
+}
+
 /// EK spell slot table: returns (level1, level2, level3, level4) max slots
 pub fn ek_slot_table(fighter_level: i64) -> (i64, i64, i64, i64) {
     match fighter_level {

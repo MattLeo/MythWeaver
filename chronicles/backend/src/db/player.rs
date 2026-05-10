@@ -270,6 +270,7 @@ pub async fn level_up_player(
             "Monk"    => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
             "Paladin" => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
             "Ranger"  => (if new_level >= 5 { 2i64 } else { 1i64 }, 0i64, 0i64, 0i64, 0i64),
+            "Rogue" => (1i64, 0i64, 0i64, 0i64, 0i64),
             _ => (player.extra_attacks, player.indomitable_max, 0, 2, 0),
         };
  
@@ -476,6 +477,27 @@ pub async fn level_up_player(
             .execute(pool).await?;
         }
     }
+
+    // ── Rogue ────────────────────────────────────────────────────────────────
+
+    if player.class == "Rogue" {
+        let sa_desc = format!(
+            "Once per turn, deal {}d6 extra damage when you hit with a Finesse or Ranged weapon \
+             and have Advantage on the roll, OR an unincapacitated ally is within 5 ft of the target \
+             and you don't have Disadvantage. Same damage type as the weapon. \
+             Cunning Strike (L5): sacrifice 1d6 to add Poison/Trip/Withdraw. \
+             Devious Strikes (L14): Daze (2d6), Knock Out (6d6), Obscure (3d6).",
+            sneak_attack_dice_n
+        );
+        sqlx::query(
+            "UPDATE abilities SET max_uses = ?, description = ? WHERE owner_id = ? AND name = 'Sneak Attack'"
+        )
+        .bind(sneak_attack_dice_n)
+        .bind(&sa_desc)
+        .bind(player_id)
+        .execute(pool).await?;
+    }
+
  
     // ── Feature list ──────────────────────────────────────────────────────────
     let new_features = match player.class.as_str() {
@@ -487,6 +509,7 @@ pub async fn level_up_player(
         "Monk"      => monk_features_at_level(new_level, player.subclass.as_deref()),
         "Paladin"   => paladin_features_at_level(new_level, player.subclass.as_deref()),
         "Ranger"    => ranger_features_at_level(new_level, player.subclass.as_deref()),
+        "Rogue"     => rogue_features_at_level(new_level, player.subclass.as_deref()),
         _           => class_features_generic(&player.class, new_level),
     };
  
@@ -523,6 +546,9 @@ pub async fn level_up_player(
         paladin_prepared_spells: paladin_prepared_n,
         favored_enemy_uses: favored_enemy_uses_n,
         ranger_prepared_spells: ranger_prepared_n,
+        sneak_attack_dice: sneak_attack_dice_n,
+        at_prepared_spells: at_prepared_n,
+        at_cantrips: at_cantrips_n,
     })
 }
 
@@ -1086,11 +1112,27 @@ fn class_features_generic(class: &str, level: i64) -> Vec<String> {
             _  => {}
         },
         "Rogue" => match level {
-            2 => features.push("Cunning Action".to_string()),
-            3 => features.push("Roguish Archetype".to_string()),
-            5 => features.push("Uncanny Dodge".to_string()),
-            7 => features.push("Evasion".to_string()),
-            _ => {}
+            1  => features.extend(["Expertise".to_string(), "Sneak Attack".to_string(), "Thieves' Cant".to_string(), "Weapon Mastery".to_string()]),
+            2  => features.push("Cunning Action".to_string()),
+            3  => features.extend(["Rogue Subclass".to_string(), "Steady Aim".to_string()]),
+            4  => features.push("Ability Score Improvement".to_string()),
+            5  => features.extend(["Cunning Strike".to_string(), "Uncanny Dodge".to_string()]),
+            6  => features.push("Expertise".to_string()),
+            7  => features.extend(["Evasion".to_string(), "Reliable Talent".to_string()]),
+            8  => features.push("Ability Score Improvement".to_string()),
+            9  => features.push("Subclass Feature".to_string()),
+            10 => features.push("Ability Score Improvement".to_string()),
+            11 => features.push("Improved Cunning Strike".to_string()),
+            12 => features.push("Ability Score Improvement".to_string()),
+            13 => features.push("Subclass Feature".to_string()),
+            14 => features.push("Devious Strikes".to_string()),
+            15 => features.push("Slippery Mind".to_string()),
+            16 => features.push("Ability Score Improvement".to_string()),
+            17 => features.push("Subclass Feature".to_string()),
+            18 => features.push("Elusive".to_string()),
+            19 => features.push("Epic Boon".to_string()),
+            20 => features.push("Stroke of Luck".to_string()),
+            _  => {}
         },
         "Wizard" => match level {
             2 => features.push("Arcane Tradition".to_string()),
@@ -1456,6 +1498,90 @@ fn ranger_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
             7  => features.push("Defensive Tactics".to_string()),
             11 => features.push("Superior Hunter's Prey".to_string()),
             15 => features.push("Superior Hunter's Defense".to_string()),
+            _  => {}
+        },
+        _ => {}
+    }
+    features
+}
+
+// ─── Rogue progression ────────────────────────────────────────────────────────
+ 
+/// Sneak Attack dice — 1d6 per 2 rogue levels.
+pub fn rogue_sneak_attack_dice(level: i64) -> i64 {
+    (level + 1) / 2
+}
+ 
+/// Arcane Trickster prepared spell count from PHB table.
+pub fn at_prepared_spells(rogue_level: i64) -> i64 {
+    match rogue_level {
+        3      => 3,  4      => 4,
+        5 | 6  => 4,  7      => 5,
+        8 | 9  => 6,  10     => 7,
+        11 | 12 => 8, 13     => 9,
+        14 | 15 => 10, 16 | 17 => 11,
+        18     => 11, 19     => 12,
+        _      => 13,
+    }
+}
+ 
+/// Arcane Trickster cantrips known (3 at L3, 4 at L10+).
+pub fn at_cantrips(rogue_level: i64) -> i64 {
+    if rogue_level >= 10 { 4 } else { 3 }
+}
+ 
+fn rogue_features_at_level(level: i64, subclass: Option<&str>) -> Vec<String> {
+    let mut features = vec![];
+    match level {
+        1  => features.extend(["Expertise".to_string(), "Sneak Attack".to_string(), "Thieves' Cant".to_string(), "Weapon Mastery".to_string()]),
+        2  => features.push("Cunning Action".to_string()),
+        3  => features.extend(["Rogue Subclass".to_string(), "Steady Aim".to_string()]),
+        4  => features.push("Ability Score Improvement".to_string()),
+        5  => features.extend(["Cunning Strike".to_string(), "Uncanny Dodge".to_string()]),
+        6  => features.push("Expertise".to_string()),
+        7  => features.extend(["Evasion".to_string(), "Reliable Talent".to_string()]),
+        8  => features.push("Ability Score Improvement".to_string()),
+        9  => features.push("Subclass Feature".to_string()),
+        10 => features.push("Ability Score Improvement".to_string()),
+        11 => features.push("Improved Cunning Strike".to_string()),
+        12 => features.push("Ability Score Improvement".to_string()),
+        13 => features.push("Subclass Feature".to_string()),
+        14 => features.push("Devious Strikes".to_string()),
+        15 => features.push("Slippery Mind".to_string()),
+        16 => features.push("Ability Score Improvement".to_string()),
+        17 => features.push("Subclass Feature".to_string()),
+        18 => features.push("Elusive".to_string()),
+        19 => features.push("Epic Boon".to_string()),
+        20 => features.push("Stroke of Luck".to_string()),
+        _  => {}
+    }
+    match subclass {
+        Some("Arcane Trickster") => match level {
+            3  => features.extend(["Spellcasting".to_string(), "Mage Hand Legerdemain".to_string()]),
+            9  => features.push("Magical Ambush".to_string()),
+            13 => features.push("Versatile Trickster".to_string()),
+            17 => features.push("Spell Thief".to_string()),
+            _  => {}
+        },
+        Some("Assassin") => match level {
+            3  => features.extend(["Assassinate".to_string(), "Assassin's Tools".to_string()]),
+            9  => features.push("Infiltration Expertise".to_string()),
+            13 => features.push("Envenom Weapons".to_string()),
+            17 => features.push("Death Strike".to_string()),
+            _  => {}
+        },
+        Some("Soulknife") => match level {
+            3  => features.extend(["Psionic Power".to_string(), "Psychic Blades".to_string()]),
+            9  => features.push("Soul Blades".to_string()),
+            13 => features.push("Psychic Veil".to_string()),
+            17 => features.push("Rend Mind".to_string()),
+            _  => {}
+        },
+        Some("Thief") => match level {
+            3  => features.extend(["Fast Hands".to_string(), "Second-Story Work".to_string()]),
+            9  => features.push("Supreme Sneak".to_string()),
+            13 => features.push("Use Magic Device".to_string()),
+            17 => features.push("Thief's Reflexes".to_string()),
             _  => {}
         },
         _ => {}

@@ -1268,3 +1268,114 @@ export function getBackgroundByName(name) {
 export function getSpeciesByName(name) {
     return SPECIES.find(s => s.name === name) || null
 }
+
+// ─── Rogue ────────────────────────────────────────────────────────────────────
+ 
+export const ROGUE_SUBCLASSES = [
+    {
+        name: 'Arcane Trickster',
+        desc: 'Enhance stealth with arcane spells. Cast Wizard spells, make Mage Hand Invisible, and eventually steal spells cast against you.',
+    },
+    {
+        name: 'Assassin',
+        desc: 'Practice the grim art of death. Advantage on Initiative, devastating first-round strikes, and double damage against surprised targets at level 17.',
+    },
+    {
+        name: 'Soulknife',
+        desc: 'Strike foes with psionic blades. Manifest psychic blades from thin air, teleport with Psychic Teleportation, and stun foes with Rend Mind.',
+    },
+    {
+        name: 'Thief',
+        desc: 'Hunt for treasure as a classic adventurer. Fast Hands for bonus action item use, Second-Story Work for climbing, and Use Magic Device at level 13.',
+    },
+]
+ 
+export const ROGUE_BASE_FEATURES = {
+    1:  ['Expertise', 'Sneak Attack', "Thieves' Cant", 'Weapon Mastery'],
+    2:  ['Cunning Action'],
+    3:  ['Rogue Subclass', 'Steady Aim'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Cunning Strike', 'Uncanny Dodge'],
+    6:  ['Expertise'],
+    7:  ['Evasion', 'Reliable Talent'],
+    8:  ['Ability Score Improvement'],
+    9:  ['Subclass Feature'],
+    10: ['Ability Score Improvement'],
+    11: ['Improved Cunning Strike'],
+    12: ['Ability Score Improvement'],
+    13: ['Subclass Feature'],
+    14: ['Devious Strikes'],
+    15: ['Slippery Mind'],
+    16: ['Ability Score Improvement'],
+    17: ['Subclass Feature'],
+    18: ['Elusive'],
+    19: ['Epic Boon'],
+    20: ['Stroke of Luck'],
+}
+ 
+export const ROGUE_SUBCLASS_FEATURES = {
+    'Arcane Trickster': {
+        3:  ['Spellcasting', 'Mage Hand Legerdemain'],
+        9:  ['Magical Ambush'],
+        13: ['Versatile Trickster'],
+        17: ['Spell Thief'],
+    },
+    'Assassin': {
+        3:  ['Assassinate', "Assassin's Tools"],
+        9:  ['Infiltration Expertise'],
+        13: ['Envenom Weapons'],
+        17: ['Death Strike'],
+    },
+    'Soulknife': {
+        3:  ['Psionic Power', 'Psychic Blades'],
+        9:  ['Soul Blades'],
+        13: ['Psychic Veil'],
+        17: ['Rend Mind'],
+    },
+    'Thief': {
+        3:  ['Fast Hands', 'Second-Story Work'],
+        9:  ['Supreme Sneak'],
+        13: ['Use Magic Device'],
+        17: ["Thief's Reflexes"],
+    },
+}
+ 
+// Rogue ASI levels — note: 5 ASIs total, includes level 10
+export const ROGUE_ASI_LEVELS = [4, 8, 10, 12, 16]
+ 
+export function getRogueFeatures(player, newLevel) {
+    const base = (ROGUE_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (ROGUE_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+// Sneak Attack dice: 1d6 at L1, +1d6 every 2 levels
+export function rogueSneakAttackDice(level) {
+    return Math.ceil(level / 2)
+}
+ 
+// Arcane Trickster spell slot summary
+export function atSlotSummary(rogueLevel) {
+    if (rogueLevel < 3)   return ''
+    if (rogueLevel < 7)   return rogueLevel === 3 ? '2×L1' : '3×L1'
+    if (rogueLevel < 10)  return '4L1/2L2'
+    if (rogueLevel < 13)  return rogueLevel === 10 ? '4L1/3L2' : '4L1/3L2'
+    if (rogueLevel < 16)  return '4L1/3L2/2L3'
+    if (rogueLevel < 19)  return '4L1/3L2/3L3'
+    return '4L1/3L2/3L3/1L4'
+}
+ 
+export function atPreparedSpells(rogueLevel) {
+    const table = {
+        3:3, 4:4, 5:4, 6:4, 7:5, 8:6, 9:6, 10:7,
+        11:8, 12:8, 13:9, 14:10, 15:10, 16:11, 17:11, 18:11, 19:12, 20:13
+    }
+    return table[rogueLevel] || 13
+}
+ 
+// Arcane Trickster cantrips known (3 at L3, +1 at L10)
+export function atCantrips(rogueLevel) {
+    return rogueLevel >= 10 ? 4 : 3
+}

@@ -897,7 +897,8 @@ export default function CombatModal({
     // Any class with a spell list — determines whether spell UI is shown
     const canCastSpells = isEK
         || ['Bard', 'Cleric', 'Druid', 'Paladin'].includes(player?.class)
-        || player?.class === 'Monk' // Warrior of Shadow / Elements get cantrips
+        || player?.class === 'Monk'
+        || (player?.class === 'Rogue' && player?.subclass === 'Arcane Trickster')
 
     // ── Load ──────────────────────────────────────────────────────────────────
     useEffect(() => {
