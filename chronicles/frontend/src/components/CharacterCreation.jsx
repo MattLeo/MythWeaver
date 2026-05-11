@@ -171,7 +171,7 @@ function buildSteps(race, background, playerClass, divineOrder, primalOrder) {
     steps.push('primal_order')
     if (primalOrder === 'Magician') steps.push('magician_cantrip')
   }
-  steps.push('background', 'background_asi', 'stats', 'equipment', 'backstory')
+  steps.push('background', 'background_asi', 'background_feat', 'stats', 'equipment', 'backstory')
   return steps
 }
 
@@ -191,11 +191,21 @@ export default function CharacterCreation({ onComplete }) {
     thaumaturge_cantrip: '',  // Cleric Thaumaturge: chosen extra cantrip
     primal_order: '',         // Druid: "Warden" | "Magician"
     magician_cantrip: '',     // Druid Magician: chosen extra cantrip
+    background_feat_id: '',
+    background_feat_choices: {},
   })
 
   const steps = buildSteps(char.race, char.background, char.player_class, char.divine_order, char.primal_order)
   const [stepIndex, setStepIndex] = useState(0)
   const currentStep = steps[stepIndex]
+  const [originFeats, setOriginFeats] = useState([])
+
+  useEffect(() => {
+    fetch('/api/feats?category=origin')
+      .then(r => r.json())
+      .then(d => setOriginFeats(d.feats || []))
+      .catch(() => { })
+  }, [])
 
   const upd = (k, v) => setChar(c => ({ ...c, [k]: v }))
 
@@ -245,8 +255,9 @@ export default function CharacterCreation({ onComplete }) {
       case 'backstory': return true
       case 'divine_order': return !!char.divine_order
       case 'thaumaturge_cantrip': return !!char.thaumaturge_cantrip
-      case 'primal_order':     return !!char.primal_order
+      case 'primal_order': return !!char.primal_order
       case 'magician_cantrip': return !!char.magician_cantrip
+      case 'background_feat': return !!char.background_feat_id
       default: return true
     }
   }
@@ -261,7 +272,10 @@ export default function CharacterCreation({ onComplete }) {
       player_species_subtype: char.species_subtype || null,
       player_class: char.player_class,
       player_background: char.background,
-      player_background_feat: bg?.feat || null,
+      background_feat_id: char.background_feat_id || null,
+      background_feat_choices: Object.keys(char.background_feat_choices).length > 0
+        ? JSON.stringify(char.background_feat_choices)
+        : null,
       player_background_skill_1: bg?.skills[0] || 'Athletics',
       player_background_skill_2: bg?.skills[1] || 'Perception',
       player_background_tool: bg?.tool || 'None',
@@ -498,6 +512,24 @@ export default function CharacterCreation({ onComplete }) {
           </>
         )
       }
+
+      case 'background_feat':
+        return (
+          <>
+            <h2>Background Feat</h2>
+            <p className="card-sub">Your background grants you one Origin feat.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '.5rem', maxHeight: '340px', overflowY: 'auto' }}>
+              {originFeats.map(feat => (
+                <div key={feat.id}
+                  className={`equip-card${char.background_feat_id === feat.id ? ' sel' : ''}`}
+                  onClick={() => upd('background_feat_id', feat.id)}>
+                  <div className="equip-label">{feat.name}</div>
+                  <div className="equip-desc">{feat.description}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )
 
       case 'stats': {
         const finalStats = STAT_KEYS.map((k, i) => {
@@ -736,7 +768,7 @@ export default function CharacterCreation({ onComplete }) {
               ))}
             </div>
           </>
-        )  
+        )
 
       default:
         return null

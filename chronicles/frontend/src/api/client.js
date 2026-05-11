@@ -472,3 +472,27 @@ export async function summonBondedWeapon(campaignId, itemId) {
   }
   return res.json()
 }
+
+// ─── Feats ───────────────────────────────────────────────────────────────────
+
+export async function listFeats(category = null) {
+    const url = category ? `/api/feats?category=${category}` : '/api/feats'
+    const res = await fetch(url.startsWith('http') ? url : `${BASE.replace('/api', '')}${url}`)
+    if (!res.ok) throw new Error('Failed to list feats')
+    return res.json()
+}
+ 
+export async function getAvailableFeats(campaignId, category = null) {
+    const url = category
+        ? `${BASE}/campaigns/${campaignId}/feats?category=${category}`
+        : `${BASE}/campaigns/${campaignId}/feats`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to get available feats')
+    return res.json()
+}
+ 
+export async function getPlayerFeats(campaignId) {
+    const res = await fetch(`${BASE}/campaigns/${campaignId}/player-feats`)
+    if (!res.ok) throw new Error('Failed to get player feats')
+    return res.json()
+}
