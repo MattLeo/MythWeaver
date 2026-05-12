@@ -4,44 +4,32 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
  
 /// Get all feats, optionally filtered by category.
-pub async fn get_all_feats(
-    pool: &SqlitePool,
-    category: Option<&str>,
-) -> Result<Vec<Value>> {
-    let rows = match category {
-        Some(cat) => {
-            sqlx::query!(
-                "SELECT * FROM feats WHERE category = ? ORDER BY name",
-                cat
-            )
-            .fetch_all(pool)
-            .await?
-        }
-        None => {
-            sqlx::query!("SELECT * FROM feats ORDER BY category, name")
-                .fetch_all(pool)
-                .await?
-        }
-    };
- 
-    let feats = rows.iter().map(|r| json!({
-        "id": r.id,
-        "name": r.name,
-        "category": r.category,
-        "prerequisite_level": r.prerequisite_level,
-        "prerequisite_feature": r.prerequisite_feature,
-        "prerequisite_ability": r.prerequisite_ability,
-        "prerequisite_ability_score": r.prerequisite_ability_score,
-        "description": r.description,
-        "ability_score_options": r.ability_score_options,
-        "ability_score_increase": r.ability_score_increase,
-        "repeatable": r.repeatable,
-        "has_choice": r.has_choice,
-        "choice_description": r.choice_description,
-        "grants_spells": r.grants_spells,
-    })).collect();
- 
-    Ok(feats)
+pub async fn get_all_feats(pool: &SqlitePool, category: Option<&str>) -> Result<Vec<Value>> {
+    let rows = sqlx::query!(
+        "SELECT id, name, category, prerequisite_level, prerequisite_feature,
+         prerequisite_ability, prerequisite_ability_score, description,
+         ability_score_options, ability_score_increase, repeatable, has_choice,
+         choice_description, grants_spells FROM feats ORDER BY category, name"
+    )
+    .fetch_all(pool).await?;
+
+    Ok(rows.iter()
+        .filter(|r| category.map_or(true, |cat| r.category == cat))
+        .map(|r| json!({
+            "id": r.id, "name": r.name, "category": r.category,
+            "prerequisite_level": r.prerequisite_level,
+            "prerequisite_feature": r.prerequisite_feature,
+            "prerequisite_ability": r.prerequisite_ability,
+            "prerequisite_ability_score": r.prerequisite_ability_score,
+            "description": r.description,
+            "ability_score_options": r.ability_score_options,
+            "ability_score_increase": r.ability_score_increase,
+            "repeatable": r.repeatable,
+            "has_choice": r.has_choice,
+            "choice_description": r.choice_description,
+            "grants_spells": r.grants_spells,
+        }))
+        .collect())
 }
  
 /// Get feats available to a player given their level, class, and existing feats.
@@ -206,24 +194,19 @@ pub async fn remove_player_feat(
 }
  
 /// Search feats by name (for UI feat picker).
-pub async fn search_feats(
-    pool: &SqlitePool,
-    query: &str,
-    category: Option<&str>,
-) -> Result<Vec<Value>> {
+pub async fn search_feats(pool: &SqlitePool, query: &str, category: Option<&str>) -> Result<Vec<Value>> {
     let pattern = format!("%{}%", query);
-    let rows = match category {
-        Some(cat) => sqlx::query!(
-            "SELECT * FROM feats WHERE name LIKE ? AND category = ? ORDER BY name LIMIT 20",
-            pattern, cat
-        ).fetch_all(pool).await?,
-        None => sqlx::query!(
-            "SELECT * FROM feats WHERE name LIKE ? ORDER BY name LIMIT 20",
-            pattern
-        ).fetch_all(pool).await?,
-    };
- 
-    let feats = rows.iter().map(|r| json!({
+    let rows = sqlx::query!(
+        "SELECT id, name, category, prerequisite_level, prerequisite_feature,
+         prerequisite_ability, prerequisite_ability_score, description,
+         ability_score_options, ability_score_increase, repeatable, has_choice,
+         choice_description, grants_spells FROM feats
+         WHERE name LIKE ? ORDER BY name LIMIT 20",
+        pattern
+    )
+    .fetch_all(pool).await?;
+
+let feats = rows.iter().map(|r| json!({
         "id": r.id,
         "name": r.name,
         "category": r.category,
@@ -239,6 +222,6 @@ pub async fn search_feats(
         "choice_description": r.choice_description,
         "grants_spells": r.grants_spells,
     })).collect();
- 
+
     Ok(feats)
 }

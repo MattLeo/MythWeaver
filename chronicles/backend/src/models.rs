@@ -667,6 +667,8 @@ pub struct CreateCampaignRequest {
     pub thaumaturge_cantrip: Option<String>,
     pub primal_order: Option<String>, 
     pub magician_cantrip: Option<String>,
+    pub background_feat_id: Option<String>,
+    pub background_feat_choices: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -714,4 +716,6 @@ pub struct LevelUpRequest {
     pub asi_stat2: Option<String>,
     pub new_maneuvers: Option<Vec<String>>,
     pub replaced_maneuver: Option<String>,
+    pub feat_id: Option<String>,
+    pub feat_choices: Option<String>,
 }

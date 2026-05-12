@@ -163,9 +163,9 @@ pub async fn recalculate_ac(pool: &SqlitePool, player_id: &str) -> Result<i64> {
         .bind(player_id)
         .fetch_one(pool)
         .await?;
-
+ 
     let dex_mod = Player::modifier(player.dex);
-
+ 
     // Find equipped armor
     let armor = sqlx::query_as::<_, Item>(
         "SELECT * FROM items WHERE owner_type = 'player' AND owner_id = ?
@@ -174,7 +174,7 @@ pub async fn recalculate_ac(pool: &SqlitePool, player_id: &str) -> Result<i64> {
     .bind(player_id)
     .fetch_optional(pool)
     .await?;
-
+ 
     // Find equipped shield
     let shield = sqlx::query_as::<_, Item>(
         "SELECT * FROM items WHERE owner_type = 'player' AND owner_id = ?
@@ -183,33 +183,8 @@ pub async fn recalculate_ac(pool: &SqlitePool, player_id: &str) -> Result<i64> {
     .bind(player_id)
     .fetch_optional(pool)
     .await?;
-
-    let base_ac = if let Some(armor) = &armor {
-        let base = armor.base_ac.unwrap_or(10);
-        match armor.armor_type.as_deref() {
-            Some("light") => base + dex_mod,
-            Some("medium") => base + dex_mod.min(2),
-            Some("heavy") => base,
-            _ => 10 + dex_mod,
-        }
-    } else {
-        10 + dex_mod
-    };
-
-        // Defense fighting style: +1 AC while wearing any armor
-    let has_defense_fs = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM player_feats WHERE player_id = ? AND feat_id = 'feat_fs_defense'"
-    )
-    .bind(player_id)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(0) > 0;
  
-    if has_defense_fs && is_wearing_armor {
-        final_ac += 1;
-    }
- 
-    // Medium Armor Master: use DEX +3 instead of +2 if DEX >= 16
+    // Medium Armor Master: DEX cap is 3 instead of 2 when DEX >= 16
     let has_mam = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM player_feats WHERE player_id = ? AND feat_id = 'feat_medium_armor_master'"
     )
@@ -218,14 +193,23 @@ pub async fn recalculate_ac(pool: &SqlitePool, player_id: &str) -> Result<i64> {
     .await
     .unwrap_or(0) > 0;
  
-    if has_mam && equipped_armor_type == "medium" && dex >= 16 {
-        // Replace the cap of +2 DEX bonus with +3
-        // (this needs to be factored in where DEX is applied to medium armor)
-        final_ac += 1;  // +1 on top of the normal +2 cap
-    }
-
+    let base_ac = if let Some(ref a) = armor {
+        let base = a.base_ac.unwrap_or(10);
+        match a.armor_type.as_deref() {
+            Some("light")  => base + dex_mod,
+            Some("medium") => {
+                let cap = if has_mam && player.dex >= 16 { 3 } else { 2 };
+                base + dex_mod.min(cap)
+            }
+            Some("heavy")  => base,
+            _              => 10 + dex_mod,
+        }
+    } else {
+        10 + dex_mod
+    };
+ 
     let shield_bonus = if shield.is_some() { 2 } else { 0 };
-
+ 
     // Sum up magic AC bonuses from all equipped items
     let magic_bonus: i64 = sqlx::query_scalar(
         "SELECT COALESCE(SUM(ie.value), 0)
@@ -239,14 +223,27 @@ pub async fn recalculate_ac(pool: &SqlitePool, player_id: &str) -> Result<i64> {
     .bind(player_id)
     .fetch_one(pool)
     .await?;
-
-    let total_ac = base_ac + shield_bonus + magic_bonus;
-
+ 
+    // Defense fighting style: +1 AC while wearing any armor
+    let defense_fs_bonus: i64 = if armor.is_some() {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM player_feats WHERE player_id = ? AND feat_id = 'feat_fs_defense'"
+        )
+        .bind(player_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0)
+    } else {
+        0
+    };
+ 
+    let total_ac = base_ac + shield_bonus + magic_bonus + defense_fs_bonus;
+ 
     sqlx::query("UPDATE players SET armor_class = ? WHERE id = ?")
         .bind(total_ac)
         .bind(player_id)
         .execute(pool)
         .await?;
-
+ 
     Ok(total_ac)
 }

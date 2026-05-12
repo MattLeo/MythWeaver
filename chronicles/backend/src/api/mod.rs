@@ -486,15 +486,6 @@ pub async fn list_campaigns(
 
 // ─── Level up ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, serde::Deserialize)]
-pub struct LevelUpRequest {
-    pub subclass: Option<String>,
-    pub asi_stat1: Option<String>,
-    pub asi_stat2: Option<String>,
-    pub new_maneuvers: Option<Vec<String>>,
-    pub replaced_maneuver: Option<String>,
-}
-
 pub async fn level_up(
     State(state): State<Arc<AppState>>,
     Path(campaign_id): Path<String>,
@@ -539,8 +530,8 @@ pub async fn level_up(
     }
 
     // ── ASI or Feat ───────────────────────────────────────────────────────────
-    if let Some(ref feat_id) = req.feat_id {
-        // Player chose a feat instead of an ASI
+
+     if let Some(ref feat_id) = req.feat_id {
         if let Err(e) = feats_db::take_feat(
             pool, &campaign_id, &p.id, feat_id,
             "asi", result.new_level,
@@ -553,11 +544,8 @@ pub async fn level_up(
             req.feat_choices.as_deref(),
             result.new_level,
         ).await;
-        // Always recalculate AC in case a stat or armor proficiency changed
         let _ = items::recalculate_ac(pool, &p.id).await;
- 
     } else if let Some(ref stat1) = req.asi_stat1 {
-        // Player chose the standard ASI
         let stat2 = req.asi_stat2.as_deref();
         if let Err(e) = player::apply_asi(pool, &p.id, stat1, stat2).await {
             return (StatusCode::INTERNAL_SERVER_ERROR,
@@ -1578,9 +1566,6 @@ async fn seed_class_abilities(
         "Rogue" => vec![
             ("Sneak Attack", Some("Deal extra 1d6 damage when you have advantage or an ally is adjacent to the target."), 1, "per_turn"),
             ("Cunning Action", Some("Bonus Action: Dash, Disengage, or Hide."), 1, "per_turn"),
-        ],
-        "Wizard" => vec![
-            ("Spell Slots (1st)", Some("1st level spell slots."), 2, "long_rest"),
         ],
         "Cleric" => vec![
             ("Channel Divinity",
@@ -7123,6 +7108,41 @@ pub async fn seed_ek_slots_handler(
     }
 }
 
+async fn feat_add_ability(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    name: &str,
+    desc: &str,
+    uses: i64,
+    refresh: &str,
+) {
+    let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
+    if !existing.iter().any(|a| a.name == name) {
+        let _ = world::create_ability(
+            pool, campaign_id, "player", player_id, name, Some(desc), uses, refresh,
+        ).await;
+    }
+}
+ 
+async fn feat_add_prof(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    prof_type: &str,
+    name: &str,
+) {
+    let id = Uuid::new_v4().to_string();
+    let _ = sqlx::query(
+        "INSERT OR IGNORE INTO proficiencies
+         (id, campaign_id, player_id, proficiency_type, name, source)
+         VALUES (?, ?, ?, ?, ?, 'feat')"
+    )
+    .bind(&id).bind(campaign_id).bind(player_id)
+    .bind(prof_type).bind(name)
+    .execute(pool).await;
+}
+ 
 async fn apply_feat_effects(
     pool: &sqlx::SqlitePool,
     campaign_id: &str,
@@ -7140,64 +7160,35 @@ async fn apply_feat_effects(
         _ => return,
     };
  
-    // ── Helper: apply stat increase ───────────────────────────────────────────
-    let apply_stat = |stat: &str| async move {
-        let _ = player::apply_asi(pool, player_id, stat, None).await;
-    };
- 
-    // ── Helper: add proficiency ───────────────────────────────────────────────
-    let add_prof = |prof_type: &str, name: &str| async move {
-        let id = uuid::Uuid::new_v4().to_string();
-        let _ = sqlx::query(
-            "INSERT OR IGNORE INTO proficiencies
-             (id, campaign_id, player_id, proficiency_type, name, source)
-             VALUES (?, ?, ?, ?, ?, 'feat')"
-        )
-        .bind(&id).bind(campaign_id).bind(player_id)
-        .bind(prof_type).bind(name)
-        .execute(pool).await;
-    };
- 
-    // ── Helper: seed ability reference ────────────────────────────────────────
-    let add_ability = |name: &str, desc: &str, uses: i64, refresh: &str| async move {
-        let existing = world::get_abilities(pool, player_id, "player").await.unwrap_or_default();
-        if !existing.iter().any(|a| a.name == name) {
-            let _ = world::create_ability(
-                pool, campaign_id, "player", player_id, name, Some(desc), uses, refresh
-            ).await;
-        }
-    };
- 
-    // ── Apply effects per feat ────────────────────────────────────────────────
     match feat_id {
  
         // ── Origin feats ──────────────────────────────────────────────────────
  
         "feat_alert" => {
-            add_ability("Alert",
+            feat_add_ability(pool, campaign_id, player_id, "Alert",
                 "Add your Proficiency Bonus to Initiative rolls. After rolling Initiative, \
                  you can swap your Initiative with one willing ally (neither Incapacitated).",
                 1, "manual").await;
         }
  
         "feat_crafter" => {
-            add_ability("Crafter",
+            feat_add_ability(pool, campaign_id, player_id, "Crafter",
                 "Proficiency with 3 Artisan's Tools of your choice. 20% discount on nonmagical items. \
                  Fast Crafting: on Long Rest, craft one item from the Fast Crafting table (lasts until next Long Rest).",
                 1, "long_rest").await;
         }
  
         "feat_healer" => {
-            add_ability("Healer",
+            feat_add_ability(pool, campaign_id, player_id, "Healer",
                 "Battle Medic: Utilize action — expend a Healer's Kit use to let a creature within 5 ft \
                  expend one Hit Die; roll it, creature regains HP = roll + Prof Bonus. \
-                 Healing Rerolls: when you roll a 1 on any healing die (spell or this feat), reroll (must use new roll).",
+                 Healing Rerolls: when you roll a 1 on any healing die, reroll (must use new roll).",
                 1, "manual").await;
         }
  
         "feat_lucky" => {
-            let prof = player::Player::proficiency_for_level(player.level);
-            add_ability("Lucky",
+            let prof = Player::proficiency_for_level(player.level);
+            feat_add_ability(pool, campaign_id, player_id, "Lucky",
                 "Luck Points (= Prof Bonus, regain on Long Rest). \
                  Spend 1 to give yourself Advantage on a D20 Test (before rolling). \
                  Spend 1 to impose Disadvantage on an attack roll against you.",
@@ -7205,9 +7196,6 @@ async fn apply_feat_effects(
         }
  
         "feat_magic_initiate" => {
-            // Spells are selected by the player in the UI and passed via choices
-            // choices: { "cantrip1": "spell_id", "cantrip2": "spell_id", "spell1": "spell_id",
-            //            "spell_list": "cleric|druid|wizard", "ability": "int|wis|cha" }
             if let Some(c1) = choices["cantrip1"].as_str() {
                 let _ = spells_db::learn_spell(pool, campaign_id, player_id, c1, "cantrip", "feat_magic_initiate").await;
             }
@@ -7220,21 +7208,20 @@ async fn apply_feat_effects(
         }
  
         "feat_musician" => {
-            add_ability("Encouraging Song",
-                "When you finish a Short or Long Rest, play a Musical Instrument you have proficiency with \
-                 to give Heroic Inspiration to a number of allies equal to your Proficiency Bonus who hear the song.",
+            feat_add_ability(pool, campaign_id, player_id, "Encouraging Song",
+                "When you finish a Short or Long Rest, play a Musical Instrument you have proficiency \
+                 with to give Heroic Inspiration to a number of allies equal to your Proficiency Bonus.",
                 1, "short_rest").await;
         }
  
         "feat_savage_attacker" => {
-            add_ability("Savage Attacker",
+            feat_add_ability(pool, campaign_id, player_id, "Savage Attacker",
                 "Once per turn when you hit a target with a weapon, roll the weapon's damage dice twice \
                  and use either roll against the target.",
                 1, "per_turn").await;
         }
  
         "feat_tough" => {
-            // +2 HP per character level immediately, then +2 per subsequent level (handled at level-up)
             let hp_bonus = 2 * level;
             let _ = sqlx::query(
                 "UPDATE players SET max_hp = max_hp + ?, current_hp = current_hp + ?,
@@ -7242,16 +7229,14 @@ async fn apply_feat_effects(
             )
             .bind(hp_bonus).bind(hp_bonus).bind(player_id)
             .execute(pool).await;
- 
-            add_ability("Tough",
-                "Your max HP increases by 2 each time you gain a character level (already applied at all previous levels).",
+            feat_add_ability(pool, campaign_id, player_id, "Tough",
+                "Your max HP increases by 2 each time you gain a character level.",
                 1, "manual").await;
         }
  
         // ── General feats ─────────────────────────────────────────────────────
  
         "feat_asi" => {
-            // choices: { "stat1": "str", "amount1": 2 } OR { "stat1": "str", "amount1": 1, "stat2": "dex", "amount2": 1 }
             if let Some(stat1) = choices["stat1"].as_str() {
                 let amount1 = choices["amount1"].as_i64().unwrap_or(1);
                 for _ in 0..amount1 {
@@ -7263,26 +7248,31 @@ async fn apply_feat_effects(
             }
         }
  
-        // Feats that grant +1 to a chosen stat + ability reference:
         "feat_actor" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Actor",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Actor",
                 "Advantage on CHA (Deception or Performance) checks while disguised as a specific person. \
                  Mimicry: can mimic sounds/speech of other creatures.",
                 1, "manual").await;
         }
  
         "feat_athlete" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Athlete",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Athlete",
                 "Climb Speed = your Speed. Hop Up: stand from Prone with only 5 ft of movement. \
                  Jumping: make running Long or High Jump after moving only 5 feet.",
                 1, "manual").await;
         }
  
         "feat_charger" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Charger",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Charger",
                 "Improved Dash: Speed +10 ft when Dashing. \
                  Charge Attack: after moving 10+ ft straight toward a target, choose +1d8 damage \
                  OR push it 10 ft (once per turn, Attack action only).",
@@ -7290,144 +7280,181 @@ async fn apply_feat_effects(
         }
  
         "feat_chef" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Chef",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Chef",
                 "Replenishing Meal (Short Rest): cook food for Prof Bonus + 4 creatures — those who eat \
                  and spend Hit Dice regain extra 1d8 HP. \
-                 Bolstering Treats: Prof Bonus treats (8 hr duration) — Bonus Action to eat one for Temp HP = Prof Bonus.",
+                 Bolstering Treats: Prof Bonus treats (8 hr) — Bonus Action to eat one for Temp HP = Prof Bonus.",
                 1, "short_rest").await;
         }
  
         "feat_crossbow_expert" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Crossbow Expert",
-                "Ignore Loading property on crossbows (can load without a free hand). \
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Crossbow Expert",
+                "Ignore Loading property on crossbows; can load without a free hand. \
                  No Disadvantage on crossbow attacks within 5 ft of an enemy. \
                  Light crossbow dual wielding: add ability modifier to extra attack damage.",
                 1, "manual").await;
         }
  
         "feat_crusher" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Crusher",
-                "Once per turn when you deal Bludgeoning damage, move target 5 ft to unoccupied space \
-                 (must be no more than one size larger). \
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Crusher",
+                "Once per turn when you deal Bludgeoning damage, move target 5 ft to unoccupied space. \
                  Enhanced Critical: on Bludgeoning crit, attack rolls against that creature have Advantage \
                  until start of your next turn.",
                 1, "manual").await;
         }
  
         "feat_defensive_duelist" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Defensive Duelist",
-                "Reaction: when holding a Finesse weapon and hit by a melee attack, add Prof Bonus to your AC, \
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Defensive Duelist",
+                "Reaction: when holding a Finesse weapon and hit by a melee attack, add Prof Bonus to AC, \
                  potentially causing the attack to miss. Bonus lasts until start of your next turn.",
                 1, "per_turn").await;
         }
  
         "feat_dual_wielder" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Dual Wielder",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Dual Wielder",
                 "Enhanced Dual Wielding: when attacking with a Light weapon (Attack action), make an extra \
-                 attack as Bonus Action with a different non-Two-Handed Melee weapon (no ability modifier to damage). \
+                 Bonus Action attack with a different non-Two-Handed Melee weapon. \
                  Quick Draw: draw/stow two non-Two-Handed weapons at once.",
                 1, "manual").await;
         }
  
         "feat_durable" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Durable",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Durable",
                 "Advantage on Death Saving Throws. \
                  Speedy Recovery: Bonus Action — expend one Hit Point Die and regain that many HP.",
                 1, "manual").await;
         }
  
         "feat_elemental_adept" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             let damage_type = choices["damage_type"].as_str().unwrap_or("fire");
-            add_ability(&format!("Elemental Adept ({})", capitalize(damage_type)),
-                &format!("Your spells ignore Resistance to {} damage. When you roll damage for a {} spell, \
-                 treat any 1 on a damage die as a 2.", damage_type, damage_type),
-                1, "manual").await;
+            let dt_cap = {
+                let mut c = damage_type.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            };
+            let name = format!("Elemental Adept ({})", dt_cap);
+            let desc = format!(
+                "Your spells ignore Resistance to {} damage. \
+                 When you roll damage for a {} spell, treat any 1 on a damage die as a 2.",
+                damage_type, damage_type
+            );
+            feat_add_ability(pool, campaign_id, player_id, &name, &desc, 1, "manual").await;
         }
  
         "feat_fey_touched" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            // Learn Misty Step always-prepared
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Misty Step").await {
                 if let Some(id) = spell["id"].as_str() {
                     let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "feat_fey_touched").await;
                 }
             }
-            // Learn chosen divination/enchantment spell always-prepared
             if let Some(spell_id) = choices["spell"].as_str() {
                 let _ = spells_db::learn_spell(pool, campaign_id, player_id, spell_id, "always_prepared", "feat_fey_touched").await;
             }
-            add_ability("Fey Touched",
+            feat_add_ability(pool, campaign_id, player_id, "Fey Touched",
                 "Always have Misty Step and one Divination or Enchantment spell prepared. \
                  Cast each once per Long Rest without a slot. Also castable with spell slots.",
                 1, "long_rest").await;
         }
  
         "feat_grappler" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Grappler",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Grappler",
                 "Punch and Grab: when you hit with an Unarmed Strike (Attack action), use both Damage \
                  and Grapple options (once per turn). \
-                 Advantage on attacks against creatures you have Grappled. \
-                 No extra movement to move a Grappled creature your size or smaller.",
+                 Advantage on attacks against Grappled creatures. \
+                 No extra movement cost to move a Grappled creature your size or smaller.",
                 1, "manual").await;
         }
  
         "feat_great_weapon_master" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Great Weapon Master",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Great Weapon Master",
                 "Heavy Weapon Mastery: when you hit with a Heavy weapon (Attack action), deal extra damage = Prof Bonus. \
-                 Hew: immediately after a Critical Hit with a Melee weapon or reducing a creature to 0 HP, \
-                 make one attack as a Bonus Action.",
+                 Hew: immediately after a Critical Hit or reducing a creature to 0 HP with a Melee weapon, \
+                 make one Bonus Action attack with the same weapon.",
                 1, "per_turn").await;
         }
  
         "feat_heavily_armored" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_prof("armor", "heavy").await;
-            let _ = items::recalculate_ac(pool, player_id).await;
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_prof(pool, campaign_id, player_id, "armor", "heavy").await;
         }
  
         "feat_heavy_armor_master" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Heavy Armor Master",
-                "When hit by an attack while wearing Heavy armor, reduce Bludgeoning, Piercing, and Slashing \
-                 damage by an amount equal to your Proficiency Bonus.",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Heavy Armor Master",
+                "When hit by an attack while wearing Heavy armor, reduce Bludgeoning, Piercing, and \
+                 Slashing damage by an amount equal to your Proficiency Bonus.",
                 1, "manual").await;
         }
  
         "feat_inspiring_leader" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Inspiring Leader",
-                "After a Short or Long Rest, give an inspiring performance. Choose up to 6 allies within 30 ft — \
-                 each gains Temp HP = character level + WIS or CHA modifier (whichever was increased).",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Inspiring Leader",
+                "After a Short or Long Rest, give an inspiring performance. Choose up to 6 allies within \
+                 30 ft — each gains Temp HP = character level + WIS or CHA modifier.",
                 1, "short_rest").await;
         }
  
         "feat_keen_mind" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Keen Mind",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Keen Mind",
                 "Expertise or proficiency in Arcana, History, Investigation, Nature, or Religion (chosen). \
                  Quick Study: take the Study action as a Bonus Action.",
                 1, "manual").await;
         }
  
         "feat_lightly_armored" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_prof("armor", "light").await;
-            add_prof("armor", "shield").await;
-            let _ = items::recalculate_ac(pool, player_id).await;
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_prof(pool, campaign_id, player_id, "armor", "light").await;
+            feat_add_prof(pool, campaign_id, player_id, "armor", "shield").await;
         }
  
         "feat_mage_slayer" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Mage Slayer",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Mage Slayer",
                 "Concentration Breaker: when you damage a concentrating creature, it has Disadvantage on \
                  its Concentration save. \
                  Guarded Mind (1/Short Rest): when you fail an INT, WIS, or CHA save, succeed instead.",
@@ -7435,96 +7462,114 @@ async fn apply_feat_effects(
         }
  
         "feat_martial_weapon_training" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_prof("weapon", "martial").await;
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_prof(pool, campaign_id, player_id, "weapon", "martial").await;
         }
  
         "feat_medium_armor_master" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Medium Armor Master",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Medium Armor Master",
                 "While wearing Medium armor, add 3 (instead of 2) to AC if DEX 16 or higher.",
                 1, "manual").await;
-            let _ = items::recalculate_ac(pool, player_id).await;
         }
  
         "feat_moderately_armored" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_prof("armor", "medium").await;
-            let _ = items::recalculate_ac(pool, player_id).await;
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_prof(pool, campaign_id, player_id, "armor", "medium").await;
         }
  
         "feat_mounted_combatant" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Mounted Combatant",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Mounted Combatant",
                 "Mounted Strike: Advantage on attacks against unmounted creatures within 5 ft of mount \
-                 (at least one size smaller than mount). \
-                 Leap Aside: mount takes no damage on DEX save for half damage (and half on fail). \
+                 (at least one size smaller). Leap Aside: mount takes no damage on DEX save for half. \
                  Veer: redirect attacks targeting your mount to hit you instead.",
                 1, "manual").await;
         }
  
         "feat_observant" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Observant",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Observant",
                 "Proficiency or Expertise in Insight, Investigation, or Perception (chosen). \
                  Quick Search: take the Search action as a Bonus Action.",
                 1, "manual").await;
         }
  
         "feat_piercer" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Piercer",
-                "Puncture: once per turn when you deal Piercing damage, reroll one damage die (must use new roll). \
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Piercer",
+                "Puncture: once per turn when you deal Piercing damage, reroll one damage die. \
                  Enhanced Critical: on Piercing crit, roll one additional damage die.",
                 1, "per_turn").await;
         }
  
         "feat_poisoner" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_prof("tool", "poisoner's kit").await;
-            add_ability("Poisoner",
-                "Potent Poison: your spells and poison attacks ignore Resistance to Poison damage. \
-                 Brew Poison (1 hr + 50 GP): create Prof Bonus doses. Apply as Bonus Action. \
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_prof(pool, campaign_id, player_id, "tool", "poisoner's kit").await;
+            feat_add_ability(pool, campaign_id, player_id, "Poisoner",
+                "Potent Poison: spells and poison attacks ignore Resistance to Poison damage. \
+                 Brew Poison (1 hr + 50 GP): create Prof Bonus doses. Bonus Action to apply. \
                  On hit: CON save or 2d8 Poison damage + Poisoned until end of your next turn.",
                 1, "manual").await;
         }
  
         "feat_polearm_master" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Polearm Master",
-                "Pole Strike: after attacking with a Quarterstaff, Spear, or Heavy+Reach weapon (Attack action), \
-                 Bonus Action to attack with the other end (1d4 Bludgeoning). \
-                 Reactive Strike: Reaction to attack a creature that enters your reach with such a weapon.",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Polearm Master",
+                "Pole Strike: after attacking with a Quarterstaff, Spear, or Heavy+Reach weapon (Attack \
+                 action), Bonus Action to attack with the other end (1d4 Bludgeoning). \
+                 Reactive Strike: Reaction to attack a creature that enters your reach.",
                 1, "per_turn").await;
         }
  
         "feat_resilient" => {
             if let Some(s) = choices["stat"].as_str() {
-                apply_stat(s).await;
-                // Grant saving throw proficiency in the chosen stat
-                add_prof("saving_throw", s).await;
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+                feat_add_prof(pool, campaign_id, player_id, "saving_throw", s).await;
             }
         }
  
         "feat_ritual_caster" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Ritual Caster",
-                "Always prepared: ritual spells chosen (equal to Prof Bonus, from level 1 with Ritual tag). \
-                 Quick Ritual (1/Long Rest): cast a prepared ritual at normal action speed without expending a slot.",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Ritual Caster",
+                "Always prepared: ritual spells chosen (equal to Prof Bonus, level 1 with Ritual tag). \
+                 Quick Ritual (1/Long Rest): cast a prepared ritual at normal speed without expending a slot.",
                 1, "long_rest").await;
         }
  
         "feat_sentinel" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Sentinel",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Sentinel",
                 "Guardian: Opportunity Attack when a creature within 5 ft takes Disengage or hits a \
                  target other than you. \
-                 Halt: when you hit a creature with an Opportunity Attack, its Speed becomes 0 for the rest of the turn.",
+                 Halt: when you hit a creature with an Opportunity Attack, its Speed becomes 0.",
                 1, "per_turn").await;
         }
  
         "feat_shadow_touched" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Invisibility").await {
                 if let Some(id) = spell["id"].as_str() {
                     let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "feat_shadow_touched").await;
@@ -7533,15 +7578,17 @@ async fn apply_feat_effects(
             if let Some(spell_id) = choices["spell"].as_str() {
                 let _ = spells_db::learn_spell(pool, campaign_id, player_id, spell_id, "always_prepared", "feat_shadow_touched").await;
             }
-            add_ability("Shadow Touched",
+            feat_add_ability(pool, campaign_id, player_id, "Shadow Touched",
                 "Always have Invisibility and one Illusion or Necromancy spell prepared. \
                  Cast each once per Long Rest without a slot. Also castable with spell slots.",
                 1, "long_rest").await;
         }
  
         "feat_sharpshooter" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Sharpshooter",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Sharpshooter",
                 "Bypass Cover: ranged weapon attacks ignore Half Cover and Three-Quarters Cover. \
                  Firing in Melee: no Disadvantage on ranged attacks within 5 ft of an enemy. \
                  Long Shots: no Disadvantage at long range.",
@@ -7549,8 +7596,10 @@ async fn apply_feat_effects(
         }
  
         "feat_shield_master" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Shield Master",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Shield Master",
                 "Shield Bash: after hitting with a Melee weapon (Attack action), bash with your Shield — \
                  STR save or push 5 ft / Prone (once per turn). \
                  Interpose Shield: Reaction on DEX save for half damage — take no damage on success.",
@@ -7558,12 +7607,16 @@ async fn apply_feat_effects(
         }
  
         "feat_skill_expert" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
         }
  
         "feat_skulker" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Skulker",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Skulker",
                 "Blindsight 10 feet. \
                  Fog of War: Advantage on DEX (Stealth) checks as part of the Hide action in combat. \
                  Sniper: missing a hidden attack roll doesn't reveal your location.",
@@ -7571,31 +7624,36 @@ async fn apply_feat_effects(
         }
  
         "feat_slasher" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Slasher",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Slasher",
                 "Hamstring: once per turn when you deal Slashing damage, reduce target Speed by 10 ft \
                  until start of your next turn. \
-                 Enhanced Critical: on Slashing crit, target has Disadvantage on attack rolls until start of your next turn.",
+                 Enhanced Critical: on Slashing crit, target has Disadvantage on attacks until start of your next turn.",
                 1, "per_turn").await;
         }
  
         "feat_speedy" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            // Persistent +10 Speed — update the player's base speed
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             let _ = sqlx::query(
                 "UPDATE players SET speed = speed + 10, updated_at = datetime('now') WHERE id = ?"
             )
             .bind(player_id).execute(pool).await;
-            add_ability("Speedy",
-                "Speed +10 ft (applied permanently). \
-                 Dash over Difficult Terrain: Difficult Terrain doesn't cost extra when Dashing. \
+            feat_add_ability(pool, campaign_id, player_id, "Speedy",
+                "Speed +10 ft (applied). \
+                 Dash over Difficult Terrain: no extra movement cost when Dashing. \
                  Agile Movement: Opportunity Attacks have Disadvantage against you.",
                 1, "manual").await;
         }
  
         "feat_spell_sniper" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Spell Sniper",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Spell Sniper",
                 "Bypass Cover: spell attack rolls ignore Half Cover and Three-Quarters Cover. \
                  Casting in Melee: no Disadvantage on spell attacks within 5 ft of an enemy. \
                  Increased Range: spells with 10+ ft range requiring attack rolls gain +60 ft range.",
@@ -7603,27 +7661,31 @@ async fn apply_feat_effects(
         }
  
         "feat_telekinetic" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Mage Hand").await {
                 if let Some(id) = spell["id"].as_str() {
                     let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "cantrip", "feat_telekinetic").await;
                 }
             }
-            add_ability("Telekinetic",
-                "Mage Hand: cast without Verbal/Somatic, can be Invisible, range and distance +30 ft. \
+            feat_add_ability(pool, campaign_id, player_id, "Telekinetic",
+                "Mage Hand: cast without Verbal/Somatic, can be Invisible, range +30 ft. \
                  Telekinetic Shove (Bonus Action): one creature within 30 ft makes STR save or moves \
-                 5 ft toward or away from you (your choice).",
+                 5 ft toward or away from you.",
                 1, "per_turn").await;
         }
  
         "feat_telepathic" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             if let Ok(Some(spell)) = spells_db::get_spell_by_name(pool, "Detect Thoughts").await {
                 if let Some(id) = spell["id"].as_str() {
                     let _ = spells_db::learn_spell(pool, campaign_id, player_id, id, "always_prepared", "feat_telepathic").await;
                 }
             }
-            add_ability("Telepathic",
+            feat_add_ability(pool, campaign_id, player_id, "Telepathic",
                 "Telepathic Utterance: speak telepathically to any creature you can see within 60 ft \
                  (one-way; requires shared language). \
                  Detect Thoughts: always prepared, cast once/LR without a slot.",
@@ -7631,61 +7693,135 @@ async fn apply_feat_effects(
         }
  
         "feat_war_caster" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("War Caster",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "War Caster",
                 "Concentration: Advantage on CON saves to maintain Concentration. \
                  Reactive Spell: Reaction when a creature leaves your reach — cast a spell at it instead \
-                 of making an Opportunity Attack (action casting time, targets only that creature). \
+                 of an Opportunity Attack (action casting time, targets only that creature). \
                  Somatic Components: perform Somatic components even with weapons or Shield in hand.",
                 1, "manual").await;
         }
  
         "feat_weapon_master" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Weapon Master",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Weapon Master",
                 "Use the Mastery property of one Simple or Martial weapon you have proficiency with. \
                  Change your weapon choice after each Long Rest.",
+                1, "manual").await;
+        }
+ 
+        // ── Fighting Style feats ──────────────────────────────────────────────
+ 
+        "feat_fs_archery" => {
+            feat_add_ability(pool, campaign_id, player_id, "Archery",
+                "+2 bonus to attack rolls with Ranged weapons.", 1, "manual").await;
+        }
+ 
+        "feat_fs_blind_fighting" => {
+            feat_add_ability(pool, campaign_id, player_id, "Blind Fighting",
+                "Blindsight with a range of 10 feet.", 1, "manual").await;
+        }
+ 
+        "feat_fs_defense" => {
+            feat_add_ability(pool, campaign_id, player_id, "Defense",
+                "+1 bonus to Armor Class while wearing Light, Medium, or Heavy armor.", 1, "manual").await;
+            // AC is recalculated at the end of this function
+        }
+ 
+        "feat_fs_dueling" => {
+            feat_add_ability(pool, campaign_id, player_id, "Dueling",
+                "+2 bonus to damage rolls when holding a Melee weapon in one hand and no other weapons.",
+                1, "manual").await;
+        }
+ 
+        "feat_fs_great_weapon_fighting" => {
+            feat_add_ability(pool, campaign_id, player_id, "Great Weapon Fighting",
+                "When rolling damage for a two-handed Melee attack, treat any 1 or 2 on a damage die as a 3.",
+                1, "manual").await;
+        }
+ 
+        "feat_fs_interception" => {
+            feat_add_ability(pool, campaign_id, player_id, "Interception",
+                "Reaction: when a creature you can see hits another creature within 5 ft of you, \
+                 reduce the damage by 1d10 + Prof Bonus (requires Shield or weapon).",
+                1, "per_turn").await;
+        }
+ 
+        "feat_fs_protection" => {
+            feat_add_ability(pool, campaign_id, player_id, "Protection",
+                "Reaction: when a creature attacks a target other than you within 5 ft, impose \
+                 Disadvantage on the attack (requires Shield). Lasts until start of your next turn.",
+                1, "per_turn").await;
+        }
+ 
+        "feat_fs_thrown_weapon_fighting" => {
+            feat_add_ability(pool, campaign_id, player_id, "Thrown Weapon Fighting",
+                "+2 bonus to damage rolls with Thrown weapons.", 1, "manual").await;
+        }
+ 
+        "feat_fs_two_weapon_fighting" => {
+            feat_add_ability(pool, campaign_id, player_id, "Two-Weapon Fighting",
+                "When making the extra attack from a Light weapon, add your ability modifier to \
+                 the damage of that attack.", 1, "manual").await;
+        }
+ 
+        "feat_fs_unarmed_fighting" => {
+            feat_add_ability(pool, campaign_id, player_id, "Unarmed Fighting",
+                "Unarmed Strikes deal 1d6 + STR Bludgeoning (1d8 if no weapons or Shield). \
+                 Start of each turn: deal 1d4 Bludgeoning to one Grappled creature.",
                 1, "manual").await;
         }
  
         // ── Epic Boon feats ───────────────────────────────────────────────────
  
         "feat_boon_fortitude" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             let _ = sqlx::query(
                 "UPDATE players SET max_hp = max_hp + 40, current_hp = current_hp + 40,
                  updated_at = datetime('now') WHERE id = ?"
             )
             .bind(player_id).execute(pool).await;
-            add_ability("Boon of Fortitude",
+            feat_add_ability(pool, campaign_id, player_id, "Boon of Fortitude",
                 "HP maximum +40 (applied). When you regain HP, also regain additional HP = CON modifier (once per turn).",
                 1, "manual").await;
         }
  
         "feat_boon_speed" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             let _ = sqlx::query(
                 "UPDATE players SET speed = speed + 30, updated_at = datetime('now') WHERE id = ?"
             )
             .bind(player_id).execute(pool).await;
-            add_ability("Boon of Speed",
+            feat_add_ability(pool, campaign_id, player_id, "Boon of Speed",
                 "Speed +30 ft (applied). \
-                 Escape Artist: Bonus Action — take Disengage, which also ends the Grappled condition. \
+                 Escape Artist: Bonus Action — take Disengage, also ends Grappled condition. \
                  Quickness: Speed +30 ft.",
                 1, "per_turn").await;
         }
  
         "feat_boon_spell_recall" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Boon of Spell Recall",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Boon of Spell Recall",
                 "Free Casting: whenever you cast a spell with a level 1-4 spell slot, roll 1d4. \
                  If the result matches the slot's level, the slot isn't expended.",
                 1, "manual").await;
         }
  
         "feat_boon_night_spirit" => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            add_ability("Boon of the Night Spirit",
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
+            feat_add_ability(pool, campaign_id, player_id, "Boon of the Night Spirit",
                 "Merge with Shadows: while in Dim Light or Darkness, Bonus Action to become Invisible \
                  (ends on Action/Bonus Action/Reaction). \
                  Shadowy Form: while in Dim Light or Darkness, Resistance to all damage except Psychic and Radiant.",
@@ -7694,32 +7830,13 @@ async fn apply_feat_effects(
  
         // All remaining Epic Boon feats: apply stat + seed ability reference
         feat_id if feat_id.starts_with("feat_boon_") => {
-            if let Some(s) = choices["stat"].as_str() { apply_stat(s).await; }
-            // The mechanical reference ability is already tracked in the player_feats table;
-            // seed a named ability for LLM DM reference
+            if let Some(s) = choices["stat"].as_str() {
+                let _ = player::apply_asi(pool, player_id, s, None).await;
+            }
             if let Ok(feat) = sqlx::query!("SELECT name, description FROM feats WHERE id = ?", feat_id)
                 .fetch_one(pool).await
             {
-                add_ability(&feat.name, &feat.description, 1, "long_rest").await;
-            }
-        }
- 
-        // ── Fighting Style feats ──────────────────────────────────────────────
-        // These are mechanical modifiers — seed as reference abilities.
-        // The actual bonuses (e.g. +2 to ranged attacks) are tracked in the ability
-        // description for the LLM DM. The combat backend applies them as follows:
-        // - Archery: +2 to ranged attack rolls → checked in resolve_player_attack
-        // - Defense: +1 AC in armor → recalculate_ac checks this
-        // - Dueling: +2 damage with single melee weapon → checked in resolve_player_damage
-        feat_id if feat_id.starts_with("feat_fs_") => {
-            if let Ok(feat) = sqlx::query!("SELECT name, description FROM feats WHERE id = ?", feat_id)
-                .fetch_one(pool).await
-            {
-                add_ability(&feat.name, &feat.description, 1, "manual").await;
-            }
-            // Defense fighting style gives a persistent +1 AC — recalculate
-            if feat_id == "feat_fs_defense" {
-                let _ = items::recalculate_ac(pool, player_id).await;
+                feat_add_ability(pool, campaign_id, player_id, &feat.name, &feat.description, 1, "long_rest").await;
             }
         }
  
@@ -7728,9 +7845,10 @@ async fn apply_feat_effects(
         }
     }
  
-    // Always recalculate AC in case armor proficiency changed
+    // Always recalculate AC — armor proficiency or Defense FS may have changed
     let _ = items::recalculate_ac(pool, player_id).await;
 }
+
  
 fn capitalize(s: &str) -> String {
     let mut c = s.chars();
@@ -7739,3 +7857,76 @@ fn capitalize(s: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
+
+
+/// GET /api/feats?category=general  — list all feats, optionally by category
+pub async fn list_feats_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let category = params.get("category").map(|s| s.as_str());
+    match feats_db::get_all_feats(pool, category).await {
+        Ok(feats) => (StatusCode::OK, Json(json!({"feats": feats}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+ 
+/// GET /api/campaigns/:id/feats  — get feats available to this player
+pub async fn get_available_feats_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+ 
+    let has_spellcasting = matches!(p.class.as_str(),
+        "Bard" | "Cleric" | "Druid" | "Paladin" | "Ranger" | "Sorcerer" | "Warlock" | "Wizard"
+    ) || p.subclass.as_deref() == Some("Eldritch Knight")
+      || p.subclass.as_deref() == Some("Arcane Trickster");
+ 
+    let has_fighting_style = matches!(p.class.as_str(), "Fighter" | "Paladin" | "Ranger")
+        || (p.class == "Bard" && p.subclass.as_deref() == Some("College of Valor"));
+ 
+    // Determine armor training from proficiencies
+    let profs = fighter::get_proficiencies(pool, &p.id).await.unwrap_or_default();
+    let armor_training: Vec<String> = profs.iter()
+        .filter(|pr| pr.proficiency_type == "armor")
+        .map(|pr| pr.name.clone())
+        .collect();
+    let armor_refs: Vec<&str> = armor_training.iter().map(|s| s.as_str()).collect();
+
+    let category = params.get("category").map(|s| s.as_str());
+ 
+    match feats_db::get_available_feats(
+        pool, &p.id, p.level,
+        p.subclass.as_deref(),
+        has_spellcasting, has_fighting_style, &armor_refs,
+        p.str, p.dex, p.con, p.int, p.wis, p.cha,
+        category,
+    ).await {
+        Ok(feats) => (StatusCode::OK, Json(json!({"feats": feats}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+// GET /api/campaigns/:id/player-feats  — get feats the player has taken
+pub async fn get_player_feats_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    match feats_db::get_player_feats(pool, &p.id).await {
+        Ok(feats) => (StatusCode::OK, Json(json!({"feats": feats}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+

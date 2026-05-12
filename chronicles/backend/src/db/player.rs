@@ -305,8 +305,8 @@ pub async fn level_up_player(
     let ranger_prepared_n    = if player.class == "Ranger" { ranger_prepared_spells(new_level) } else { 0 };
 
     let sneak_attack_dice_n  = if player.class == "Rogue" { rogue_sneak_attack_dice(new_level) } else { 0 };
-    let at_prepared_n       = if player.class == "Rogue" { rogue_arcane_trickster_prepared(new_level) } else { 0 };
-    let at_cantrips_n       = if player.class == "Rogue" { rogue_arcane_trickster_cantrips(new_level) } else { 0 };
+    let at_prepared_n       = if player.class == "Rogue" { at_prepared_spells(new_level) } else { 0 };
+    let at_cantrips_n       = if player.class == "Rogue" { at_cantrips(new_level) } else { 0 };
 
     let sorcery_points_n       = if player.class == "Sorcerer" { sorcerer_sorcery_points(new_level) } else { 0 };
     let sorcerer_cantrips_n    = if player.class == "Sorcerer" { sorcerer_cantrips(new_level) } else { 0 };
