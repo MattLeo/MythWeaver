@@ -439,6 +439,9 @@ CREATE TABLE IF NOT EXISTS combat_enemies (
     is_frightened       INTEGER NOT NULL DEFAULT 0,
     is_disarmed         INTEGER NOT NULL DEFAULT 0,
     player_missed_last_attack INTEGER NOT NULL DEFAULT 0,
+    threat_json         TEXT NOT NULL DEFAULT '{}',
+    enemy_type          TEXT NOT NULL DEFAULT 'humanoid_basic',
+    spell_list_json     TEXT NOT NULL DEFAULT '[]', 
     created_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
