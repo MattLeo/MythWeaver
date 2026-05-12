@@ -1191,39 +1191,33 @@ export default function CombatModal({
         }
 
         // ── Bonus damage spells (Divine Smite, Thunderous Smite, etc.) ────────
-        // These have damage dice but no attack roll and no save — they add
-        // raw damage directly to the current target after a weapon hit.
-        if (selectedTarget) {
-            addLog(`${player.name} calls upon ${spell.name}!`, 'spell')
-            startDiceRoll({
-                count: diceCount,
-                sides,
-                label: `${spell.name} — ${diceCount}d${sides} ${spell.damage_type} damage`,
-                isAdvantage: false,
-                isSpell: true,
-                onConfirm: async (rolls) => {
-                    const total = rolls.reduce((a, b) => a + b, 0)
-                    try {
-                        await api.setCombatTarget(campaignId, selectedTarget)
-                        const result = await api.applyBonusDamage(campaignId, total)
-                        addLog(
-                            `${spell.name} deals ${result.damage_dealt} ${spell.damage_type || 'radiant'} damage to ${result.enemy_name}${result.enemy_dead ? ' — falls!' : ''}`,
-                            result.enemy_dead ? 'crit' : 'spell'
-                        )
-                        setShakingEnemy(selectedTarget)
+        // No attack roll, no save. Cast as a Bonus Action after a weapon hit.
+        // The backend already has current_target_id set from the weapon attack —
+        // we don't need selectedTarget (which is cleared by finishAttack).
+        startDiceRoll({
+            count: diceCount,
+            sides,
+            label: `${spell.name} — ${diceCount}d${sides} ${spell.damage_type} damage`,
+            isAdvantage: false,
+            isSpell: true,
+            onConfirm: async (rolls) => {
+                const total = rolls.reduce((a, b) => a + b, 0)
+                try {
+                    const result = await api.applyBonusDamage(campaignId, total)
+                    addLog(
+                        `${spell.name} deals ${result.damage_dealt} ${spell.damage_type || 'radiant'} damage to ${result.enemy_name}${result.enemy_dead ? ' — falls!' : ''}`,
+                        result.enemy_dead ? 'crit' : 'spell'
+                    )
+                    if (result.enemy_id) {
+                        setShakingEnemy(result.enemy_id)
                         setTimeout(() => setShakingEnemy(null), 500)
-                        await refreshCombat()
-                        if (result.all_enemies_defeated) { endCombatVictory(); return }
-                    } catch (e) { console.error('Bonus damage failed:', e) }
-                    finishSpellAction(spell)
-                }
-            })
-            return
-        }
-
-        // No target selected — just log the cast (buffs, utility spells, etc.)
-        addLog(`${player.name} casts ${spell.name}${castLevel ? ` (level ${castLevel} slot)` : ''}`, 'spell')
-        finishSpellAction(spell)
+                    }
+                    await refreshCombat()
+                    if (result.all_enemies_defeated) { endCombatVictory(); return }
+                } catch (e) { console.error('Bonus damage failed:', e) }
+                finishSpellAction(spell)
+            }
+        })
     }
 
     const confirmSpellAttack = async () => {
