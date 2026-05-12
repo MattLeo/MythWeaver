@@ -664,8 +664,8 @@ function cantripDiceAtLevel(spell, charLevel) {
 function gfbSecondaryDamage(playerLevel, spellcastingMod) {
     const diceCount = playerLevel >= 17 ? 3
         : playerLevel >= 11 ? 2
-        : playerLevel >= 5 ? 1
-        : 0
+            : playerLevel >= 5 ? 1
+                : 0
     return { diceCount, mod: Math.max(0, spellcastingMod) }
 }
 
@@ -1190,11 +1190,15 @@ export default function CombatModal({
             return
         }
 
+        // ── Bonus damage spells (Divine Smite, Thunderous Smite, etc.) ────────
+        // These have damage dice but no attack roll and no save — they add
+        // raw damage directly to the current target after a weapon hit.
         if (selectedTarget) {
+            addLog(`${player.name} calls upon ${spell.name}!`, 'spell')
             startDiceRoll({
                 count: diceCount,
                 sides,
-                label: `${spell.name} — ${diceCount}d${sides} ${spell.damage_type || 'radiant'} damage`,
+                label: `${spell.name} — ${diceCount}d${sides} ${spell.damage_type} damage`,
                 isAdvantage: false,
                 isSpell: true,
                 onConfirm: async (rolls) => {
@@ -1206,6 +1210,8 @@ export default function CombatModal({
                             `${spell.name} deals ${result.damage_dealt} ${spell.damage_type || 'radiant'} damage to ${result.enemy_name}${result.enemy_dead ? ' — falls!' : ''}`,
                             result.enemy_dead ? 'crit' : 'spell'
                         )
+                        setShakingEnemy(selectedTarget)
+                        setTimeout(() => setShakingEnemy(null), 500)
                         await refreshCombat()
                         if (result.all_enemies_defeated) { endCombatVictory(); return }
                     } catch (e) { console.error('Bonus damage failed:', e) }
@@ -1215,6 +1221,7 @@ export default function CombatModal({
             return
         }
 
+        // No target selected — just log the cast (buffs, utility spells, etc.)
         addLog(`${player.name} casts ${spell.name}${castLevel ? ` (level ${castLevel} slot)` : ''}`, 'spell')
         finishSpellAction(spell)
     }
@@ -1554,6 +1561,7 @@ export default function CombatModal({
             isAdvantage: false,
             onConfirm: async (rolls) => {
                 const roll = rolls[0]
+
                 if (roll === 20) {
                     addLog(`${player.name} rolls a Natural 20 — stabilizes with 1 HP!`, 'heal')
                     setDeathSuccesses(3)
@@ -1566,12 +1574,14 @@ export default function CombatModal({
                     addLog(`${player.name} is back on their feet!`, 'heal')
                     setPhase('player_turn'); return
                 }
+
                 if (roll === 1) {
                     const nf = deathFailures + 2; setDeathFailures(nf)
                     addLog(`${player.name} rolls a 1 — two failures!`, 'death')
                     if (nf >= 3) { addLog(`${player.name} has died.`, 'death'); onCombatEnd('death', logData.current); return }
-                    setPhase('death_saves'); return
+                    await endTurn(); return
                 }
+
                 if (roll >= 10) {
                     const ns = deathSuccesses + 1; setDeathSuccesses(ns)
                     addLog(`${player.name} succeeds on death save (${ns}/3).`, 'heal')
@@ -1597,15 +1607,18 @@ export default function CombatModal({
                         addLog(`--- ${player.name}'s turn ---`, 'system')
                         setPhase('player_turn'); return
                     }
-                    setPhase('death_saves'); return
+                    await endTurn(); return
                 }
+
+                // Failure (2–9)
                 const nf = deathFailures + 1; setDeathFailures(nf)
                 addLog(`${player.name} fails death save (${nf}/3).`, 'death')
-                if (nf >= 3) { addLog(`${player.name} has died.`, 'death'); onCombatEnd('death', log); return }
-                setPhase('death_saves')
+                if (nf >= 3) { addLog(`${player.name} has died.`, 'death'); onCombatEnd('death', logData.current); return }
+                await endTurn()
             }
         })
     }
+
 
     // ── Victory ────────────────────────────────────────────────────────────────
     const endCombatVictory = async () => {
