@@ -409,6 +409,15 @@ export async function searchSpells(campaignId, query, wizardOnly = false) {
   return res.json()
 }
 
+export async function applyBonusDamage(campaignId, damage) {
+    const res = await fetch(`${BASE}/campaigns/${campaignId}/bonus-damage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ damage }),
+    })
+    return res.json()
+}
+
 // ─── Concentration ────────────────────────────────────────────────────────────
 
 export async function getConcentration(campaignId) {

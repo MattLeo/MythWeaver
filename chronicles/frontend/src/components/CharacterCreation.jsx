@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { STYLES } from '../styles.js'
 import {
   CLASSES, SPECIES, BACKGROUNDS, CLASS_EQUIPMENT, SEX_OPTIONS,

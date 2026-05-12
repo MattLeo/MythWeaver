@@ -1503,3 +1503,40 @@ pub async fn process_initial_turns(
 
     Ok(results)
 }
+
+pub async fn apply_bonus_damage(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    raw_damage: i64,
+) -> Result<Value> {
+    let target_id: Option<String> = sqlx::query_scalar(
+        "SELECT current_target_id FROM combat_encounters
+         WHERE campaign_id = ? AND status = 'active'"
+    )
+    .bind(campaign_id)
+    .fetch_optional(pool).await?
+    .flatten();
+
+    let target_id = target_id.ok_or_else(|| anyhow::anyhow!("No target selected"))?;
+    let enemy = get_enemy(pool, &target_id).await?
+        .ok_or_else(|| anyhow::anyhow!("Enemy not found"))?;
+
+    let new_hp = (enemy.current_hp - raw_damage).max(0);
+    let is_dead = new_hp == 0;
+    let is_bloodied = new_hp > 0 && new_hp <= enemy.max_hp / 2;
+
+    sqlx::query(
+        "UPDATE combat_enemies SET current_hp = ?, is_alive = ?, is_bloodied = ? WHERE id = ?"
+    )
+    .bind(new_hp).bind(!is_dead).bind(is_bloodied).bind(&target_id)
+    .execute(pool).await?;
+
+    Ok(json!({
+        "damage_dealt": raw_damage,
+        "enemy_hp": new_hp,
+        "enemy_dead": is_dead,
+        "enemy_bloodied": is_bloodied,
+        "enemy_name": enemy.name,
+        "all_enemies_defeated": is_dead,
+    }))
+}

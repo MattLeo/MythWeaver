@@ -1190,7 +1190,32 @@ export default function CombatModal({
             return
         }
 
-        addLog(`${player.name} casts ${spell.name}`, 'spell')
+        if (selectedTarget) {
+            startDiceRoll({
+                count: diceCount,
+                sides,
+                label: `${spell.name} — ${diceCount}d${sides} ${spell.damage_type || 'radiant'} damage`,
+                isAdvantage: false,
+                isSpell: true,
+                onConfirm: async (rolls) => {
+                    const total = rolls.reduce((a, b) => a + b, 0)
+                    try {
+                        await api.setCombatTarget(campaignId, selectedTarget)
+                        const result = await api.applyBonusDamage(campaignId, total)
+                        addLog(
+                            `${spell.name} deals ${result.damage_dealt} ${spell.damage_type || 'radiant'} damage to ${result.enemy_name}${result.enemy_dead ? ' — falls!' : ''}`,
+                            result.enemy_dead ? 'crit' : 'spell'
+                        )
+                        await refreshCombat()
+                        if (result.all_enemies_defeated) { endCombatVictory(); return }
+                    } catch (e) { console.error('Bonus damage failed:', e) }
+                    finishSpellAction(spell)
+                }
+            })
+            return
+        }
+
+        addLog(`${player.name} casts ${spell.name}${castLevel ? ` (level ${castLevel} slot)` : ''}`, 'spell')
         finishSpellAction(spell)
     }
 

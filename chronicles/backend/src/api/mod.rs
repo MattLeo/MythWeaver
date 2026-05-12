@@ -7930,3 +7930,16 @@ pub async fn get_player_feats_handler(
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct BonusDamageRequest { pub damage: i64 }
+
+pub async fn apply_bonus_damage_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<BonusDamageRequest>,
+) -> impl IntoResponse {
+    match crate::db::combat::apply_bonus_damage(&state.pool, &campaign_id, req.damage).await {
+        Ok(result) => (StatusCode::OK, Json(result)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
