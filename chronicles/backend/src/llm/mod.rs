@@ -14,6 +14,7 @@ const MAX_TOOL_ITERATIONS: usize = 10;
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
+const GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 #[derive(Clone)]
 pub struct LlmClient {
@@ -278,7 +279,7 @@ impl LlmClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            return Err(anyhow::anyhow!("OpenRouter API error {}: {}", status, body));
+            return Err(anyhow::anyhow!("Gemini API error {}: {}", status, body));
         }
  
         let or_response: OpenRouterResponse = response.json().await?;
