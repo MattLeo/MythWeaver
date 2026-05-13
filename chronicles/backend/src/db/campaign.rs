@@ -220,3 +220,27 @@ pub async fn get_session_summaries(
 
     Ok(summaries)
 }
+
+// ─── Player Notes ─────────────────────────────────────────────────────────────
+
+pub async fn get_player_notes(pool: &SqlitePool, campaign_id: &str) -> Result<String> {
+    let notes: Option<String> = sqlx::query_scalar(
+        "SELECT player_notes FROM campaigns WHERE id = ?"
+    )
+    .bind(campaign_id)
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+    Ok(notes.unwrap_or_default())
+}
+
+pub async fn update_player_notes(pool: &SqlitePool, campaign_id: &str, notes: &str) -> Result<()> {
+    sqlx::query(
+        "UPDATE campaigns SET player_notes = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(notes)
+    .bind(campaign_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}

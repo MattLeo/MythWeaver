@@ -82,7 +82,7 @@ ${STYLES}
 export default function Sidebar({
   player, abilities, items, companions, campaignTime,
   isOpen, onNewAdventure, levelUpAvailable, onLevelUp,
-  onInventory, onAbilities, onSpells
+  onInventory, onAbilities, onSpells, onNotes
 }) {
   if (!player) return null
 
@@ -254,6 +254,13 @@ export default function Sidebar({
               ✦ Spells
             </button>
           )}
+          <button
+            className="btn-ghost"
+            onClick={onNotes}
+            style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
+          >
+            ✦ Notes
+          </button>
         </div>
 
 

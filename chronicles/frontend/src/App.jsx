@@ -12,6 +12,7 @@ import ShopModal from './components/ShopModal.jsx'
 import InventoryModal from './components/InventoryModal.jsx'
 import AbilitiesModal from './components/AbilitiesModal.jsx'
 import SpellsModal from './components/SpellsModal'
+import NotesModal from './components/NotesModal.jsx'
 import {
   isLevelUpAvailable,
   getFighterFeatures, getBarbarianFeatures, getBardFeatures,
@@ -69,6 +70,7 @@ export default function App() {
   const [showInventory, setShowInventory] = useState(false)
   const [showAbilities, setShowAbilities] = useState(false)
   const [showSpells, setShowSpells] = useState(false)
+  const [showNotes, setShowNotes] = useState(false)
 
 
   // ── Resume campaign ─────────────────────────────────────────────────────────
@@ -165,117 +167,117 @@ export default function App() {
     setShowLevelUp(true)
   }
 
-   const buildLevelUpPreview = (p) => {
+  const buildLevelUpPreview = (p) => {
     const newLevel = p.level + 1
-    const conMod   = Math.floor((p.con - 10) / 2)
-    const chaMod   = Math.floor((p.cha - 10) / 2)
-    const hitDie   = hitDieForClass(p.class)
+    const conMod = Math.floor((p.con - 10) / 2)
+    const chaMod = Math.floor((p.cha - 10) / 2)
+    const hitDie = hitDieForClass(p.class)
     const hpGained = Math.floor(hitDie / 2) + 1 + conMod
     const newMaxHp = p.max_hp + hpGained
-    const newProf  = proficiencyForLevel(newLevel)
- 
-    const isFighter   = p.class === 'Fighter'
+    const newProf = proficiencyForLevel(newLevel)
+
+    const isFighter = p.class === 'Fighter'
     const isBarbarian = p.class === 'Barbarian'
-    const isBard      = p.class === 'Bard'
-    const isCleric    = p.class === 'Cleric'
-    const isDruid     = p.class === 'Druid'
-    const isMonk      = p.class === 'Monk'
-    const isPaladin   = p.class === 'Paladin'
-    const isRanger    = p.class === 'Ranger'
-    const isRogue     = p.class === 'Rogue'
-    const isSorcerer  = p.class === 'Sorcerer'
-    const isWarlock   = p.class === 'Warlock'
-    const isWizard    = p.class === 'Wizard'
- 
+    const isBard = p.class === 'Bard'
+    const isCleric = p.class === 'Cleric'
+    const isDruid = p.class === 'Druid'
+    const isMonk = p.class === 'Monk'
+    const isPaladin = p.class === 'Paladin'
+    const isRanger = p.class === 'Ranger'
+    const isRogue = p.class === 'Rogue'
+    const isSorcerer = p.class === 'Sorcerer'
+    const isWarlock = p.class === 'Warlock'
+    const isWizard = p.class === 'Wizard'
+
     // ── Fighter ──────────────────────────────────────────────────────────────
-    const secondWindUses  = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
+    const secondWindUses = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
     const actionSurgeUses = isFighter ? (newLevel >= 17 ? 2 : newLevel >= 2 ? 1 : 0) : 0
-    const indomitableMax  = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
+    const indomitableMax = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
     const weaponMasteryCount = isFighter
       ? (newLevel >= 16 ? 6 : newLevel >= 4 ? 4 : 3)
       : isBarbarian ? barbarianWeaponMastery(newLevel) : 0
     const extraAttacks = isFighter
       ? (newLevel >= 20 ? 4 : newLevel >= 11 ? 3 : newLevel >= 5 ? 2 : 1)
       : isBarbarian ? (newLevel >= 5 ? 2 : 1)
-      : (isBard && p.subclass === 'College of Valor' && newLevel >= 6) ? 2
-      : (isMonk && newLevel >= 5) ? 2
-      : (isPaladin && newLevel >= 5) ? 2
-      : (isRanger && newLevel >= 5) ? 2
-      : 1
- 
-    const rageUses   = isBarbarian ? barbarianRageUses(newLevel)   : 0
+        : (isBard && p.subclass === 'College of Valor' && newLevel >= 6) ? 2
+          : (isMonk && newLevel >= 5) ? 2
+            : (isPaladin && newLevel >= 5) ? 2
+              : (isRanger && newLevel >= 5) ? 2
+                : 1
+
+    const rageUses = isBarbarian ? barbarianRageUses(newLevel) : 0
     const rageDamage = isBarbarian ? barbarianRageDamage(newLevel) : 0
-    const bardicDie             = isBard ? bardInspirationDie(newLevel) : 0
+    const bardicDie = isBard ? bardInspirationDie(newLevel) : 0
     const bardicInspirationUses = isBard ? Math.max(1, chaMod) : 0
-    const bardPrepared          = isBard ? bardPreparedSpells(newLevel) : 0
-    const bardKnownCantrips     = isBard ? bardCantrips(newLevel) : 0
-    const bardSlots             = isBard ? bardSlotSummary(newLevel) : ''
-    const channelDivinityUses   = isCleric ? clericChannelDivinityUses(newLevel) : 0
-    const clericKnownCantrips   = isCleric ? clericCantrips(newLevel) : 0
-    const clericPrepared        = isCleric ? clericPreparedSpells(newLevel) : 0
-    const clericSlots           = isCleric ? clericSlotSummary(newLevel) : ''
-    const wildShapeUses         = isDruid ? druidWildShapeUses(newLevel) : 0
-    const wildShapeCR           = isDruid ? druidWildShapeCR(newLevel) : ''
-    const druidKnownCantrips    = isDruid ? druidCantrips(newLevel) : 0
-    const druidPrepared         = isDruid ? druidPreparedSpells(newLevel) : 0
-    const druidSlots            = isDruid ? druidSlotSummary(newLevel) : ''
-    const focusPoints           = isMonk ? monkFocusPoints(newLevel) : 0
-    const martialArtsDie        = isMonk ? monkMartialArtsDie(newLevel) : 0
-    const unarmoredMovement     = isMonk ? monkUnarmoredMovement(newLevel) : 0
-    const layOnHandsPool        = isPaladin ? paladinLayOnHandsPool(newLevel) : 0
-    const paladinCdUses         = isPaladin ? paladinChannelDivinityUses(newLevel) : 0
-    const paladinPrepared       = isPaladin ? paladinPreparedSpells(newLevel) : 0
-    const paladinSlots          = isPaladin ? paladinSlotSummary(newLevel) : ''
-    const favoredEnemyUses      = isRanger ? rangerFavoredEnemyUses(newLevel) : 0
-    const rangerPrepared        = isRanger ? rangerPreparedSpells(newLevel) : 0
-    const rangerSlots           = isRanger ? rangerSlotSummary(newLevel) : ''
-    const sneakAttackDice       = isRogue ? rogueSneakAttackDice(newLevel) : 0
-    const rogueAtSlots          = isRogue && p.subclass === 'Arcane Trickster' ? atSlotSummary(newLevel) : ''
-    const rogueAtPrepared       = isRogue && p.subclass === 'Arcane Trickster' ? atPreparedSpells(newLevel) : 0
-    const rogueAtCantrips       = isRogue && p.subclass === 'Arcane Trickster' ? atCantrips(newLevel) : 0
-    const sorceryPoints         = isSorcerer ? sorcererSorceryPoints(newLevel) : 0
+    const bardPrepared = isBard ? bardPreparedSpells(newLevel) : 0
+    const bardKnownCantrips = isBard ? bardCantrips(newLevel) : 0
+    const bardSlots = isBard ? bardSlotSummary(newLevel) : ''
+    const channelDivinityUses = isCleric ? clericChannelDivinityUses(newLevel) : 0
+    const clericKnownCantrips = isCleric ? clericCantrips(newLevel) : 0
+    const clericPrepared = isCleric ? clericPreparedSpells(newLevel) : 0
+    const clericSlots = isCleric ? clericSlotSummary(newLevel) : ''
+    const wildShapeUses = isDruid ? druidWildShapeUses(newLevel) : 0
+    const wildShapeCR = isDruid ? druidWildShapeCR(newLevel) : ''
+    const druidKnownCantrips = isDruid ? druidCantrips(newLevel) : 0
+    const druidPrepared = isDruid ? druidPreparedSpells(newLevel) : 0
+    const druidSlots = isDruid ? druidSlotSummary(newLevel) : ''
+    const focusPoints = isMonk ? monkFocusPoints(newLevel) : 0
+    const martialArtsDie = isMonk ? monkMartialArtsDie(newLevel) : 0
+    const unarmoredMovement = isMonk ? monkUnarmoredMovement(newLevel) : 0
+    const layOnHandsPool = isPaladin ? paladinLayOnHandsPool(newLevel) : 0
+    const paladinCdUses = isPaladin ? paladinChannelDivinityUses(newLevel) : 0
+    const paladinPrepared = isPaladin ? paladinPreparedSpells(newLevel) : 0
+    const paladinSlots = isPaladin ? paladinSlotSummary(newLevel) : ''
+    const favoredEnemyUses = isRanger ? rangerFavoredEnemyUses(newLevel) : 0
+    const rangerPrepared = isRanger ? rangerPreparedSpells(newLevel) : 0
+    const rangerSlots = isRanger ? rangerSlotSummary(newLevel) : ''
+    const sneakAttackDice = isRogue ? rogueSneakAttackDice(newLevel) : 0
+    const rogueAtSlots = isRogue && p.subclass === 'Arcane Trickster' ? atSlotSummary(newLevel) : ''
+    const rogueAtPrepared = isRogue && p.subclass === 'Arcane Trickster' ? atPreparedSpells(newLevel) : 0
+    const rogueAtCantrips = isRogue && p.subclass === 'Arcane Trickster' ? atCantrips(newLevel) : 0
+    const sorceryPoints = isSorcerer ? sorcererSorceryPoints(newLevel) : 0
     const sorcererKnownCantrips = isSorcerer ? sorcererCantrips(newLevel) : 0
-    const sorcererPrepared      = isSorcerer ? sorcererPreparedSpells(newLevel) : 0
-    const sorcererSlots         = isSorcerer ? sorcererSlotSummary(newLevel) : ''
-    const warlockSlotLvl        = isWarlock ? warlockSlotLevel(newLevel) : 0
-    const warlockSlotCnt        = isWarlock ? warlockSlotCount(newLevel) : 0
-    const warlockPrepared       = isWarlock ? warlockPreparedSpells(newLevel) : 0
-    const warlockKnownCantrips  = isWarlock ? warlockCantrips(newLevel) : 0
-    const warlockInvCount       = isWarlock ? warlockInvocations(newLevel) : 0
-    const wizardKnownCantrips   = isWizard ? wizardCantrips(newLevel) : 0
-    const wizardPrepared        = isWizard ? wizardPreparedSpells(newLevel) : 0
-    const wizardSlots           = isWizard ? wizardSlotSummary(newLevel) : ''
- 
-    const asiAvailable = isFighter   ? FIGHTER_ASI_LEVELS.includes(newLevel)
-      : isBarbarian  ? BARBARIAN_ASI_LEVELS.includes(newLevel)
-      : isBard       ? BARD_ASI_LEVELS.includes(newLevel)
-      : isCleric     ? CLERIC_ASI_LEVELS.includes(newLevel)
-      : isDruid      ? DRUID_ASI_LEVELS.includes(newLevel)
-      : isMonk       ? MONK_ASI_LEVELS.includes(newLevel)
-      : isPaladin    ? PALADIN_ASI_LEVELS.includes(newLevel)
-      : isRanger     ? RANGER_ASI_LEVELS.includes(newLevel)
-      : isRogue      ? ROGUE_ASI_LEVELS.includes(newLevel)
-      : isSorcerer   ? SORCERER_ASI_LEVELS.includes(newLevel)
-      : isWarlock    ? WARLOCK_ASI_LEVELS.includes(newLevel)
-      : isWizard     ? WIZARD_ASI_LEVELS.includes(newLevel)
-      : [4, 8, 12, 16, 19].includes(newLevel)
- 
+    const sorcererPrepared = isSorcerer ? sorcererPreparedSpells(newLevel) : 0
+    const sorcererSlots = isSorcerer ? sorcererSlotSummary(newLevel) : ''
+    const warlockSlotLvl = isWarlock ? warlockSlotLevel(newLevel) : 0
+    const warlockSlotCnt = isWarlock ? warlockSlotCount(newLevel) : 0
+    const warlockPrepared = isWarlock ? warlockPreparedSpells(newLevel) : 0
+    const warlockKnownCantrips = isWarlock ? warlockCantrips(newLevel) : 0
+    const warlockInvCount = isWarlock ? warlockInvocations(newLevel) : 0
+    const wizardKnownCantrips = isWizard ? wizardCantrips(newLevel) : 0
+    const wizardPrepared = isWizard ? wizardPreparedSpells(newLevel) : 0
+    const wizardSlots = isWizard ? wizardSlotSummary(newLevel) : ''
+
+    const asiAvailable = isFighter ? FIGHTER_ASI_LEVELS.includes(newLevel)
+      : isBarbarian ? BARBARIAN_ASI_LEVELS.includes(newLevel)
+        : isBard ? BARD_ASI_LEVELS.includes(newLevel)
+          : isCleric ? CLERIC_ASI_LEVELS.includes(newLevel)
+            : isDruid ? DRUID_ASI_LEVELS.includes(newLevel)
+              : isMonk ? MONK_ASI_LEVELS.includes(newLevel)
+                : isPaladin ? PALADIN_ASI_LEVELS.includes(newLevel)
+                  : isRanger ? RANGER_ASI_LEVELS.includes(newLevel)
+                    : isRogue ? ROGUE_ASI_LEVELS.includes(newLevel)
+                      : isSorcerer ? SORCERER_ASI_LEVELS.includes(newLevel)
+                        : isWarlock ? WARLOCK_ASI_LEVELS.includes(newLevel)
+                          : isWizard ? WIZARD_ASI_LEVELS.includes(newLevel)
+                            : [4, 8, 12, 16, 19].includes(newLevel)
+
     const subclassChoiceRequired = newLevel === 3 && !p.subclass
- 
-    const newFeatures = isFighter   ? getFighterFeatures(p, newLevel)
-      : isBarbarian  ? getBarbarianFeatures(p, newLevel)
-      : isBard       ? getBardFeatures(p, newLevel)
-      : isCleric     ? getClericFeatures(p, newLevel)
-      : isDruid      ? getDruidFeatures(p, newLevel)
-      : isMonk       ? getMonkFeatures(p, newLevel)
-      : isPaladin    ? getPaladinFeatures(p, newLevel)
-      : isRanger     ? getRangerFeatures(p, newLevel)
-      : isRogue      ? getRogueFeatures(p, newLevel)
-      : isSorcerer   ? getSorcererFeatures(p, newLevel)
-      : isWarlock    ? getWarlockFeatures(p, newLevel)
-      : isWizard     ? getWizardFeatures(p, newLevel)
-      : []
- 
+
+    const newFeatures = isFighter ? getFighterFeatures(p, newLevel)
+      : isBarbarian ? getBarbarianFeatures(p, newLevel)
+        : isBard ? getBardFeatures(p, newLevel)
+          : isCleric ? getClericFeatures(p, newLevel)
+            : isDruid ? getDruidFeatures(p, newLevel)
+              : isMonk ? getMonkFeatures(p, newLevel)
+                : isPaladin ? getPaladinFeatures(p, newLevel)
+                  : isRanger ? getRangerFeatures(p, newLevel)
+                    : isRogue ? getRogueFeatures(p, newLevel)
+                      : isSorcerer ? getSorcererFeatures(p, newLevel)
+                        : isWarlock ? getWarlockFeatures(p, newLevel)
+                          : isWizard ? getWizardFeatures(p, newLevel)
+                            : []
+
     return {
       new_level: newLevel, hp_gained: hpGained, new_max_hp: newMaxHp,
       new_proficiency_bonus: newProf,
@@ -508,6 +510,7 @@ export default function App() {
         onInventory={() => setShowInventory(true)}
         onAbilities={() => setShowAbilities(true)}
         onSpells={() => setShowSpells(true)}
+        onNotes={() => setShowNotes(true)}
       />
 
       <GameScreen
@@ -581,6 +584,13 @@ export default function App() {
           player={player}
           onClose={() => setShowSpells(false)}
           onCastInCombat={showCombat ? () => { } : null}
+        />
+      )}
+
+      {showNotes && (
+        <NotesModal
+          campaignId={campaign.id}
+          onClose={() => setShowNotes(false)}
         />
       )}
 

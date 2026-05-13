@@ -7943,3 +7943,25 @@ pub async fn apply_bonus_damage_handler(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }
+
+pub async fn get_notes_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    match campaign::get_player_notes(&state.pool, &campaign_id).await {
+        Ok(notes) => (StatusCode::OK, Json(json!({ "notes": notes }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))),
+    }
+}
+
+pub async fn update_notes_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    let notes = body["notes"].as_str().unwrap_or("");
+    match campaign::update_player_notes(&state.pool, &campaign_id, notes).await {
+        Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))),
+    }
+}

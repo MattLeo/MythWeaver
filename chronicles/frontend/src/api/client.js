@@ -505,3 +505,21 @@ export async function getPlayerFeats(campaignId) {
     if (!res.ok) throw new Error('Failed to get player feats')
     return res.json()
 }
+
+// ─── Notes ───────────────────────────────────────────────────────────────────
+
+export async function getNotes(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/notes`)
+  if (!res.ok) throw new Error('Failed to get notes')
+  return res.json()
+}
+
+export async function saveNotes(campaignId, notes) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/notes`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes })
+  })
+  if (!res.ok) throw new Error('Failed to save notes')
+  return res.json()
+}

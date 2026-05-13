@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/campaigns/:id", get(api::get_campaign_state).delete(api::delete_campaign))
         .route("/api/campaigns/:id/player-state", get(api::get_player_state))
         .route("/api/campaigns/:id/level-up", post(api::level_up))
+        .route("/api/campaigns/:id/notes", get(api::get_notes_handler).put(api::update_notes_handler))
 
         // ── Sessions ─────────────────────────────────────────────────────────
         .route("/api/campaigns/:id/session", post(api::start_session))

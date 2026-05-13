@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL DEFAULT 'MythWeaver Campaign',
     story_journal   TEXT,
+    player_notes    TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
