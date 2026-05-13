@@ -39,18 +39,30 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
 
     let spells_sql = include_str!("../../migrations/002_spells_seed.sql");
-
-    sqlx::query(spells_sql)
-        .execute(pool)
+    let spell_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM spells")
+        .fetch_one(pool)
         .await
-        .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+        .unwrap_or(0);
+
+    if spell_count == 0 {
+        sqlx::query(spells_sql)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+    }
 
     let feats_sql = include_str!("../../migrations/003_feats_seed.sql");
-
-    sqlx::query(feats_sql)
-        .execute(pool)
+    let feat_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM feats")
+        .fetch_one(pool)
         .await
-        .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+        .unwrap_or(0);
+
+    if feat_count == 0 {
+        sqlx::query(feats_sql)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+    }
 
     tracing::info!("Database migrations complete");
     Ok(())
