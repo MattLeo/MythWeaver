@@ -349,6 +349,40 @@ pub async fn create_campaign(
         ).await;
     }
 
+    // ── Starting class cantrips ───────────────────────────────────────────────
+    let class_source = p.class.to_lowercase().replace(' ', "_");
+    for spell_id in req.starting_cantrips.iter().flatten() {
+        let _ = spells_db::learn_spell(pool, &camp.id, &p.id, spell_id, "cantrip", &class_source).await;
+    }
+
+    // ── Starting known/prepared spells ────────────────────────────────────────
+    for spell_id in req.starting_spells.iter().flatten() {
+        let _ = spells_db::learn_spell(pool, &camp.id, &p.id, spell_id, "prepared", &class_source).await;
+    }
+
+    // ── Lineage cantrips (granted automatically by species/subtype) ───────────
+    let lineage_cantrips: &[&str] = match (p.race.as_str(), p.species_subtype.as_deref()) {
+        ("Elf",      Some("High Elf"))              => &["spell_prestidigitation"],
+        ("Elf",      Some("Wood Elf"))              => &["spell_druidcraft"],
+        ("Gnome",    Some("Forest Gnome"))          => &["spell_minor_illusion"],
+        ("Gnome",    Some("Rock Gnome"))            => &["spell_mending", "spell_prestidigitation"],
+        ("Half-Elf", Some("High Elf Heritage"))     => &["spell_prestidigitation"],
+        _                                           => &[],
+    };
+    for spell_id in lineage_cantrips {
+        let _ = spells_db::learn_spell(pool, &camp.id, &p.id, spell_id, "cantrip", "lineage").await;
+    }
+
+    // ── Magic Initiate feat spells ────────────────────────────────────────────
+    if req.background_feat_id.as_deref() == Some("feat_magic_initiate") {
+        for spell_id in req.magic_initiate_cantrips.iter().flatten() {
+            let _ = spells_db::learn_spell(pool, &camp.id, &p.id, spell_id, "cantrip", "magic_initiate").await;
+        }
+        if let Some(ref spell_id) = req.magic_initiate_spell {
+            let _ = spells_db::learn_spell(pool, &camp.id, &p.id, spell_id, "always_prepared", "magic_initiate").await;
+        }
+    }
+
     if let Err(e) = time::init_campaign_time(pool, &camp.id).await {
         tracing::warn!("Failed to init campaign time: {}", e);
     }
@@ -6741,42 +6775,47 @@ pub async fn learn_spell_handler(
         Ok(Some(p)) => p,
         _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
     };
- 
-    // Verify spell exists
+
     let spell = match spells_db::get_spell(pool, &req.spell_id).await {
         Ok(Some(s)) => s,
         Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "Spell not found"}))),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     };
- 
+
     let spell_level = spell["level"].as_i64().unwrap_or(0);
     let spell_type = if spell_level == 0 {
         "cantrip".to_string()
     } else {
         req.spell_type.unwrap_or_else(|| "prepared".to_string())
     };
- 
-    // Enforce EK restrictions: only abjuration/evocation unless replacing
-    // (This is advisory — the frontend should enforce; backend just records)
-    let fighter_level = p.level;
-    let max_prepared = spells_db::ek_spells_prepared(fighter_level);
- 
-    // Count current prepared (non-cantrip) spells
-    let known = spells_db::get_known_spells(pool, &p.id).await.unwrap_or_default();
-    let prepared_count = known.iter()
-        .filter(|s| s["spell_type"].as_str() != Some("cantrip"))
-        .count() as i64;
- 
-    if spell_type != "cantrip" && prepared_count >= max_prepared {
-        return (StatusCode::BAD_REQUEST, Json(json!({
-            "error": format!(
-                "Already know {} spells (max {} at fighter level {}).",
-                prepared_count, max_prepared, fighter_level
-            )
-        })));
+
+    let subclass = p.subclass.as_deref().unwrap_or("");
+
+    // ── EK-only: enforce the EK spell count cap ───────────────────────────────
+    if subclass == "Eldritch Knight" && spell_type != "cantrip" {
+        let max_prepared = spells_db::ek_spells_prepared(p.level);
+        let known = spells_db::get_known_spells(pool, &p.id).await.unwrap_or_default();
+        let prepared_count = known.iter()
+            .filter(|s| s["spell_type"].as_str() != Some("cantrip"))
+            .count() as i64;
+        if prepared_count >= max_prepared {
+            return (StatusCode::BAD_REQUEST, Json(json!({
+                "error": format!(
+                    "Already know {} spells (max {} at fighter level {}).",
+                    prepared_count, max_prepared, p.level
+                )
+            })));
+        }
     }
- 
-    match spells_db::learn_spell(pool, &campaign_id, &p.id, &req.spell_id, &spell_type, "eldritch_knight").await {
+
+    // ── Derive source from class/subclass ─────────────────────────────────────
+    let source = match subclass {
+        "Eldritch Knight"  => "eldritch_knight".to_string(),
+        "Arcane Trickster" => "arcane_trickster".to_string(),
+        _ => p.class.to_lowercase().replace(' ', "_"),
+    };
+
+    match spells_db::learn_spell(pool, &campaign_id, &p.id, &req.spell_id, &spell_type, &source).await {
         Ok(status) if status == "already_known" => {
             (StatusCode::OK, Json(json!({"message": "Already know this spell", "spell": spell})))
         }
@@ -7988,5 +8027,15 @@ pub async fn update_notes_handler(
     match campaign::update_player_notes(&state.pool, &campaign_id, notes).await {
         Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))),
+    }
+}
+
+pub async fn browse_class_spells_handler(
+    State(state): State<Arc<AppState>>,
+    Path(class_name): Path<String>,
+) -> impl IntoResponse {
+    match spells_db::get_class_spells(&state.pool, &class_name).await {
+        Ok(spells) => (StatusCode::OK, Json(json!({ "spells": spells }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }

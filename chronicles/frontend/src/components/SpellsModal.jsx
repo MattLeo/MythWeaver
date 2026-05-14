@@ -539,7 +539,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
             <span style={styles.headerGlyph}>✦</span>
             <div>
               <div style={styles.headerTitle}>Arcane Arsenal</div>
-              <div style={styles.headerSub}>Eldritch Knight · Spellbook</div>
+              <div style={styles.headerSub}>Spellbook</div>
             </div>
           </div>
           <button onClick={onClose} style={styles.closeBtn}>✕</button>

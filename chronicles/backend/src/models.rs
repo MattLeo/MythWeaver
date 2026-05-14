@@ -669,6 +669,10 @@ pub struct CreateCampaignRequest {
     pub magician_cantrip: Option<String>,
     pub background_feat_id: Option<String>,
     pub background_feat_choices: Option<String>,
+    pub starting_cantrips: Option<Vec<String>>,
+    pub starting_spells: Option<Vec<String>>,
+    pub magic_initiate_cantrips: Option<Vec<String>>,
+    pub magic_initiate_spell: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

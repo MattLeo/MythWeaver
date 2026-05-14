@@ -375,6 +375,12 @@ export async function getClassSpells(campaignId) {
   return res.json()
 }
 
+export async function getSpellsByClass(className) {
+  const res = await fetch(`${BASE}/spells/browse/${encodeURIComponent(className)}`)
+  if (!res.ok) throw new Error('Failed to get class spells')
+  return res.json()
+}
+
 /**
  * Cast a spell.
  * @param {string} campaignId

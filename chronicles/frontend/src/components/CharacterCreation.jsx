@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { STYLES } from '../styles.js'
+import { getSpellsByClass } from '../api/client.js'
 import {
   CLASSES, SPECIES, BACKGROUNDS, CLASS_EQUIPMENT, SEX_OPTIONS,
   STAT_KEYS, STAT_LABELS_ARRAY, statModifier, formatModifier, hitDieForClass,
@@ -12,6 +13,16 @@ const rollBlock = () => Array.from({ length: 6 }, () => {
   const r = [d(6), d(6), d(6), d(6)].sort((a, b) => a - b)
   return r[1] + r[2] + r[3]
 })
+
+const STARTING_CANTRIP_COUNTS = {
+  Wizard: 3, Cleric: 3, Sorcerer: 4, Bard: 2, Druid: 2, Warlock: 2,
+}
+const STARTING_SPELL_COUNTS = {
+  Wizard: 6, Bard: 4, Sorcerer: 2, Warlock: 2,
+}
+const CANTRIP_CLASSES = Object.keys(STARTING_CANTRIP_COUNTS)
+const KNOWN_SPELL_CLASSES = Object.keys(STARTING_SPELL_COUNTS)
+const MI_LISTS = ['Cleric', 'Druid', 'Wizard']
 
 const CREATION_STYLES = `
 ${STYLES}
@@ -117,6 +128,11 @@ ${STYLES}
 }
 .info-box strong { color: var(--goldl); font-family: 'Cinzel', serif; font-size: .72rem; letter-spacing: .06em; }
 .sex-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.pick-card.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 `
 
 // ─── Step definitions ─────────────────────────────────────────────────────────
@@ -158,11 +174,16 @@ const SCHOOL_COLORS_CC = {
   Abjuration: '#7ec8e3', Necromancy: '#b0f5a9', Conjuration: '#b5a9f5',
 }
 
-function buildSteps(race, background, playerClass, divineOrder, primalOrder) {
+function buildSteps(race, background, playerClass, divineOrder, primalOrder, backgroundFeatId) {
   const steps = ['name', 'sex', 'species']
   const sp = getSpeciesByName(race)
   if (sp?.subtype) steps.push('species_subtype')
   steps.push('class')
+
+  // Spell selection for casting classes — happens right after class choice
+  if (CANTRIP_CLASSES.includes(playerClass)) steps.push('starting_cantrips')
+  if (KNOWN_SPELL_CLASSES.includes(playerClass)) steps.push('starting_spells')
+
   if (playerClass === 'Cleric') {
     steps.push('divine_order')
     if (divineOrder === 'Thaumaturge') steps.push('thaumaturge_cantrip')
@@ -171,7 +192,16 @@ function buildSteps(race, background, playerClass, divineOrder, primalOrder) {
     steps.push('primal_order')
     if (primalOrder === 'Magician') steps.push('magician_cantrip')
   }
-  steps.push('background', 'background_asi', 'background_feat', 'stats', 'equipment', 'backstory')
+
+  steps.push('background', 'background_asi', 'background_feat')
+
+  // Magic Initiate requires spell selection after feat is chosen
+  if (backgroundFeatId === 'feat_magic_initiate') {
+    steps.push('magic_initiate_list')
+    steps.push('magic_initiate_spells')
+  }
+
+  steps.push('stats', 'equipment', 'backstory')
   return steps
 }
 
@@ -193,12 +223,23 @@ export default function CharacterCreation({ onComplete }) {
     magician_cantrip: '',     // Druid Magician: chosen extra cantrip
     background_feat_id: '',
     background_feat_choices: {},
+    starting_cantrips: [],
+    starting_spells: [],
+    magic_initiate_list: '',
+    magic_initiate_cantrips: [],
+    magic_initiate_spell: '',
   })
 
-  const steps = buildSteps(char.race, char.background, char.player_class, char.divine_order, char.primal_order)
+  const steps = buildSteps(
+    char.race, char.background, char.player_class,
+    char.divine_order, char.primal_order, char.background_feat_id
+  )
   const [stepIndex, setStepIndex] = useState(0)
   const currentStep = steps[stepIndex]
   const [originFeats, setOriginFeats] = useState([])
+  const [classSpells, setClassSpells] = useState([])
+  const [miSpells, setMiSpells] = useState([])
+  const [spellsLoading, setSpellsLoading] = useState(false)
 
   useEffect(() => {
     fetch('/api/feats?category=origin')
@@ -206,6 +247,26 @@ export default function CharacterCreation({ onComplete }) {
       .then(d => setOriginFeats(d.feats || []))
       .catch(() => { })
   }, [])
+
+  useEffect(() => {
+    if (!['starting_cantrips', 'starting_spells'].includes(currentStep)) return
+    if (!char.player_class || classSpells.length > 0) return
+    setSpellsLoading(true)
+    getSpellsByClass(char.player_class)
+      .then(d => setClassSpells(d.spells || []))
+      .catch(() => { })
+      .finally(() => setSpellsLoading(false))
+  }, [currentStep, char.player_class])
+
+  useEffect(() => {
+    if (currentStep !== 'magic_initiate_spells' || !char.magic_initiate_list) return
+    if (miSpells.length > 0) return   // ← add this
+    setSpellsLoading(true)
+    getSpellsByClass(char.magic_initiate_list)
+      .then(d => setMiSpells(d.spells || []))
+      .catch(() => { })
+      .finally(() => setSpellsLoading(false))
+  }, [currentStep, char.magic_initiate_list])
 
   const upd = (k, v) => setChar(c => ({ ...c, [k]: v }))
 
@@ -243,21 +304,29 @@ export default function CharacterCreation({ onComplete }) {
 
   const canAdvance = () => {
     switch (currentStep) {
-      case 'name': return char.name.trim().length > 1
-      case 'sex': return !!char.sex
-      case 'species': return !!char.race
-      case 'species_subtype': return !!char.species_subtype
-      case 'class': return !!char.player_class
-      case 'background': return !!char.background
-      case 'background_asi': return asiValid()
-      case 'stats': return true
-      case 'equipment': return !!char.equipment_choice
-      case 'backstory': return true
-      case 'divine_order': return !!char.divine_order
+      case 'name':              return char.name.trim().length > 1
+      case 'sex':               return !!char.sex
+      case 'species':           return !!char.race
+      case 'species_subtype':   return !!char.species_subtype
+      case 'class':             return !!char.player_class
+      case 'background':        return !!char.background
+      case 'background_asi':    return asiValid()
+      case 'stats':             return true
+      case 'equipment':         return !!char.equipment_choice
+      case 'backstory':         return true
+      case 'divine_order':      return !!char.divine_order
       case 'thaumaturge_cantrip': return !!char.thaumaturge_cantrip
-      case 'primal_order': return !!char.primal_order
-      case 'magician_cantrip': return !!char.magician_cantrip
-      case 'background_feat': return !!char.background_feat_id
+      case 'primal_order':      return !!char.primal_order
+      case 'magician_cantrip':  return !!char.magician_cantrip
+      case 'background_feat':   return !!char.background_feat_id
+      case 'starting_cantrips':
+        return char.starting_cantrips.length === (STARTING_CANTRIP_COUNTS[char.player_class] || 0)
+      case 'starting_spells':
+        return char.starting_spells.length === (STARTING_SPELL_COUNTS[char.player_class] || 0)
+      case 'magic_initiate_list':
+        return !!char.magic_initiate_list
+      case 'magic_initiate_spells':
+        return char.magic_initiate_cantrips.length === 2 && !!char.magic_initiate_spell
       default: return true
     }
   }
@@ -294,6 +363,10 @@ export default function CharacterCreation({ onComplete }) {
       thaumaturge_cantrip: char.thaumaturge_cantrip || null,
       primal_order: char.primal_order || null,
       magician_cantrip: char.magician_cantrip || null,
+      starting_cantrips: char.starting_cantrips,
+      starting_spells: char.starting_spells,
+      magic_initiate_cantrips: char.magic_initiate_cantrips,
+      magic_initiate_spell: char.magic_initiate_spell || null,
     })
   }
 
@@ -411,7 +484,12 @@ export default function CharacterCreation({ onComplete }) {
                 <div
                   key={c}
                   className={`pick${char.player_class === c ? ' sel' : ''}`}
-                  onClick={() => upd('player_class', c)}
+                  onClick={() => {
+                    upd('player_class', c)
+                    upd('starting_cantrips', [])
+                    upd('starting_spells', [])
+                    setClassSpells([])
+                  }}
                 >
                   {c}
                 </div>
@@ -769,6 +847,193 @@ export default function CharacterCreation({ onComplete }) {
             </div>
           </>
         )
+
+        case 'starting_cantrips': {
+        const needed = STARTING_CANTRIP_COUNTS[char.player_class] || 0
+        const cantrips = classSpells.filter(s => s.level === 0)
+        const toggle = (spell) => {
+          const already = char.starting_cantrips.includes(spell.id)
+          if (already) {
+            upd('starting_cantrips', char.starting_cantrips.filter(id => id !== spell.id))
+          } else if (char.starting_cantrips.length < needed) {
+            upd('starting_cantrips', [...char.starting_cantrips, spell.id])
+          }
+        }
+        return (
+          <>
+            <h2>Starting Cantrips</h2>
+            <p className="card-sub">
+              Choose {needed} cantrip{needed !== 1 ? 's' : ''} from the {char.player_class} spell list.
+              &nbsp;({char.starting_cantrips.length}/{needed} chosen)
+            </p>
+            {spellsLoading ? <p className="card-sub">Loading spells…</p> : (
+              <div className="pick-grid-2">
+                {cantrips.map(s => {
+                  const sel = char.starting_cantrips.includes(s.id)
+                  const disabled = !sel && char.starting_cantrips.length >= needed
+                  return (
+                    <div
+                      key={s.id}
+                      className={`pick-card${sel ? ' sel' : ''}${disabled ? ' disabled' : ''}`}
+                      onClick={() => !disabled && toggle(s)}
+                    >
+                      <div className="pick-card-name">{s.name}</div>
+                      <div className="pick-card-desc">
+                        <span style={{ color: SCHOOL_COLORS_CC[s.school] || 'var(--dim)', fontSize: '.72rem' }}>
+                          {s.school}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )
+      }
+
+      case 'starting_spells': {
+        const needed = STARTING_SPELL_COUNTS[char.player_class] || 0
+        const spells = classSpells.filter(s => s.level === 1)
+        const toggle = (spell) => {
+          const already = char.starting_spells.includes(spell.id)
+          if (already) {
+            upd('starting_spells', char.starting_spells.filter(id => id !== spell.id))
+          } else if (char.starting_spells.length < needed) {
+            upd('starting_spells', [...char.starting_spells, spell.id])
+          }
+        }
+        const label = char.player_class === 'Wizard' ? 'spellbook' : 'known spells'
+        return (
+          <>
+            <h2>Starting {char.player_class === 'Wizard' ? 'Spellbook' : 'Spells'}</h2>
+            <p className="card-sub">
+              Choose {needed} level 1 spell{needed !== 1 ? 's' : ''} for your {label}.
+              &nbsp;({char.starting_spells.length}/{needed} chosen)
+            </p>
+            {spellsLoading ? <p className="card-sub">Loading spells…</p> : (
+              <div className="pick-grid-2">
+                {spells.map(s => {
+                  const sel = char.starting_spells.includes(s.id)
+                  const disabled = !sel && char.starting_spells.length >= needed
+                  return (
+                    <div
+                      key={s.id}
+                      className={`pick-card${sel ? ' sel' : ''}${disabled ? ' disabled' : ''}`}
+                      onClick={() => !disabled && toggle(s)}
+                    >
+                      <div className="pick-card-name">{s.name}</div>
+                      <div className="pick-card-desc">
+                        <span style={{ color: SCHOOL_COLORS_CC[s.school] || 'var(--dim)', fontSize: '.72rem' }}>
+                          {s.school}
+                        </span>
+                        {s.concentration === 1 && (
+                          <span style={{ fontSize: '.7rem', color: 'var(--dim)' }}> · Concentration</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )
+      }
+
+      case 'magic_initiate_list':
+        return (
+          <>
+            <h2>Magic Initiate</h2>
+            <p className="card-sub">
+              Choose a spell list to learn from. You'll pick two cantrips and one level 1 spell from it.
+            </p>
+            <div className="pick-grid-2">
+              {MI_LISTS.map(list => (
+                <div
+                  key={list}
+                  className={`pick-card${char.magic_initiate_list === list ? ' sel' : ''}`}
+                  onClick={() => {
+                    upd('magic_initiate_list', list)
+                    upd('magic_initiate_cantrips', [])
+                    upd('magic_initiate_spell', '')
+                    setMiSpells([])
+                  }}
+                >
+                  <div className="pick-card-name">{list} List</div>
+                  <div className="pick-card-desc">
+                    {list === 'Cleric' && 'Divine magic — healing, radiant damage, protection'}
+                    {list === 'Druid' && 'Nature magic — elementals, animals, plants'}
+                    {list === 'Wizard' && 'Arcane magic — the broadest selection of spells'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )
+
+      case 'magic_initiate_spells': {
+        const miCantrips = miSpells.filter(s => s.level === 0)
+        const miLevel1   = miSpells.filter(s => s.level === 1)
+        const toggleMiCantrip = (spell) => {
+          const already = char.magic_initiate_cantrips.includes(spell.id)
+          if (already) {
+            upd('magic_initiate_cantrips', char.magic_initiate_cantrips.filter(id => id !== spell.id))
+          } else if (char.magic_initiate_cantrips.length < 2) {
+            upd('magic_initiate_cantrips', [...char.magic_initiate_cantrips, spell.id])
+          }
+        }
+        return (
+          <>
+            <h2>Magic Initiate Spells</h2>
+            <p className="card-sub">
+              Choose 2 cantrips and 1 level 1 spell from the {char.magic_initiate_list} list.
+            </p>
+            {spellsLoading ? <p className="card-sub">Loading spells…</p> : (
+              <>
+                <h3 style={{ fontSize: '.8rem', color: 'var(--goldl)', margin: '.5rem 0 .25rem' }}>
+                  Cantrips ({char.magic_initiate_cantrips.length}/2)
+                </h3>
+                <div className="pick-grid-2">
+                  {miCantrips.map(s => {
+                    const sel = char.magic_initiate_cantrips.includes(s.id)
+                    const disabled = !sel && char.magic_initiate_cantrips.length >= 2
+                    return (
+                      <div
+                        key={s.id}
+                        className={`pick-card${sel ? ' sel' : ''}${disabled ? ' disabled' : ''}`}
+                        onClick={() => !disabled && toggleMiCantrip(s)}
+                      >
+                        <div className="pick-card-name">{s.name}</div>
+                        <div className="pick-card-desc" style={{ color: SCHOOL_COLORS_CC[s.school] || 'var(--dim)', fontSize: '.72rem' }}>
+                          {s.school}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <h3 style={{ fontSize: '.8rem', color: 'var(--goldl)', margin: '.75rem 0 .25rem' }}>
+                  Level 1 Spell {char.magic_initiate_spell ? '✓' : '(choose 1)'}
+                </h3>
+                <div className="pick-grid-2">
+                  {miLevel1.map(s => (
+                    <div
+                      key={s.id}
+                      className={`pick-card${char.magic_initiate_spell === s.id ? ' sel' : ''}`}
+                      onClick={() => upd('magic_initiate_spell', s.id)}
+                    >
+                      <div className="pick-card-name">{s.name}</div>
+                      <div className="pick-card-desc" style={{ color: SCHOOL_COLORS_CC[s.school] || 'var(--dim)', fontSize: '.72rem' }}>
+                        {s.school}
+                        {s.concentration === 1 && ' · Conc'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )
+      }
 
       default:
         return null
