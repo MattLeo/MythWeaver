@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
+use sqlx::Row;
 use uuid::Uuid;
 
 // ─── Spell Queries ────────────────────────────────────────────────────────────
@@ -80,31 +81,53 @@ pub async fn get_spell_by_name(pool: &SqlitePool, name: &str) -> Result<Option<V
     })))
 }
 
-pub async fn search_spells(pool: &SqlitePool, query: &str, wizard_only: bool) -> Result<Vec<Value>> {
+pub async fn search_spells(
+    pool: &SqlitePool,
+    query: &str,
+    wizard_only: bool,
+    class_name: Option<&str>,
+) -> Result<Vec<Value>> {
     let pattern = format!("%{}%", query);
-    let wizard_filter: i64 = if wizard_only { 1 } else { 0 };
 
-    let rows = sqlx::query!(
+    // Build the class filter clause
+    let class_filter = match class_name {
+        Some("Wizard") | None if wizard_only => "AND is_wizard_spell = 1",
+        Some("Cleric")   => "AND is_cleric_spell = 1",
+        Some("Druid")    => "AND is_druid_spell = 1",
+        Some("Bard")     => "AND is_bard_spell = 1",
+        Some("Paladin")  => "AND is_paladin_spell = 1",
+        Some("Ranger")   => "AND is_ranger_spell = 1",
+        Some("Sorcerer") => "AND is_sorcerer_spell = 1",
+        Some("Warlock")  => "AND is_warlock_spell = 1",
+        Some("Wizard")   => "AND is_wizard_spell = 1",
+        _                => "",
+    };
+
+    let sql = format!(
         "SELECT id, name, level, school, casting_time, duration, concentration, description
          FROM spells
          WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?))
-           AND (? = 0 OR is_wizard_spell = 1)
+           {}
          ORDER BY level, name
          LIMIT 20",
-        pattern, pattern, wizard_filter
-    )
-    .fetch_all(pool)
-    .await?;
+        class_filter
+    );
+
+    let rows = sqlx::query(&sql)
+        .bind(&pattern)
+        .bind(&pattern)
+        .fetch_all(pool)
+        .await?;
 
     Ok(rows.iter().map(|r| json!({
-        "id": r.id,
-        "name": r.name,
-        "level": r.level,
-        "school": r.school,
-        "casting_time": r.casting_time,
-        "duration": r.duration,
-        "concentration": r.concentration,
-        "description": r.description,
+        "id":            r.get::<String, _>("id"),
+        "name":          r.get::<String, _>("name"),
+        "level":         r.get::<i64, _>("level"),
+        "school":        r.get::<String, _>("school"),
+        "casting_time":  r.get::<String, _>("casting_time"),
+        "duration":      r.get::<String, _>("duration"),
+        "concentration": r.get::<i64, _>("concentration"),
+        "description":   r.get::<String, _>("description"),
     })).collect())
 }
 
@@ -1008,4 +1031,54 @@ pub async fn validate_cast(
         "concentration_warning": false,
         "spell": spell,
     }))
+}
+
+pub async fn get_class_spells(pool: &SqlitePool, class_name: &str) -> Result<Vec<Value>> {
+    let col = match class_name {
+        "Wizard" | "Eldritch Knight" | "Arcane Trickster" => "is_wizard_spell",
+        "Cleric"   => "is_cleric_spell",
+        "Druid"    => "is_druid_spell",
+        "Bard"     => "is_bard_spell",
+        "Paladin"  => "is_paladin_spell",
+        "Ranger"   => "is_ranger_spell",
+        "Sorcerer" => "is_sorcerer_spell",
+        "Warlock"  => "is_warlock_spell",
+        _          => return Ok(vec![]),
+    };
+
+    let sql = format!(
+        "SELECT id, name, level, school, casting_time, duration, concentration, description,
+                damage_die, damage_die_count, damage_type, save_type, attack_type, target_type,
+                has_backend_resolver, scales_with_level,
+                cantrip_dice_5, cantrip_dice_11, cantrip_dice_17, slot_scale_dice
+         FROM spells
+         WHERE {} = 1
+         ORDER BY level, name",
+        col
+    );
+
+    let rows = sqlx::query(&sql).fetch_all(pool).await?;
+
+    Ok(rows.iter().map(|r| json!({
+        "id":                r.get::<String, _>("id"),
+        "name":              r.get::<String, _>("name"),
+        "level":             r.get::<i64, _>("level"),
+        "school":            r.get::<String, _>("school"),
+        "casting_time":      r.get::<String, _>("casting_time"),
+        "duration":          r.get::<String, _>("duration"),
+        "concentration":     r.get::<i64, _>("concentration"),
+        "description":       r.get::<String, _>("description"),
+        "damage_die":        r.get::<Option<String>, _>("damage_die"),
+        "damage_die_count":  r.get::<Option<i64>, _>("damage_die_count"),
+        "damage_type":       r.get::<Option<String>, _>("damage_type"),
+        "save_type":         r.get::<Option<String>, _>("save_type"),
+        "attack_type":       r.get::<Option<String>, _>("attack_type"),
+        "target_type":       r.get::<Option<String>, _>("target_type"),
+        "has_backend_resolver": r.get::<i64, _>("has_backend_resolver"),
+        "scales_with_level": r.get::<i64, _>("scales_with_level"),
+        "cantrip_dice_5":    r.get::<Option<i64>, _>("cantrip_dice_5"),
+        "cantrip_dice_11":   r.get::<Option<i64>, _>("cantrip_dice_11"),
+        "cantrip_dice_17":   r.get::<Option<i64>, _>("cantrip_dice_17"),
+        "slot_scale_dice":   r.get::<Option<i64>, _>("slot_scale_dice"),
+    })).collect())
 }

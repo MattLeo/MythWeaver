@@ -93,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/campaigns/:id/spells/slots", get(api::get_spell_slots_handler))
         .route("/api/campaigns/:id/spells/slots/seed", post(api::seed_ek_slots_handler))
         .route("/api/campaigns/:id/bonus-damage", post(api::apply_bonus_damage_handler))
+        .route("/api/campaigns/:id/spells/browse", get(api::browse_spells_handler))
 
         // ── Concentration ────────────────────────────────────────────────────
         .route("/api/campaigns/:id/concentration", get(api::get_concentration_handler))

@@ -39,6 +39,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
 
     let spells_sql = include_str!("../../migrations/002_spells_seed.sql");
+    let class_lists = include_str!("../../migrations/004_spells_class_lists.sql");
     let spell_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM spells")
         .fetch_one(pool)
         .await
@@ -46,6 +47,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
 
     if spell_count == 0 {
         sqlx::query(spells_sql)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+
+        sqlx::query(class_lists)
             .execute(pool)
             .await
             .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;

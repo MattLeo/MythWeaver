@@ -7072,6 +7072,7 @@ pub async fn summon_bonded_weapon_handler(
 pub struct SpellSearchRequest {
     pub query: String,
     pub wizard_only: Option<bool>,
+    pub class_name: Option<String>,
 }
  
 pub async fn search_spells_handler(
@@ -7079,8 +7080,32 @@ pub async fn search_spells_handler(
     Json(req): Json<SpellSearchRequest>,
 ) -> impl IntoResponse {
     let wizard_only = req.wizard_only.unwrap_or(false);
-    match spells_db::search_spells(&state.pool, &req.query, wizard_only).await {
+    match spells_db::search_spells(
+        &state.pool,
+        &req.query,
+        wizard_only,
+        req.class_name.as_deref(),
+    ).await {
         Ok(results) => (StatusCode::OK, Json(json!({"spells": results}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+pub async fn browse_spells_handler(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = &state.pool;
+    let p = match player::get_player_by_campaign(pool, &campaign_id).await {
+        Ok(Some(p)) => p,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({"error": "Player not found"}))),
+    };
+    let class_name = p.subclass
+        .as_deref()
+        .filter(|s| matches!(*s, "Eldritch Knight" | "Arcane Trickster"))
+        .unwrap_or(&p.class);
+    match spells_db::get_class_spells(pool, class_name).await {
+        Ok(spells) => (StatusCode::OK, Json(json!({ "spells": spells }))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }

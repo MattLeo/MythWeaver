@@ -369,6 +369,12 @@ export async function forgetSpell(campaignId, spellId) {
   return res.json()
 }
 
+export async function getClassSpells(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/browse`)
+  if (!res.ok) throw new Error('Failed to get class spells')
+  return res.json()
+}
+
 /**
  * Cast a spell.
  * @param {string} campaignId
@@ -396,11 +402,11 @@ export async function castSpell(campaignId, spellId, options = {}) {
   return res.json()
 }
 
-export async function searchSpells(campaignId, query, wizardOnly = false) {
+export async function searchSpells(campaignId, query, wizardOnly = false, className = null) {
   const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, wizard_only: wizardOnly })
+    body: JSON.stringify({ query, wizard_only: wizardOnly, class_name: className })
   })
   if (!res.ok) {
     const body = await res.text()
