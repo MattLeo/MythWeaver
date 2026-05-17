@@ -1121,6 +1121,29 @@ pub async fn use_combat_ability(
                 pool, &p, req.roll.unwrap_or(0)
             ).await
         }
+        "rage" => {
+            crate::db::combat::use_rage(pool, &campaign_id, &p).await
+        }
+        "divine_spark" => {
+            let mode = req.maneuver_name.as_deref().unwrap_or("heal");
+            let roll = req.roll.unwrap_or(0);
+            crate::db::combat::use_divine_spark(pool, &campaign_id, &p, roll, mode, req.target_id.as_deref()).await
+        }
+        "lay_on_hands" => {
+            let amount = req.roll.unwrap_or(5).max(1);
+            crate::db::combat::use_lay_on_hands(pool, &p, amount).await
+        }
+        "wild_shape" => {
+            crate::db::combat::use_wild_shape(pool, &p).await
+        }
+        "breath_weapon" => {
+            let damage = req.roll.unwrap_or(0);
+            crate::db::combat::use_breath_weapon(pool, &campaign_id, &p, damage).await
+        }
+        "healing_hands" => {
+            let heal = req.roll.unwrap_or(0);
+            crate::db::combat::use_healing_hands(pool, &p, heal).await
+        }
         _ => Ok(json!({"error": format!("Unknown ability type: {}", req.ability_type)}))
     };
 

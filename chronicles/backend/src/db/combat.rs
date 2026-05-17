@@ -636,7 +636,14 @@ pub async fn apply_player_damage(
     let str_mod = Player::modifier(player.str);
     let dex_mod = Player::modifier(player.dex);
     let dmg_mod = str_mod.max(dex_mod);
-    let total_damage = (damage_roll + dmg_mod).max(1);
+
+    let damage_bonuses: i64 = crate::db::fighter::get_active_effects(pool, "player", &player.id)
+        .await.unwrap_or_default()
+        .into_iter()
+        .filter(|e| e.effect_type == "damage_bonus")
+        .filter_map(|e| e.value)
+        .sum();
+    let total_damage = (damage_roll + dmg_mod + damage_bonuses).max(1);
 
     let new_hp = (enemy.current_hp - total_damage).max(0);
     let is_dead = new_hp == 0;
@@ -734,6 +741,12 @@ pub async fn end_player_turn(
             }
             "enemy" => {
                 if !current.is_alive { continue; }
+                // turn_order_json is stale — check actual DB state
+                match get_enemy(pool, &current.id).await {
+                    Ok(Some(e)) if !e.is_alive => continue,
+                    Ok(None) => continue,
+                    _ => {}
+                }
                 let result = resolve_enemy_turn(pool, campaign_id, player, &current).await?;
                 let combat_ended = result.combat_ended;
                 let player_downed = result.player_downed;
@@ -822,7 +835,7 @@ async fn resolve_enemy_turn(
             actor_type: "enemy".to_string(),
             action: "skip".to_string(),
             target: None, roll: None, hit: None, damage: None, damage_type: None,
-            text: format!("{} is defeated.", enemy.name),
+            text: String::new(),
             combat_ended: false, player_downed: false,
         });
     }
@@ -859,7 +872,7 @@ async fn resolve_enemy_turn(
                     hit: Some(false),
                     damage: None, damage_type: Some(dmg_type.to_string()),
                     text: format!("{} casts {} at {} but it misses.",
-                        enemy.name, spell, player.name),
+                        enemy.name, spell_display_name(spell), player.name),
                     combat_ended: false, player_downed: false,
                 });
             }
@@ -877,7 +890,7 @@ async fn resolve_enemy_turn(
                 damage: Some(damage),
                 damage_type: Some(dmg_type.to_string()),
                 text: format!("{} casts {} and hits {} for {} {} damage{}",
-                    enemy.name, spell, player.name, damage, dmg_type,
+                    enemy.name, spell_display_name(spell), player.name, damage, dmg_type,
                     if new_hp == 0 { " — they fall!" } else { "." }),
                 combat_ended: false,
                 player_downed: new_hp == 0,
@@ -1438,7 +1451,20 @@ pub async fn resolve_enemy_attack(
 
     let die_size = parse_die_size(&enemy.damage_die);
     let damage = (roll(die_size) + enemy.damage_bonus).max(1);
-    let new_hp = (player.current_hp - damage).max(0);
+
+    let is_resistant = crate::db::fighter::get_active_effects(pool, "player", &player.id)
+        .await.unwrap_or_default()
+        .into_iter()
+        .any(|e| e.effect_type == "damage_resistance" && match e.damage_type.as_deref() {
+            Some("all") => true,
+            Some("bludgeoning|piercing|slashing") =>
+                matches!(enemy.damage_type.as_str(), "bludgeoning" | "piercing" | "slashing"),
+            Some(t) => t == enemy.damage_type.as_str(),
+            None => false,
+        });
+    let final_damage = if is_resistant { damage / 2 } else { damage };
+
+    let new_hp = (player.current_hp - final_damage).max(0);
     crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
 
     Ok(json!({
@@ -1751,4 +1777,257 @@ pub async fn apply_bonus_damage(
         "enemy_name": enemy.name,
         "all_enemies_defeated": is_dead,
     }))
+}
+
+pub async fn use_rage(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+) -> Result<Value> {
+    let ab: Option<(String, i64)> = sqlx::query_as(
+        "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Rage'"
+    ).bind(&player.id).fetch_optional(pool).await?;
+
+    let (ab_id, uses) = match ab {
+        Some(a) => a,
+        None => return Ok(json!({"error": "Rage not found"})),
+    };
+    if uses <= 0 {
+        return Ok(json!({"error": "No Rage uses remaining"}));
+    }
+
+    sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+        .bind(&ab_id).execute(pool).await?;
+
+    let rage_damage: i64 = match player.level {
+        1..=8   => 2,
+        9..=15  => 3,
+        16..=20 => 4,
+        _       => 2,
+    };
+
+    // Clear any existing Rage effects then apply fresh ones
+    crate::db::fighter::remove_effects_by_source(pool, &player.id, "rage").await?;
+
+    crate::db::fighter::add_active_effect(
+        pool, campaign_id, "player", &player.id,
+        "Rage Damage", "damage_bonus",
+        Some(rage_damage), None,
+        "combat", None, "rage",
+    ).await?;
+
+    crate::db::fighter::add_active_effect(
+        pool, campaign_id, "player", &player.id,
+        "Rage Resistance", "damage_resistance",
+        None, Some("bludgeoning|piercing|slashing"),
+        "combat", None, "rage",
+    ).await?;
+
+    Ok(json!({
+        "message": format!("Rage activated! +{} damage on STR attacks. Resistance to BPS damage.", rage_damage),
+        "rage_damage_bonus": rage_damage,
+        "uses_remaining": uses - 1,
+    }))
+}
+
+pub async fn use_divine_spark(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+    roll_total: i64,
+    mode: &str,   // "heal" or "damage"
+    target_id: Option<&str>,
+) -> Result<Value> {
+    let rows = sqlx::query(
+        "UPDATE abilities SET current_uses = current_uses - 1
+         WHERE owner_id = ? AND name = 'Channel Divinity' AND current_uses > 0"
+    ).bind(&player.id).execute(pool).await?.rows_affected();
+
+    if rows == 0 {
+        return Ok(json!({"error": "No Channel Divinity uses remaining"}));
+    }
+
+    let wis_mod = Player::modifier(player.wis);
+    let total = (roll_total + wis_mod).max(1);
+
+    if mode == "heal" {
+        let new_hp = (player.current_hp + total).min(player.max_hp);
+        crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
+        Ok(json!({
+            "message": format!("Divine Spark heals {} HP.", total),
+            "healing": total,
+            "new_hp": new_hp,
+        }))
+    } else {
+        let tid = target_id.ok_or_else(|| anyhow::anyhow!("No target for damage"))?;
+        let enemy = get_enemy(pool, tid).await?
+            .ok_or_else(|| anyhow::anyhow!("Enemy not found"))?;
+        let new_hp = (enemy.current_hp - total).max(0);
+        let is_dead = new_hp == 0;
+        sqlx::query(
+            "UPDATE combat_enemies SET current_hp = ?, is_alive = ?, is_bloodied = ? WHERE id = ?"
+        ).bind(new_hp).bind(!is_dead)
+         .bind(new_hp > 0 && new_hp <= enemy.max_hp / 2)
+         .bind(tid).execute(pool).await?;
+        Ok(json!({
+            "message": format!("Divine Spark deals {} Radiant damage to {}.", total, enemy.name),
+            "damage": total,
+            "enemy_dead": is_dead,
+            "enemy_name": enemy.name,
+        }))
+    }
+}
+
+pub async fn use_lay_on_hands(
+    pool: &SqlitePool,
+    player: &Player,
+    amount: i64,
+) -> Result<Value> {
+    let ab: Option<(String, i64)> = sqlx::query_as(
+        "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Lay On Hands'"
+    ).bind(&player.id).fetch_optional(pool).await?;
+
+    let (ab_id, pool_hp) = match ab {
+        Some(a) => a,
+        None => return Ok(json!({"error": "Lay on Hands not found"})),
+    };
+    if pool_hp < amount {
+        return Ok(json!({"error": format!("Only {} HP remaining in Lay on Hands pool", pool_hp)}));
+    }
+
+    let new_hp = (player.current_hp + amount).min(player.max_hp);
+    crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
+    sqlx::query("UPDATE abilities SET current_uses = current_uses - ? WHERE id = ?")
+        .bind(amount).bind(&ab_id).execute(pool).await?;
+
+    Ok(json!({
+        "message": format!("Lay on Hands restores {} HP.", amount),
+        "healing": amount,
+        "new_hp": new_hp,
+        "pool_remaining": pool_hp - amount,
+    }))
+}
+
+pub async fn use_wild_shape(
+    pool: &SqlitePool,
+    player: &Player,
+) -> Result<Value> {
+    let ab: Option<(String, i64)> = sqlx::query_as(
+        "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Wild Shape'"
+    ).bind(&player.id).fetch_optional(pool).await?;
+
+    let (ab_id, uses) = match ab {
+        Some(a) => a,
+        None => return Ok(json!({"error": "Wild Shape not found"})),
+    };
+    if uses <= 0 {
+        return Ok(json!({"error": "No Wild Shape uses remaining"}));
+    }
+
+    sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+        .bind(&ab_id).execute(pool).await?;
+
+    let is_moon = player.subclass.as_deref() == Some("Circle of the Moon");
+    let temp = if is_moon { player.level * 3 } else { player.level };
+    let new_temp = player.temp_hp.max(temp);
+    sqlx::query("UPDATE players SET temp_hp = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(new_temp).bind(&player.id).execute(pool).await?;
+
+    Ok(json!({
+        "message": format!("Wild Shape activated! Gained {} Temporary HP.", temp),
+        "temp_hp": new_temp,
+        "uses_remaining": uses - 1,
+    }))
+}
+
+pub async fn use_breath_weapon(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player: &Player,
+    damage_roll: i64,
+) -> Result<Value> {
+    let ab: Option<(String, i64)> = sqlx::query_as(
+        "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Breath Weapon'"
+    ).bind(&player.id).fetch_optional(pool).await?;
+
+    let (ab_id, uses) = match ab {
+        Some(a) => a,
+        None => return Ok(json!({"error": "Breath Weapon not found"})),
+    };
+    if uses <= 0 {
+        return Ok(json!({"error": "No Breath Weapon uses remaining"}));
+    }
+
+    sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+        .bind(&ab_id).execute(pool).await?;
+
+    let target_id: Option<String> = sqlx::query_scalar(
+        "SELECT current_target_id FROM combat_encounters WHERE campaign_id = ? AND status = 'active'"
+    ).bind(campaign_id).fetch_optional(pool).await?.flatten();
+
+    match target_id {
+        None => Ok(json!({"message": "Breath Weapon used!", "damage": damage_roll, "uses_remaining": uses - 1})),
+        Some(tid) => {
+            let enemy = get_enemy(pool, &tid).await?
+                .ok_or_else(|| anyhow::anyhow!("Enemy not found"))?;
+            let new_hp = (enemy.current_hp - damage_roll).max(0);
+            let is_dead = new_hp == 0;
+            sqlx::query(
+                "UPDATE combat_enemies SET current_hp = ?, is_alive = ?, is_bloodied = ? WHERE id = ?"
+            ).bind(new_hp).bind(!is_dead)
+             .bind(new_hp > 0 && new_hp <= enemy.max_hp / 2)
+             .bind(&tid).execute(pool).await?;
+            Ok(json!({
+                "message": format!("Breath Weapon hits {} for {} damage!", enemy.name, damage_roll),
+                "damage": damage_roll,
+                "enemy_dead": is_dead,
+                "enemy_name": enemy.name,
+                "uses_remaining": uses - 1,
+            }))
+        }
+    }
+}
+
+pub async fn use_healing_hands(
+    pool: &SqlitePool,
+    player: &Player,
+    heal_roll: i64,
+) -> Result<Value> {
+    let ab: Option<(String, i64)> = sqlx::query_as(
+        "SELECT id, current_uses FROM abilities WHERE owner_id = ? AND name = 'Healing Hands'"
+    ).bind(&player.id).fetch_optional(pool).await?;
+
+    let (ab_id, uses) = match ab {
+        Some(a) => a,
+        None => return Ok(json!({"error": "Healing Hands not found"})),
+    };
+    if uses <= 0 {
+        return Ok(json!({"error": "No Healing Hands uses remaining"}));
+    }
+
+    sqlx::query("UPDATE abilities SET current_uses = current_uses - 1 WHERE id = ?")
+        .bind(&ab_id).execute(pool).await?;
+
+    let new_hp = (player.current_hp + heal_roll).min(player.max_hp);
+    crate::db::player::update_player_hp(pool, &player.id, new_hp).await?;
+
+    Ok(json!({
+        "message": format!("Healing Hands restores {} HP.", heal_roll),
+        "healing": heal_roll,
+        "new_hp": new_hp,
+        "uses_remaining": uses - 1,
+    }))
+}
+
+fn spell_display_name(spell_id: &str) -> &str {
+    match spell_id {
+        "magic_missile"  => "Magic Missile",
+        "ray_of_frost"   => "Ray of Frost",
+        "fire_bolt"      => "Fire Bolt",
+        "poison_spray"   => "Poison Spray",
+        "burning_hands"  => "Burning Hands",
+        "chill_touch"    => "Chill Touch",
+        "thunderwave"    => "Thunderwave",
+        other            => other,
+    }
 }

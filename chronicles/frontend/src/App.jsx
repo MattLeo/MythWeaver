@@ -71,6 +71,7 @@ export default function App() {
   const [showAbilities, setShowAbilities] = useState(false)
   const [showSpells, setShowSpells] = useState(false)
   const [showNotes, setShowNotes] = useState(false)
+  const [knownSpells, setKnownSpells] = useState([])
 
 
   // ── Resume campaign ─────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ export default function App() {
       if (playerState.items) setItems(playerState.items)
       if (playerState.companions) setCompanions(playerState.companions)
       if (playerState.known_maneuvers) setKnownManeuvers(playerState.known_maneuvers)
+      if (playerState.known_spells) setKnownSpells(playerState.known_spells)
 
       if (sess?.id) {
         const msgData = await api.getSessionMessages(campaignId, sess.id)
@@ -154,6 +156,7 @@ export default function App() {
       if (state.companions) setCompanions(state.companions)
       if (state.time) setCampaignTime(state.time)
       if (state.known_maneuvers) setKnownManeuvers(state.known_maneuvers)
+      if (state.known_spells) setKnownSpells(state.known_spells)
     } catch (e) {
       console.error('Failed to refresh player state:', e)
     }
@@ -511,6 +514,7 @@ export default function App() {
         onAbilities={() => setShowAbilities(true)}
         onSpells={() => setShowSpells(true)}
         onNotes={() => setShowNotes(true)}
+        knownSpells={knownSpells}
       />
 
       <GameScreen

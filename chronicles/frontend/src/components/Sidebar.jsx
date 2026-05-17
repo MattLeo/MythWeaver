@@ -82,7 +82,7 @@ ${STYLES}
 export default function Sidebar({
   player, abilities, items, companions, campaignTime,
   isOpen, onNewAdventure, levelUpAvailable, onLevelUp,
-  onInventory, onAbilities, onSpells, onNotes
+  onInventory, onAbilities, onSpells, onNotes, knownSpells,
 }) {
   if (!player) return null
 
@@ -96,10 +96,7 @@ export default function Sidebar({
   const xpPct = xpProgress(player.experience, player.level)
 
   const isEK = player.subclass === 'Eldritch Knight'
-  const canCastSpells = isEK
-    || ['Bard', 'Cleric', 'Druid', 'Paladin', 'Sorcerer', 'Warlock', 'Wizard'].includes(player.class)
-    || (player.class === 'Monk' && player.knownSpells && player.knownSpells.some(s => s.level === 0))
-    || (player.class === 'Rogue' && player.subclass === 'Arcane Trickster')
+  const canCastSpells = knownSpells.length > 0
 
   return (
     <>

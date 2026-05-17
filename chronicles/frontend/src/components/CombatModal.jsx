@@ -13,6 +13,21 @@ const SCHOOL_COLORS = {
     transmutation: '#f5cfa9',
 }
 
+const PASSIVE_NAMES = [
+    'hit dice', 'unarmored defense', 'weapon mastery', 'martial arts',
+    'spellbook', 'ritual adept', 'scholar', 'jack of all trades',
+    'fey ancestry', 'stonecunning', 'druidic', 'resourceful',
+    'elven heritage', 'elven lineage spells', 'fiendish legacy spells',
+    'draconic flight', 'large form', 'clockwork device', 'fast movement',
+    'feral instinct', 'instinctive pounce', 'primal knowledge', 'danger sense',
+    'aspect of the wilds', 'nature speaker', 'fighting style', 'archery',
+    'defense', 'dueling', 'great weapon fighting', 'two-weapon fighting',
+    'unarmed fighting', 'pact magic', 'eldritch invocations', 'metamagic',
+    'arcane recovery', 'jack of all trades', 'expertise', 'reliable talent',
+    'deft explorer', 'roving', 'favored enemy', 'sneak attack',
+    'war bond', 'darkvision', 'luck', 'lucky',
+]
+
 const COMBAT_STYLES = `
 ${STYLES}
 
@@ -124,18 +139,21 @@ ${STYLES}
 }
 
 .enemy-row {
-  display: flex; gap: 1rem; justify-content: center;
-  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem;
+  justify-content: center;
+  align-content: flex-start;
   flex: 1; min-height: 0;
-  padding-top: .5rem;
+  padding: .5rem;
 }
 
 .enemy-card {
   display: flex; flex-direction: column; align-items: center;
-  gap: .3rem; cursor: pointer; transition: all .2s;
-  position: relative; padding: .5rem;
+  gap: .25rem; cursor: pointer; transition: all .2s;
+  position: relative; padding: .4rem .25rem;
   border-radius: 3px; border: 1px solid transparent;
-  min-width: 80px;
+  width: 100%;
 }
 
 .enemy-card:hover:not(.dead):not(.disabled) {
@@ -195,9 +213,9 @@ ${STYLES}
 }
 
 .enemy-name {
-  font-family: 'Cinzel', serif; font-size: .62rem;
+  font-family: 'Cinzel', serif; font-size: .58rem;
   color: var(--dim); text-align: center;
-  letter-spacing: .06em; max-width: 80px;
+  letter-spacing: .04em; width: 100%;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -889,16 +907,22 @@ export default function CombatModal({
     const logRef = useRef(null)
     const logData = useRef([])
 
+    const combatAbilities = (abilities || []).filter(ab => {
+        const n = ab.name.toLowerCase()
+        if (PASSIVE_NAMES.some(p => n === p)) return false
+        if (ab.refresh_type === 'per_turn') return true
+        if (ab.refresh_type === 'short_rest') return true
+        if (ab.refresh_type === 'long_rest' && ab.max_uses > 0) return true
+        return false
+    })
+
     // ── Class feature detection ───────────────────────────────────────────────
     const isEK = player?.subclass === 'Eldritch Knight'
     const hasWarMagic = isEK && (player?.level || 0) >= 7
     const hasImprovedWarMagic = isEK && (player?.level || 0) >= 18
 
-    // Any class with a spell list — determines whether spell UI is shown
-    const canCastSpells = isEK
-        || ['Bard', 'Cleric', 'Druid', 'Paladin', 'Sorcerer', 'Warlock', 'Wizard'].includes(player?.class)
-        || (player?.class === 'Monk' && player?.knownSpells && player?.knownSpells.some(s => s.level === 0))
-        || (player?.class === 'Rogue' && player?.subclass === 'Arcane Trickster')
+    // Any character that has known spells will enable the spell UI
+    const canCastSpells = knownSpells.length > 0
 
     // ── Load ──────────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -1459,30 +1483,142 @@ export default function CombatModal({
     }
 
     // ── Skills ─────────────────────────────────────────────────────────────────
-    const combatAbilities = (abilities || []).filter(ab => {
-        const n = ab.name.toLowerCase()
-        return n.includes('second wind') || n.includes('action surge') ||
-            n.includes('indomitable') || n.includes('rage') || n.includes('cunning')
-    })
-
     const useSkill = async (ability) => {
         setShowSkillsMenu(false)
-        const name = ability.name.toLowerCase()
-        if (name.includes('second wind')) {
+        const n = ability.name.toLowerCase()
+
+        if (n.includes('second wind')) {
             try {
                 const result = await api.useCombatAbility(campaignId, 'second_wind')
-                addLog(`${player.name} uses Second Wind and recovers ${result.healing} HP.`, 'heal')
+                addLog(`${player.name} uses Second Wind, recovering ${result.healing} HP.`, 'heal')
                 setBonusActionUsed(true)
-                await refreshCombat()
                 if (onPlayerUpdate) await onPlayerUpdate()
             } catch (e) { console.error(e) }
-        } else if (name.includes('action surge')) {
+            return
+        }
+
+        if (n === 'action surge') {
             try {
                 await api.useCombatAbility(campaignId, 'action_surge')
-                addLog(`${player.name} activates Action Surge!`, 'system')
+                addLog(`${player.name} uses Action Surge!`, 'system')
                 setActionUsed(false)
                 setActionSurgeAvailable(false)
             } catch (e) { console.error(e) }
+            return
+        }
+
+        if (n === 'indomitable') {
+            startDiceRoll({
+                count: 1, sides: 20, label: 'Indomitable — Reroll Saving Throw', isAdvantage: false,
+                onConfirm: async (rolls) => {
+                    try {
+                        await api.useCombatAbility(campaignId, 'indomitable', { roll: rolls[0] })
+                        addLog(`${player.name} uses Indomitable! Reroll result: ${rolls[0]} + ${player.level}.`, 'system')
+                        if (onPlayerUpdate) await onPlayerUpdate()
+                    } catch (e) { console.error(e) }
+                }
+            })
+            return
+        }
+
+        if (n === 'rage') {
+            try {
+                const result = await api.useCombatAbility(campaignId, 'rage')
+                if (result.error) { addLog(result.error, 'miss'); return }
+                addLog(result.message, 'system')
+                setBonusActionUsed(true)
+                if (onPlayerUpdate) await onPlayerUpdate()
+            } catch (e) { console.error(e) }
+            return
+        }
+
+        if (n === 'channel divinity') {
+            // Ask heal or damage, then roll Xd8 where X = WIS mod (min 1)
+            const mode = window.confirm('Use Divine Spark to HEAL yourself? (Cancel = deal damage to current target)')
+                ? 'heal' : 'damage'
+            const wisMod = Math.max(1, Math.floor((player.wis - 10) / 2))
+            startDiceRoll({
+                count: wisMod, sides: 8,
+                label: `Divine Spark — ${mode === 'heal' ? 'Healing' : 'Radiant Damage'}`,
+                isAdvantage: false,
+                onConfirm: async (rolls) => {
+                    try {
+                        const total = rolls.reduce((a, b) => a + b, 0)
+                        const target = selectedTarget?.id || null
+                        const result = await api.useCombatAbility(campaignId, 'divine_spark', {
+                            roll: total,
+                            maneuver_name: mode,
+                            target_id: target,
+                        })
+                        if (result.error) { addLog(result.error, 'miss'); return }
+                        addLog(result.message, mode === 'heal' ? 'heal' : 'hit')
+                        if (onPlayerUpdate) await onPlayerUpdate()
+                    } catch (e) { console.error(e) }
+                }
+            })
+            return
+        }
+
+        if (n === 'lay on hands') {
+            const amount = parseInt(window.prompt(`Lay on Hands — how many HP to restore? (Pool remaining: ${ability.current_uses})`, '5'))
+            if (!amount || isNaN(amount) || amount <= 0) return
+            try {
+                const result = await api.useCombatAbility(campaignId, 'lay_on_hands', { roll: amount })
+                if (result.error) { addLog(result.error, 'miss'); return }
+                addLog(result.message, 'heal')
+                if (onPlayerUpdate) await onPlayerUpdate()
+            } catch (e) { console.error(e) }
+            return
+        }
+
+        if (n === 'wild shape') {
+            try {
+                const result = await api.useCombatAbility(campaignId, 'wild_shape')
+                if (result.error) { addLog(result.error, 'miss'); return }
+                addLog(result.message, 'system')
+                setBonusActionUsed(true)
+                if (onPlayerUpdate) await onPlayerUpdate()
+            } catch (e) { console.error(e) }
+            return
+        }
+
+        if (n === 'breath weapon') {
+            // Dragonborn: dice = ceil(level/5) × 2 d10s
+            const diceCount = Math.max(1, Math.ceil((player.level || 1) / 5)) * 2
+            startDiceRoll({
+                count: diceCount, sides: 10,
+                label: 'Breath Weapon Damage',
+                isAdvantage: false,
+                onConfirm: async (rolls) => {
+                    try {
+                        const total = rolls.reduce((a, b) => a + b, 0)
+                        const result = await api.useCombatAbility(campaignId, 'breath_weapon', { roll: total })
+                        if (result.error) { addLog(result.error, 'miss'); return }
+                        addLog(result.message, 'hit')
+                        if (onPlayerUpdate) await onPlayerUpdate()
+                    } catch (e) { console.error(e) }
+                }
+            })
+            return
+        }
+
+        if (n === 'healing hands') {
+            const profBonus = player.proficiency_bonus || 2
+            startDiceRoll({
+                count: profBonus, sides: 4,
+                label: 'Healing Hands',
+                isAdvantage: false,
+                onConfirm: async (rolls) => {
+                    try {
+                        const total = rolls.reduce((a, b) => a + b, 0)
+                        const result = await api.useCombatAbility(campaignId, 'healing_hands', { roll: total })
+                        if (result.error) { addLog(result.error, 'miss'); return }
+                        addLog(result.message, 'heal')
+                        if (onPlayerUpdate) await onPlayerUpdate()
+                    } catch (e) { console.error(e) }
+                }
+            })
+            return
         }
     }
 
@@ -1519,7 +1655,9 @@ export default function CombatModal({
             for (let i = 0; i < turnResults.length; i++) {
                 await new Promise(r => setTimeout(r, 1600))
                 const t = turnResults[i]
+                if (t.action === 'skip' || !t.text) continue
                 addLog(t.text, t.hit ? (t.damage ? 'hit' : 'system') : 'miss')
+                await refreshCombat()
                 if (t.player_downed) {
                     await refreshCombat()
                     if (onPlayerUpdate) await onPlayerUpdate()
@@ -1670,11 +1808,10 @@ export default function CombatModal({
                     {/* Turn Order Bar */}
                     {phase !== 'initiative' && turnOrder.length > 0 && (
                         <div className="turn-order-bar">
-                            {turnOrder.map((p, i) => (
+                            {turnOrder.filter(p => p.is_alive).map((p, i) => (
                                 <div key={p.id + i} className={[
                                     'turn-chip', p.participant_type,
-                                    i === 0 ? 'active' : '',
-                                    !p.is_alive ? 'dead' : ''
+                                    currentActor?.id === p.id ? 'active' : '',
                                 ].filter(Boolean).join(' ')}>
                                     <span className="turn-chip-icon">
                                         {p.participant_type === 'player' ? '⚔' :
