@@ -33,125 +33,109 @@ impl LlmClient {
     }
 
 
-    pub async fn run_agentic_loop(
-        &self,
-        pool: &SqlitePool,
-        campaign_id: &str,
-        system_prompt: &str,
-        messages: Vec<ChatMessage>,
-        game_state: &GameState,
-    ) -> Result<AgentResult> {
-        let available_tools = tools::tools_for_state(game_state);
-        let anthropic_tools = convert_tools_to_anthropic(&available_tools);
-        let mut current_messages = messages.clone();
-        let mut tool_calls_made: Vec<ToolCallRecord> = vec![];
-        let mut roll_request: Option<RollRequest> = None;
+    pub async fn run_agentic_loop(...) -> Result<AgentResult> {
+    let available_tools = tools::tools_for_state(game_state);
+    let anthropic_tools = convert_tools_to_anthropic(&available_tools);
+    let mut current_messages = messages.clone();
+    let mut tool_calls_made: Vec<ToolCallRecord> = vec![];
+    let mut roll_request: Option<RollRequest> = None;
 
-        for iteration in 0..MAX_TOOL_ITERATIONS {
-            tracing::debug!("Agent loop iteration {}", iteration);
+    for iteration in 0..MAX_TOOL_ITERATIONS {
+        tracing::debug!("Agent loop iteration {}", iteration);
 
-            let response = self.chat_completion_anthropic(
-                system_prompt,
-                &current_messages,
-                &anthropic_tools,
-            ).await?;
+        let response = self.chat_completion_anthropic(
+            system_prompt,
+            &current_messages,
+            &anthropic_tools,
+        ).await?;
 
-            let stop_reason = response.stop_reason.as_deref().unwrap_or("end_turn");
+        let stop_reason = response.stop_reason.as_deref().unwrap_or("end_turn");
 
-            let narrative_text: String = response.content.iter()
-                .filter(|b| b.block_type == "text")
-                .filter_map(|b| b.text.clone())
-                .collect::<Vec<_>>()
-                .join("");
+        // Extract text and tool_use blocks
+        let narrative_text: String = response.content.iter()
+            .filter(|b| b.block_type == "text")
+            .filter_map(|b| b.text.clone())
+            .collect::<Vec<_>>()
+            .join("");
 
-            let tool_uses: Vec<AnthropicToolUse> = response.content.iter()
-                .filter(|b| b.block_type == "tool_use")
-                .filter_map(|b| {
-                    Some(AnthropicToolUse {
-                        id: b.id.clone()?,
-                        name: b.name.clone()?,
-                        input: b.input.clone()?,
-                    })
-                })
-                .collect();
+        let tool_uses: Vec<AnthropicToolUse> = response.content.iter()
+            .filter(|b| b.block_type == "tool_use")
+            .filter_map(|b| Some(AnthropicToolUse {
+                id: b.id.clone()?,
+                name: b.name.clone()?,
+                input: b.input.clone()?,
+            }))
+            .collect();
 
-            if stop_reason == "end_turn" || tool_uses.is_empty() {
-                return Ok(AgentResult {
-                    narrative: narrative_text,
-                    tool_calls_made,
-                    roll_request,
-                });
-            }
-
-            // Store the full assistant turn (text + tool_use blocks) in history
-            current_messages.push(ChatMessage {
-                role: "assistant".to_string(),
-                content: if narrative_text.is_empty() { None } else { Some(narrative_text.clone()) },
-                anthropic_content: Some(response.content.clone()),
-                tool_results: None,
-            });
-
-            // Handle request_roll immediately — return before executing other tools
-            if let Some(tc) = tool_uses.iter().find(|t| t.name == "request_roll") {
-                roll_request = Some(RollRequest {
-                    tool_call_id: tc.id.clone(),
-                    die: tc.input["die"].as_str().unwrap_or("d20").to_string(),
-                    skill: tc.input["skill"].as_str().unwrap_or("").to_string(),
-                    dc: tc.input["dc"].as_i64().unwrap_or(10),
-                    reason: tc.input["reason"].as_str().unwrap_or("").to_string(),
-                });
-                return Ok(AgentResult {
-                    narrative: narrative_text,
-                    tool_calls_made,
-                    roll_request,
-                });
-            }
-
-            // Execute all other tools and collect results
-            let mut tool_result_blocks: Vec<Value> = vec![];
-
-            for tc in &tool_uses {
-                tracing::info!("Executing tool: {} with args: {}", tc.name, tc.input);
-
-                let result = executor::execute_tool(
-                    pool,
-                    campaign_id,
-                    &tc.name,
-                    &tc.input,
-                ).await;
-
-                let result_str = match result {
-                    Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_default(),
-                    Err(e) => {
-                        tracing::error!("Tool '{}' error: {}", tc.name, e);
-                        format!("{{\"error\": \"{}\"}}", e)
-                    }
-                };
-
-                tool_calls_made.push(ToolCallRecord {
-                    tool_name: tc.name.clone(),
-                    args: tc.input.clone(),
-                    result: result_str.clone(),
-                });
-
-                tool_result_blocks.push(json!({
-                    "type": "tool_result",
-                    "tool_use_id": tc.id,
-                    "content": result_str
-                }));
-            }
-
-            // Anthropic tool results go as a user message with a content array
-            current_messages.push(ChatMessage {
-                role: "user".to_string(),
-                content: None,
-                anthropic_content: None,
-                tool_results: Some(tool_result_blocks),
+        if stop_reason == "end_turn" || tool_uses.is_empty() {
+            return Ok(AgentResult {
+                narrative: narrative_text,
+                tool_calls_made,
+                roll_request,
             });
         }
 
-        Err(anyhow::anyhow!("Agent loop exceeded maximum iterations"))
+        // Store assistant turn (text + tool_use blocks)
+        current_messages.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: if narrative_text.is_empty() { None } else { Some(narrative_text.clone()) },
+            anthropic_content: Some(response.content.clone()),
+            tool_results: None,
+        });
+
+        // Execute tools and collect results
+        let mut tool_result_blocks: Vec<Value> = vec![];
+        for tc in &tool_uses {
+            let input = tc.input.clone();
+            tracing::info!("Executing tool: {} with args: {}", tc.name, input);
+
+            // Handle roll requests
+            if tc.name == "request_roll" {
+                let die = input["die"].as_str().unwrap_or("d20").to_string();
+                let skill = input["skill"].as_str().unwrap_or("").to_string();
+                let dc = input["dc"].as_i64().unwrap_or(10);
+                let reason = input["reason"].as_str().unwrap_or("").to_string();
+                roll_request = Some(RollRequest {
+                    tool_call_id: tc.id.clone(),
+                    die, skill, dc, reason,
+                });
+                tool_result_blocks.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": tc.id,
+                    "content": "Roll requested. Waiting for player."
+                }));
+                continue;
+            }
+
+            let result = executor::execute_tool(pool, campaign_id, &tc.name, &input).await;
+            let result_str = match result {
+                Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_default(),
+                Err(e) => { tracing::error!("Tool '{}' error: {}", tc.name, e); format!("{{\"error\": \"{}\"}}", e) }
+            };
+
+            tool_calls_made.push(ToolCallRecord {
+                tool_name: tc.name.clone(),
+                args: input,
+                result: result_str.clone(),
+            });
+
+            tool_result_blocks.push(json!({
+                "type": "tool_result",
+                "tool_use_id": tc.id,
+                "content": result_str
+            }));
+        }
+
+        current_messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: None,
+            anthropic_content: None,
+            tool_results: Some(tool_result_blocks),
+        });
     }
+
+    Err(anyhow::anyhow!("Agent loop exceeded maximum iterations"))
+}
 
 
     pub async fn narrate_combat_result(&self, system: &str, result: &Value) -> Result<String> {
@@ -160,10 +144,9 @@ impl LlmClient {
             serde_json::to_string(result).unwrap_or_default()
         );
         let messages = vec![ChatMessage::user(&prompt)];
-        let response = self.chat_completion_anthropic(system, &messages, &[]).await?;
-        let content = response.content.iter()
-            .find(|b| b.block_type == "text")
-            .and_then(|b| b.text.clone())
+        let response = self.chat_completion(system, &messages, &[]).await?;
+        let content = response.choices.into_iter().next()
+            .and_then(|c| c.message.content)
             .unwrap_or_else(|| "The attack lands.".to_string());
         Ok(content)
     }
@@ -251,7 +234,7 @@ impl LlmClient {
         }
  
         let response = self.client
-            .post(ANTHROPIC_URL)
+            .post(OPENROUTER_URL)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .header("HTTP-Referer", "https://mythweaver.app")
@@ -268,44 +251,6 @@ impl LlmClient {
  
         let or_response: OpenRouterResponse = response.json().await?;
         Ok(or_response)
-    }
-
-    async fn chat_completion_anthropic(
-        &self,
-        system: &str,
-        messages: &[ChatMessage],
-        tools: &[Value],
-    ) -> Result<AnthropicResponse> {
-        let anthropic_messages = build_anthropic_messages(messages);
-
-        let mut payload = json!({
-            "model": self.model,
-            "max_tokens": 1024,
-            "system": system,          // <-- system is top-level, not a message
-            "messages": anthropic_messages,
-        });
-
-        if !tools.is_empty() {
-            payload["tools"] = json!(tools);
-        }
-
-        let response = self.client
-            .post(ANTHROPIC_URL)
-            .header("x-api-key", &self.api_key)          // <-- different auth header
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("Content-Type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await?;
-            return Err(anyhow::anyhow!("Anthropic API error {}: {}", status, body));
-        }
-
-        let anthropic_response: AnthropicResponse = response.json().await?;
-        Ok(anthropic_response)
     }
 }
 
@@ -340,7 +285,6 @@ fn convert_tools_for_openrouter(tools: &[Value]) -> Vec<Value> {
 
 fn build_anthropic_messages(messages: &[ChatMessage]) -> Vec<Value> {
     messages.iter().map(|msg| {
-        // Tool results → user message with content array of tool_result blocks
         if let Some(results) = &msg.tool_results {
             return json!({
                 "role": "user",
@@ -348,7 +292,6 @@ fn build_anthropic_messages(messages: &[ChatMessage]) -> Vec<Value> {
             });
         }
 
-        // Assistant messages with tool_use blocks
         if msg.role == "assistant" {
             if let Some(content_blocks) = &msg.anthropic_content {
                 return json!({
@@ -358,7 +301,6 @@ fn build_anthropic_messages(messages: &[ChatMessage]) -> Vec<Value> {
             }
         }
 
-        // Plain messages
         json!({
             "role": msg.role,
             "content": msg.content.as_deref().unwrap_or("")
