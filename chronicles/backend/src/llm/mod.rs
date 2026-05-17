@@ -263,7 +263,7 @@ impl LlmClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            return Err(anyhow::anyhow!("Anthropic API error {}: {}", status, body));
+            return Err(anyhow::anyhow!("OpenRouter API error {}: {}", status, body));
         }
  
         let or_response: OpenRouterResponse = response.json().await?;
