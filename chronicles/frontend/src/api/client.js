@@ -369,6 +369,18 @@ export async function forgetSpell(campaignId, spellId) {
   return res.json()
 }
 
+export async function getClassSpells(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/browse`)
+  if (!res.ok) throw new Error('Failed to get class spells')
+  return res.json()
+}
+
+export async function getSpellsByClass(className) {
+  const res = await fetch(`${BASE}/spells/browse/${encodeURIComponent(className)}`)
+  if (!res.ok) throw new Error('Failed to get class spells')
+  return res.json()
+}
+
 /**
  * Cast a spell.
  * @param {string} campaignId
@@ -396,17 +408,26 @@ export async function castSpell(campaignId, spellId, options = {}) {
   return res.json()
 }
 
-export async function searchSpells(campaignId, query, wizardOnly = false) {
+export async function searchSpells(campaignId, query, wizardOnly = false, className = null) {
   const res = await fetch(`${BASE}/campaigns/${campaignId}/spells/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, wizard_only: wizardOnly })
+    body: JSON.stringify({ query, wizard_only: wizardOnly, class_name: className })
   })
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`Failed to search spells (${res.status}): ${body}`)
   }
   return res.json()
+}
+
+export async function applyBonusDamage(campaignId, damage) {
+    const res = await fetch(`${BASE}/campaigns/${campaignId}/bonus-damage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ damage }),
+    })
+    return res.json()
 }
 
 // ─── Concentration ────────────────────────────────────────────────────────────
@@ -470,5 +491,47 @@ export async function summonBondedWeapon(campaignId, itemId) {
     const body = await res.text()
     throw new Error(`Failed to summon bonded weapon (${res.status}): ${body}`)
   }
+  return res.json()
+}
+
+// ─── Feats ───────────────────────────────────────────────────────────────────
+
+export async function listFeats(category = null) {
+    const url = category ? `/api/feats?category=${category}` : '/api/feats'
+    const res = await fetch(url.startsWith('http') ? url : `${BASE.replace('/api', '')}${url}`)
+    if (!res.ok) throw new Error('Failed to list feats')
+    return res.json()
+}
+ 
+export async function getAvailableFeats(campaignId, category = null) {
+    const url = category
+        ? `${BASE}/campaigns/${campaignId}/feats?category=${category}`
+        : `${BASE}/campaigns/${campaignId}/feats`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to get available feats')
+    return res.json()
+}
+ 
+export async function getPlayerFeats(campaignId) {
+    const res = await fetch(`${BASE}/campaigns/${campaignId}/player-feats`)
+    if (!res.ok) throw new Error('Failed to get player feats')
+    return res.json()
+}
+
+// ─── Notes ───────────────────────────────────────────────────────────────────
+
+export async function getNotes(campaignId) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/notes`)
+  if (!res.ok) throw new Error('Failed to get notes')
+  return res.json()
+}
+
+export async function saveNotes(campaignId, notes) {
+  const res = await fetch(`${BASE}/campaigns/${campaignId}/notes`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes })
+  })
+  if (!res.ok) throw new Error('Failed to save notes')
   return res.json()
 }

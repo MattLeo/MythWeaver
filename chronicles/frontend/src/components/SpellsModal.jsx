@@ -3,44 +3,44 @@ import {
   getKnownSpells, getSpellSlots, getConcentration,
   getWarBonds, castSpell, learnSpell, forgetSpell,
   searchSpells, dropConcentration, createWarBond,
-  breakWarBond, summonBondedWeapon,
+  breakWarBond, summonBondedWeapon, getClassSpells,
 } from '../api/client'
 
 const SCHOOL_COLORS = {
-  abjuration:    '#7ec8e3',
-  conjuration:   '#b5a9f5',
-  divination:    '#f5e87e',
-  enchantment:   '#f5a9c8',
-  evocation:     '#f5a96a',
-  illusion:      '#a9f5d0',
-  necromancy:    '#b0f5a9',
+  abjuration: '#7ec8e3',
+  conjuration: '#b5a9f5',
+  divination: '#f5e87e',
+  enchantment: '#f5a9c8',
+  evocation: '#f5a96a',
+  illusion: '#a9f5d0',
+  necromancy: '#b0f5a9',
   transmutation: '#f5cfa9',
 }
 
 const SCHOOL_GLYPHS = {
-  abjuration:    '🛡',
-  conjuration:   '✦',
-  divination:    '👁',
-  enchantment:   '♡',
-  evocation:     '⚡',
-  illusion:      '◈',
-  necromancy:    '☽',
+  abjuration: '🛡',
+  conjuration: '✦',
+  divination: '👁',
+  enchantment: '♡',
+  evocation: '⚡',
+  illusion: '◈',
+  necromancy: '☽',
   transmutation: '⟳',
 }
 
 const DAMAGE_TYPE_COLORS = {
-  fire:        '#f5764a',
-  cold:        '#7ec8e3',
-  lightning:   '#ffe066',
-  acid:        '#a8e86e',
-  poison:      '#8bcf6e',
-  necrotic:    '#b0f5a9',
-  radiant:     '#fff3a3',
-  psychic:     '#f5a9c8',
-  force:       '#c4a9f5',
-  thunder:     '#a9c4f5',
-  piercing:    '#d0c8b8',
-  slashing:    '#d0c8b8',
+  fire: '#f5764a',
+  cold: '#7ec8e3',
+  lightning: '#ffe066',
+  acid: '#a8e86e',
+  poison: '#8bcf6e',
+  necrotic: '#b0f5a9',
+  radiant: '#fff3a3',
+  psychic: '#f5a9c8',
+  force: '#c4a9f5',
+  thunder: '#a9c4f5',
+  piercing: '#d0c8b8',
+  slashing: '#d0c8b8',
   bludgeoning: '#d0c8b8',
 }
 
@@ -326,6 +326,36 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
   const [searching, setSearching] = useState(false)
   const [toast, setToast] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [browseSpells, setBrowseSpells] = useState([])
+  const [browseLoading, setBrowseLoading] = useState(false)
+  const [browseFilter, setBrowseFilter] = useState('')
+  const [browseLevelFilter, setBrowseLevelFilter] = useState('all')
+
+  const playerClass = player?.class || ''
+  const playerSubclass = player?.subclass || ''
+  const isEK = playerSubclass === 'Eldritch Knight'
+  const isArcaneTrickster = playerSubclass === 'Arcane Trickster'
+  const showWarBonds = isEK
+
+
+  const LEARN_HINTS = {
+    'Wizard': 'Add spells to your spellbook from the full wizard list. You can prepare any spell in your book after a Long Rest.',
+    'Eldritch Knight': 'As an Eldritch Knight, you learn spells from the wizard list, prioritizing Abjuration and Evocation.',
+    'Arcane Trickster': 'As an Arcane Trickster, you learn spells from the wizard list, prioritizing Enchantment and Illusion.',
+    'Cleric': 'Clerics can prepare any spell from the divine list after a Long Rest. Search to add spells to your prepared list.',
+    'Druid': 'Druids can prepare any spell from the druid list after a Long Rest. Search to add spells to your prepared list.',
+    'Paladin': 'Paladins prepare spells from the paladin list after a Long Rest. Search to add spells to your prepared list.',
+    'Bard': 'Bards learn spells permanently from the bard spell list.',
+    'Sorcerer': 'Sorcerers learn spells permanently from the sorcerer spell list.',
+    'Warlock': 'Choose spells to add permanently to your pact. You cast them using your Pact Magic slots.',
+    'Ranger': 'Rangers learn spells permanently from the ranger spell list.',
+  }
+  const learnHint = LEARN_HINTS[isEK ? 'Eldritch Knight' : isArcaneTrickster ? 'Arcane Trickster' : playerClass]
+    ?? 'Search for spells to add to your list.'
+
+  const searchPlaceholder = isEK || isArcaneTrickster || playerClass === 'Wizard'
+    ? 'Search wizard spells...'
+    : `Search ${playerClass.toLowerCase()} spells...`
 
   // ── Load data ──────────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
@@ -358,7 +388,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
     const timer = setTimeout(async () => {
       setSearching(true)
       try {
-        const res = await searchSpells(campaignId, searchQuery, true)
+        const res = await searchSpells(campaignId, searchQuery, false, playerClass)
         setSearchResults(res.spells || [])
       } catch (e) {
         showToast('Search failed', 'error')
@@ -368,6 +398,15 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
     }, 300)
     return () => clearTimeout(timer)
   }, [searchQuery, tab, campaignId])
+
+  useEffect(() => {
+    if (tab !== 'browse' || browseSpells.length > 0) return
+    setBrowseLoading(true)
+    getClassSpells(campaignId)
+      .then(res => setBrowseSpells(res.spells || []))
+      .catch(() => showToast('Failed to load spell list', 'error'))
+      .finally(() => setBrowseLoading(false))
+  }, [tab, campaignId])
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const showToast = (msg, type = 'info') => {
@@ -500,7 +539,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
             <span style={styles.headerGlyph}>✦</span>
             <div>
               <div style={styles.headerTitle}>Arcane Arsenal</div>
-              <div style={styles.headerSub}>Eldritch Knight · Spellbook</div>
+              <div style={styles.headerSub}>Spellbook</div>
             </div>
           </div>
           <button onClick={onClose} style={styles.closeBtn}>✕</button>
@@ -532,7 +571,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
 
         {/* ── Tabs ───────────────────────────────────────────────────────── */}
         <div style={styles.tabs}>
-          {['known', 'learn', 'bonds'].map(t => (
+          {(['known', 'browse', 'learn', ...(showWarBonds ? ['bonds'] : [])]).map(t => (
             <button
               key={t}
               onClick={() => { setTab(t); setSelected(null) }}
@@ -543,7 +582,8 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
               }}
             >
               {t === 'known' && `Known (${knownSpells.length})`}
-              {t === 'learn' && 'Learn New'}
+              {t === 'browse' && 'Browse'}
+              {t === 'learn' && 'Learn by Name'}
               {t === 'bonds' && `War Bonds (${warBonds.length}/2)`}
             </button>
           ))}
@@ -600,7 +640,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
                       autoFocus
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
-                      placeholder="Search wizard spells..."
+                      placeholder={searchPlaceholder}
                       style={styles.searchInput}
                     />
                     {searching && <span style={{ color: '#888', fontSize: 12 }}>...</span>}
@@ -662,9 +702,8 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
                   <div style={styles.section}>
                     {searchQuery.trim().length < 2 && (
                       <div style={styles.searchHint}>
-                        Type at least 2 characters to search.<br/>
-                        As an Eldritch Knight, you may learn spells from the wizard list,
-                        prioritizing Abjuration and Evocation.
+                        Type at least 2 characters to search.<br />
+                        {learnHint}
                       </div>
                     )}
                     {searchResults.map(s => {
@@ -684,6 +723,97 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
                       <div style={styles.searchHint}>No spells found for "{searchQuery}"</div>
                     )}
                   </div>
+                )}
+
+                {/* ── Browse: full class spell list ─────────────────────── */}
+                {tab === 'browse' && (
+                  <>
+                    {/* Search within browse */}
+                    <div style={styles.searchBar}>
+                      <span style={styles.searchIcon}>🔍</span>
+                      <input
+                        value={browseFilter}
+                        onChange={e => setBrowseFilter(e.target.value)}
+                        placeholder={`Filter ${playerClass.toLowerCase()} spells…`}
+                        style={styles.searchInput}
+                      />
+                      {browseFilter && (
+                        <button
+                          onClick={() => setBrowseFilter('')}
+                          style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 14 }}
+                        >✕</button>
+                      )}
+                    </div>
+
+                    {/* Level filter pills */}
+                    <div style={styles.filterRow}>
+                      {['all', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].map(l => {
+                        const hasSpells = l === 'all' || browseSpells.some(s =>
+                          String(s.level) === l &&
+                          (browseFilter.length < 2 || s.name.toLowerCase().includes(browseFilter.toLowerCase()))
+                        )
+                        if (!hasSpells) return null
+                        return (
+                          <button
+                            key={l}
+                            onClick={() => setBrowseLevelFilter(l)}
+                            style={{
+                              ...styles.filterPill,
+                              background: browseLevelFilter === l ? 'rgba(245,207,169,0.15)' : 'transparent',
+                              borderColor: browseLevelFilter === l ? '#f5cfa9' : 'rgba(255,255,255,0.1)',
+                              color: browseLevelFilter === l ? '#f5cfa9' : '#888',
+                            }}
+                          >
+                            {l === 'all' ? 'All' : l === '0' ? 'Cantrips' : `L${l}`}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {browseLoading && (
+                      <div style={styles.searchHint}>Loading…</div>
+                    )}
+
+                    {/* Spells grouped by level */}
+                    {!browseLoading && (() => {
+                      const nameMatch = s => browseFilter.length < 2 ||
+                        s.name.toLowerCase().includes(browseFilter.toLowerCase())
+                      const levels = browseLevelFilter === 'all'
+                        ? [...new Set(browseSpells.map(s => s.level))].sort((a, b) => a - b)
+                        : [parseInt(browseLevelFilter)]
+
+                      return levels.map(lvl => {
+                        const group = browseSpells.filter(s => s.level === lvl && nameMatch(s))
+                        if (group.length === 0) return null
+                        return (
+                          <div key={lvl} style={styles.section}>
+                            <div style={styles.sectionHeader}>
+                              {lvl === 0 ? 'Cantrips' : `Level ${lvl}`}
+                              <span style={styles.sectionCount}>{group.length}</span>
+                            </div>
+                            {group.map(s => {
+                              const alreadyKnown = knownSpells.some(k => k.spell_id === s.id)
+                              return (
+                                <div
+                                  key={s.id}
+                                  style={{ opacity: alreadyKnown ? 0.45 : 1 }}
+                                >
+                                  <SpellCard
+                                    spell={{ ...s, spell_id: s.id }}
+                                    isSelected={selected?.id === s.id || selected?.spell_id === s.id}
+                                    onClick={() => setSelected({ ...s, spell_id: s.id })}
+                                  />
+                                  {alreadyKnown && (
+                                    <div style={styles.alreadyKnown}>Already known</div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })
+                    })()}
+                  </>
                 )}
 
                 {/* Empty state */}
@@ -707,7 +837,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
                   onCast={handleCast}
                   onForget={handleForget}
                   onLearn={handleLearn}
-                  mode={tab === 'learn' ? 'learn' : 'known'}
+                  mode={tab === 'learn' || tab === 'browse' ? 'learn' : 'known'}
                   player={player}
                 />
               </div>

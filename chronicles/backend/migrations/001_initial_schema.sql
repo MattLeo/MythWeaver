@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL DEFAULT 'MythWeaver Campaign',
     story_journal   TEXT,
+    player_notes    TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -439,6 +440,9 @@ CREATE TABLE IF NOT EXISTS combat_enemies (
     is_frightened       INTEGER NOT NULL DEFAULT 0,
     is_disarmed         INTEGER NOT NULL DEFAULT 0,
     player_missed_last_attack INTEGER NOT NULL DEFAULT 0,
+    threat_json         TEXT NOT NULL DEFAULT '{}',
+    enemy_type          TEXT NOT NULL DEFAULT 'humanoid_basic',
+    spell_list_json     TEXT NOT NULL DEFAULT '[]', 
     created_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -580,6 +584,41 @@ CREATE TABLE IF NOT EXISTS concentration (
     UNIQUE(player_id)  -- can only concentrate on one spell at a time
 );
 
+-- ─── Feats Tables ─────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS feats (
+    id                          TEXT PRIMARY KEY,
+    name                        TEXT NOT NULL,
+    category                    TEXT NOT NULL,  -- 'origin' | 'general' | 'fighting_style' | 'epic_boon'
+    prerequisite_level          INTEGER NOT NULL DEFAULT 0,
+    prerequisite_feature        TEXT,    -- 'spellcasting' | 'pact_magic' | 'fighting_style'
+                                         -- | 'heavy_armor_training' | 'medium_armor_training'
+                                         -- | 'light_armor_training' | 'shield_training'
+    prerequisite_ability        TEXT,    -- stat abbrev with '/' for OR, e.g. 'str' or 'str/dex'
+    prerequisite_ability_score  INTEGER NOT NULL DEFAULT 0,
+    description                 TEXT NOT NULL,
+    ability_score_options       TEXT,    -- JSON array of eligible stats, e.g. '["str","dex"]'
+    ability_score_increase      INTEGER NOT NULL DEFAULT 0,  -- 0 = no ASI, 1 = +1, 2 = +2
+    repeatable                  INTEGER NOT NULL DEFAULT 0,  -- 1 = can take multiple times
+    has_choice                  INTEGER NOT NULL DEFAULT 0,  -- 1 = player must make a selection
+    choice_description          TEXT,    -- what the player must choose (skill, spell, damage type, etc.)
+    grants_spells               TEXT,    -- JSON: always-prepared spells granted by the feat
+    created_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS player_feats (
+    id          TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    player_id   TEXT NOT NULL,
+    feat_id     TEXT NOT NULL,
+    feat_name   TEXT NOT NULL,
+    source      TEXT NOT NULL,   -- 'background' | 'asi' | 'epic_boon' | 'class'
+    level_taken INTEGER,         -- which player level the feat was taken at
+    choices     TEXT,            -- JSON: choices made (e.g. {"skill":"arcana","spell":"detect_magic"})
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (feat_id) REFERENCES feats(id)
+);
+
 -- ─── Indexes ─────────────────────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_messages_session         ON messages(session_id);
@@ -604,3 +643,5 @@ CREATE INDEX IF NOT EXISTS idx_shop_transactions        ON shop_transactions(sho
 CREATE INDEX IF NOT EXISTS idx_spells_level             ON spells(level);
 CREATE INDEX IF NOT EXISTS idx_spells_school            ON spells(school);
 CREATE INDEX IF NOT EXISTS idx_spells_name              ON spells(name);
+CREATE INDEX IF NOT EXISTS idx_player_feats_player      ON player_feats(player_id);
+CREATE INDEX IF NOT EXISTS idx_player_feats_campaign    ON player_feats(campaign_id);

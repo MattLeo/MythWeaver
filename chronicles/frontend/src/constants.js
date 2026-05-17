@@ -1104,6 +1104,111 @@ export function paladinSlotSummary(level) {
     return (slots[level] || slots[20]).filter(s => s > 0).join('/')
 }
 
+// ─── Ranger ───────────────────────────────────────────────────────────────────
+ 
+export const RANGER_SUBCLASSES = [
+    {
+        name: 'Beast Master',
+        desc: 'Bond with a primal beast. Your Primal Companion fights alongside you, shares your spells, and grows more powerful as you level.',
+    },
+    {
+        name: 'Fey Wanderer',
+        desc: 'Wield fey mirth and fury. Dreadful Strikes deal psychic damage, Otherworldly Glamour adds WIS to CHA checks, and fey magic grants teleportation.',
+    },
+    {
+        name: 'Gloom Stalker',
+        desc: 'Draw on shadow magic to fight your foes. Dread Ambusher rewards first strikes, Umbral Sight hides you in darkness, and Shadowy Dodge deflects attacks.',
+    },
+    {
+        name: 'Hunter',
+        desc: 'Protect nature and people from destruction. Choose between Colossus Slayer and Horde Breaker, switch at rest, and gain ever-greater prey techniques.',
+    },
+]
+ 
+export const RANGER_BASE_FEATURES = {
+    1:  ['Spellcasting', 'Favored Enemy', 'Weapon Mastery'],
+    2:  ['Deft Explorer', 'Fighting Style'],
+    3:  ['Ranger Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Extra Attack'],
+    6:  ['Roving'],
+    7:  ['Subclass Feature'],
+    8:  ['Ability Score Improvement'],
+    9:  ['Expertise'],
+    10: ['Tireless'],
+    11: ['Subclass Feature'],
+    12: ['Ability Score Improvement'],
+    13: ['Relentless Hunter'],
+    14: ["Nature's Veil"],
+    15: ['Subclass Feature'],
+    16: ['Ability Score Improvement'],
+    17: ['Precise Hunter'],
+    18: ['Feral Senses'],
+    19: ['Epic Boon'],
+    20: ['Foe Slayer'],
+}
+ 
+export const RANGER_SUBCLASS_FEATURES = {
+    'Beast Master': {
+        3:  ['Primal Companion'],
+        7:  ['Exceptional Training'],
+        11: ['Bestial Fury'],
+        15: ['Share Spells'],
+    },
+    'Fey Wanderer': {
+        3:  ['Dreadful Strikes', 'Fey Wanderer Spells', 'Otherworldly Glamour'],
+        7:  ['Beguiling Twist'],
+        11: ['Fey Reinforcements'],
+        15: ['Misty Wanderer'],
+    },
+    'Gloom Stalker': {
+        3:  ['Dread Ambusher', 'Gloom Stalker Spells', 'Umbral Sight'],
+        7:  ['Iron Mind'],
+        11: ["Stalker's Flurry"],
+        15: ['Shadowy Dodge'],
+    },
+    'Hunter': {
+        3:  ["Hunter's Lore", "Hunter's Prey"],
+        7:  ['Defensive Tactics'],
+        11: ["Superior Hunter's Prey"],
+        15: ["Superior Hunter's Defense"],
+    },
+}
+ 
+export const RANGER_ASI_LEVELS = [4, 8, 12, 16, 19]
+ 
+export function getRangerFeatures(player, newLevel) {
+    const base = (RANGER_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (RANGER_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+export function rangerFavoredEnemyUses(level) {
+    if (level >= 17) return 6
+    if (level >= 13) return 5
+    if (level >= 9)  return 4
+    if (level >= 5)  return 3
+    return 2
+}
+ 
+export function rangerPreparedSpells(level) {
+    const table = [0,2,3,4,5,6,6,7,7,9,9,10,10,11,11,12,12,14,14,15,15]
+    return table[level] || 15
+}
+ 
+export function rangerSlotSummary(level) {
+    const slots = {
+        1: [2,0,0,0,0], 2: [2,0,0,0,0], 3: [3,0,0,0,0], 4: [3,0,0,0,0],
+        5: [4,2,0,0,0], 6: [4,2,0,0,0], 7: [4,3,0,0,0], 8: [4,3,0,0,0],
+        9: [4,3,2,0,0], 10:[4,3,2,0,0], 11:[4,3,3,0,0], 12:[4,3,3,0,0],
+        13:[4,3,3,1,0], 14:[4,3,3,1,0], 15:[4,3,3,2,0], 16:[4,3,3,2,0],
+        17:[4,3,3,3,1], 18:[4,3,3,3,1], 19:[4,3,3,3,2], 20:[4,3,3,3,2],
+    }
+    return (slots[level] || slots[20]).filter(s => s > 0).join('/')
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function xpToNextLevel(level) {
@@ -1162,4 +1267,453 @@ export function getBackgroundByName(name) {
 
 export function getSpeciesByName(name) {
     return SPECIES.find(s => s.name === name) || null
+}
+
+// ─── Rogue ────────────────────────────────────────────────────────────────────
+ 
+export const ROGUE_SUBCLASSES = [
+    {
+        name: 'Arcane Trickster',
+        desc: 'Enhance stealth with arcane spells. Cast Wizard spells, make Mage Hand Invisible, and eventually steal spells cast against you.',
+    },
+    {
+        name: 'Assassin',
+        desc: 'Practice the grim art of death. Advantage on Initiative, devastating first-round strikes, and double damage against surprised targets at level 17.',
+    },
+    {
+        name: 'Soulknife',
+        desc: 'Strike foes with psionic blades. Manifest psychic blades from thin air, teleport with Psychic Teleportation, and stun foes with Rend Mind.',
+    },
+    {
+        name: 'Thief',
+        desc: 'Hunt for treasure as a classic adventurer. Fast Hands for bonus action item use, Second-Story Work for climbing, and Use Magic Device at level 13.',
+    },
+]
+ 
+export const ROGUE_BASE_FEATURES = {
+    1:  ['Expertise', 'Sneak Attack', "Thieves' Cant", 'Weapon Mastery'],
+    2:  ['Cunning Action'],
+    3:  ['Rogue Subclass', 'Steady Aim'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Cunning Strike', 'Uncanny Dodge'],
+    6:  ['Expertise'],
+    7:  ['Evasion', 'Reliable Talent'],
+    8:  ['Ability Score Improvement'],
+    9:  ['Subclass Feature'],
+    10: ['Ability Score Improvement'],
+    11: ['Improved Cunning Strike'],
+    12: ['Ability Score Improvement'],
+    13: ['Subclass Feature'],
+    14: ['Devious Strikes'],
+    15: ['Slippery Mind'],
+    16: ['Ability Score Improvement'],
+    17: ['Subclass Feature'],
+    18: ['Elusive'],
+    19: ['Epic Boon'],
+    20: ['Stroke of Luck'],
+}
+ 
+export const ROGUE_SUBCLASS_FEATURES = {
+    'Arcane Trickster': {
+        3:  ['Spellcasting', 'Mage Hand Legerdemain'],
+        9:  ['Magical Ambush'],
+        13: ['Versatile Trickster'],
+        17: ['Spell Thief'],
+    },
+    'Assassin': {
+        3:  ['Assassinate', "Assassin's Tools"],
+        9:  ['Infiltration Expertise'],
+        13: ['Envenom Weapons'],
+        17: ['Death Strike'],
+    },
+    'Soulknife': {
+        3:  ['Psionic Power', 'Psychic Blades'],
+        9:  ['Soul Blades'],
+        13: ['Psychic Veil'],
+        17: ['Rend Mind'],
+    },
+    'Thief': {
+        3:  ['Fast Hands', 'Second-Story Work'],
+        9:  ['Supreme Sneak'],
+        13: ['Use Magic Device'],
+        17: ["Thief's Reflexes"],
+    },
+}
+ 
+// Rogue ASI levels — note: 5 ASIs total, includes level 10
+export const ROGUE_ASI_LEVELS = [4, 8, 10, 12, 16]
+ 
+export function getRogueFeatures(player, newLevel) {
+    const base = (ROGUE_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (ROGUE_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+// Sneak Attack dice: 1d6 at L1, +1d6 every 2 levels
+export function rogueSneakAttackDice(level) {
+    return Math.ceil(level / 2)
+}
+ 
+// Arcane Trickster spell slot summary
+export function atSlotSummary(rogueLevel) {
+    if (rogueLevel < 3)   return ''
+    if (rogueLevel < 7)   return rogueLevel === 3 ? '2×L1' : '3×L1'
+    if (rogueLevel < 10)  return '4L1/2L2'
+    if (rogueLevel < 13)  return rogueLevel === 10 ? '4L1/3L2' : '4L1/3L2'
+    if (rogueLevel < 16)  return '4L1/3L2/2L3'
+    if (rogueLevel < 19)  return '4L1/3L2/3L3'
+    return '4L1/3L2/3L3/1L4'
+}
+ 
+export function atPreparedSpells(rogueLevel) {
+    const table = {
+        3:3, 4:4, 5:4, 6:4, 7:5, 8:6, 9:6, 10:7,
+        11:8, 12:8, 13:9, 14:10, 15:10, 16:11, 17:11, 18:11, 19:12, 20:13
+    }
+    return table[rogueLevel] || 13
+}
+ 
+// Arcane Trickster cantrips known (3 at L3, +1 at L10)
+export function atCantrips(rogueLevel) {
+    return rogueLevel >= 10 ? 4 : 3
+}
+
+// ─── Sorcerer ─────────────────────────────────────────────────────────────────
+
+export const SORCERER_SUBCLASSES = [
+    {
+        name: 'Aberrant Sorcery',
+        desc: 'Wield unnatural psionic power. Telepathic Speech, psionic spells cast without components, and a space-warping Warping Implosion at level 18.',
+    },
+    {
+        name: 'Clockwork Sorcery',
+        desc: 'Channel cosmic forces of order. Restore Balance to cancel Advantage/Disadvantage, Bastion of Law shields allies, and Trance of Order at level 14.',
+    },
+    {
+        name: 'Draconic Sorcery',
+        desc: 'Breathe the magic of dragons. Bonus HP and natural armor at level 3, elemental damage affinity at level 6, and draconic wings at level 14.',
+    },
+    {
+        name: 'Wild Magic Sorcery',
+        desc: 'Unleash chaotic magic. Wild Magic Surges on nat 20s, Tides of Chaos for guaranteed Advantage, and Bend Luck to manipulate others\' rolls.',
+    },
+]
+
+export const SORCERER_BASE_FEATURES = {
+    1:  ['Spellcasting', 'Innate Sorcery'],
+    2:  ['Font of Magic', 'Metamagic'],
+    3:  ['Sorcerer Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Sorcerous Restoration'],
+    6:  ['Subclass Feature'],
+    7:  ['Sorcery Incarnate'],
+    8:  ['Ability Score Improvement'],
+    9:  [],
+    10: ['Metamagic'],
+    11: [],
+    12: ['Ability Score Improvement'],
+    13: [],
+    14: ['Subclass Feature'],
+    15: [],
+    16: ['Ability Score Improvement'],
+    17: ['Metamagic'],
+    18: ['Subclass Feature'],
+    19: ['Epic Boon'],
+    20: ['Arcane Apotheosis'],
+}
+
+export const SORCERER_SUBCLASS_FEATURES = {
+    'Aberrant Sorcery': {
+        3:  ['Psionic Spells', 'Telepathic Speech'],
+        6:  ['Psionic Sorcery', 'Psychic Defenses'],
+        14: ['Revelation in Flesh'],
+        18: ['Warping Implosion'],
+    },
+    'Clockwork Sorcery': {
+        3:  ['Clockwork Spells', 'Restore Balance'],
+        6:  ['Bastion of Law'],
+        14: ['Trance of Order'],
+        18: ['Clockwork Cavalcade'],
+    },
+    'Draconic Sorcery': {
+        3:  ['Draconic Resilience', 'Draconic Spells'],
+        6:  ['Elemental Affinity'],
+        14: ['Dragon Wings'],
+        18: ['Dragon Companion'],
+    },
+    'Wild Magic Sorcery': {
+        3:  ['Wild Magic Surge', 'Tides of Chaos'],
+        6:  ['Bend Luck'],
+        14: ['Controlled Chaos'],
+        18: ['Tamed Surge'],
+    },
+}
+
+export const SORCERER_ASI_LEVELS = [4, 8, 12, 16]
+
+export function getSorcererFeatures(player, newLevel) {
+    const base = (SORCERER_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (SORCERER_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+
+// Sorcery Points = Sorcerer level (0 at L1, starts at L2)
+export function sorcererSorceryPoints(level) {
+    return level >= 2 ? level : 0
+}
+
+// Cantrips: 4 at L1, 5 at L4, 6 at L10
+export function sorcererCantrips(level) {
+    if (level >= 10) return 6
+    if (level >= 4)  return 5
+    return 4
+}
+
+// Prepared spells from PHB table
+export function sorcererPreparedSpells(level) {
+    const table = [0,2,4,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22]
+    return table[level] || 22
+}
+
+// Full caster slots (shared with Bard/Cleric/Druid)
+export function sorcererSlotSummary(level) {
+    const table = {
+        1:[2,0,0,0,0,0,0,0,0], 2:[3,0,0,0,0,0,0,0,0], 3:[4,2,0,0,0,0,0,0,0],
+        4:[4,3,0,0,0,0,0,0,0], 5:[4,3,2,0,0,0,0,0,0], 6:[4,3,3,0,0,0,0,0,0],
+        7:[4,3,3,1,0,0,0,0,0], 8:[4,3,3,2,0,0,0,0,0], 9:[4,3,3,3,1,0,0,0,0],
+        10:[4,3,3,3,2,0,0,0,0], 11:[4,3,3,3,2,1,0,0,0], 12:[4,3,3,3,2,1,0,0,0],
+        13:[4,3,3,3,2,1,1,0,0], 14:[4,3,3,3,2,1,1,0,0], 15:[4,3,3,3,2,1,1,1,0],
+        16:[4,3,3,3,2,1,1,1,0], 17:[4,3,3,3,2,1,1,1,1], 18:[4,3,3,3,3,1,1,1,1],
+        19:[4,3,3,3,3,2,1,1,1], 20:[4,3,3,3,3,2,2,1,1],
+    }
+    return (table[level] || table[20]).filter(s => s > 0).join('/')
+}
+
+// ─── Warlock ──────────────────────────────────────────────────────────────────
+ 
+export const WARLOCK_SUBCLASSES = [
+    {
+        name: 'Archfey Patron',
+        desc: 'Bargain with whimsical fey. Misty Step at will, Misty Escape reactions, and the ability to weave teleportation into your spellcasting at level 14.',
+    },
+    {
+        name: 'Celestial Patron',
+        desc: 'Call on the power of the heavens. Healing Light pool to restore HP, Radiant Soul damage boost, and Searing Vengeance to save dying allies.',
+    },
+    {
+        name: 'Fiend Patron',
+        desc: 'Make a deal with the lower planes. Temp HP on kills, Dark One\'s Own Luck to boost rolls, and Hurl Through Hell at level 14.',
+    },
+    {
+        name: 'Great Old One Patron',
+        desc: 'Unearth forbidden lore of ineffable beings. Telepathic Awakened Mind, Psychic Spells without components, and Create Thrall at level 14.',
+    },
+]
+ 
+export const WARLOCK_BASE_FEATURES = {
+    1:  ['Eldritch Invocations', 'Pact Magic'],
+    2:  ['Magical Cunning'],
+    3:  ['Warlock Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  [],
+    6:  ['Subclass Feature'],
+    7:  [],
+    8:  ['Ability Score Improvement'],
+    9:  ['Contact Patron'],
+    10: ['Subclass Feature'],
+    11: ['Mystic Arcanum (Level 6 Spell)'],
+    12: ['Ability Score Improvement'],
+    13: ['Mystic Arcanum (Level 7 Spell)'],
+    14: ['Subclass Feature'],
+    15: ['Mystic Arcanum (Level 8 Spell)'],
+    16: ['Ability Score Improvement'],
+    17: ['Mystic Arcanum (Level 9 Spell)'],
+    18: [],
+    19: ['Epic Boon'],
+    20: ['Eldritch Master'],
+}
+ 
+export const WARLOCK_SUBCLASS_FEATURES = {
+    'Archfey Patron': {
+        3:  ['Archfey Spells', 'Steps of the Fey'],
+        6:  ['Misty Escape'],
+        10: ['Beguiling Defenses'],
+        14: ['Bewitching Magic'],
+    },
+    'Celestial Patron': {
+        3:  ['Celestial Spells', 'Healing Light'],
+        6:  ['Radiant Soul'],
+        10: ['Celestial Resilience'],
+        14: ['Searing Vengeance'],
+    },
+    'Fiend Patron': {
+        3:  ["Dark One's Blessing", 'Fiend Spells'],
+        6:  ["Dark One's Own Luck"],
+        10: ['Fiendish Resilience'],
+        14: ['Hurl Through Hell'],
+    },
+    'Great Old One Patron': {
+        3:  ['Awakened Mind', 'Great Old One Spells', 'Psychic Spells'],
+        6:  ['Clairvoyant Combatant'],
+        10: ['Eldritch Hex', 'Thought Shield'],
+        14: ['Create Thrall'],
+    },
+}
+ 
+export const WARLOCK_ASI_LEVELS = [4, 8, 12, 16]
+ 
+export function getWarlockFeatures(player, newLevel) {
+    const base = (WARLOCK_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (WARLOCK_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+ 
+// Pact Magic slot level (all slots are the same level)
+export function warlockSlotLevel(level) {
+    if (level >= 9) return 5
+    if (level >= 7) return 4
+    if (level >= 5) return 3
+    if (level >= 3) return 2
+    return 1
+}
+ 
+// Number of Pact Magic spell slots
+export function warlockSlotCount(level) {
+    if (level >= 17) return 4
+    if (level >= 11) return 3
+    if (level >= 2)  return 2
+    return 1
+}
+ 
+// Prepared spells from PHB table
+export function warlockPreparedSpells(level) {
+    const table = [0,2,3,4,5,6,7,8,9,10,10,11,11,12,12,13,13,14,14,15,15]
+    return table[level] || 15
+}
+ 
+// Cantrips: 2 at L1, 3 at L4, 4 at L10
+export function warlockCantrips(level) {
+    if (level >= 10) return 4
+    if (level >= 4)  return 3
+    return 2
+}
+ 
+// Eldritch Invocations known from PHB table
+export function warlockInvocations(level) {
+    const table = [0,1,3,3,3,5,5,6,6,7,7,7,8,8,8,9,9,9,10,10,10]
+    return table[level] || 10
+}
+
+// ─── Wizard ───────────────────────────────────────────────────────────────────
+
+export const WIZARD_SUBCLASSES = [
+    {
+        name: 'Abjurer',
+        desc: 'Shield companions and banish foes. Arcane Ward absorbs damage, Projected Ward extends it to allies, and Spell Resistance grants Advantage on saves against spells.',
+    },
+    {
+        name: 'Diviner',
+        desc: 'Learn the secrets of the multiverse. Portent dice let you replace any d20 roll, Expert Divination recovers slots when you scry, and The Third Eye expands your senses.',
+    },
+    {
+        name: 'Evoker',
+        desc: 'Create explosive elemental effects. Potent Cantrip ensures misses still deal damage, Sculpt Spells protects allies in your blasts, and Overchannel maximizes spell damage.',
+    },
+    {
+        name: 'Illusionist',
+        desc: 'Weave subtle spells of deception. Cast illusions without verbal components, summon spectral creatures with Phantasmal Creatures, and make illusions real with Illusory Reality.',
+    },
+]
+
+export const WIZARD_BASE_FEATURES = {
+    1:  ['Spellcasting', 'Ritual Adept', 'Arcane Recovery'],
+    2:  ['Scholar'],
+    3:  ['Wizard Subclass'],
+    4:  ['Ability Score Improvement'],
+    5:  ['Memorize Spell'],
+    6:  ['Subclass Feature'],
+    7:  [],
+    8:  ['Ability Score Improvement'],
+    9:  [],
+    10: ['Subclass Feature'],
+    11: [],
+    12: ['Ability Score Improvement'],
+    13: [],
+    14: ['Subclass Feature'],
+    15: [],
+    16: ['Ability Score Improvement'],
+    17: [],
+    18: ['Spell Mastery'],
+    19: ['Epic Boon'],
+    20: ['Signature Spells'],
+}
+
+export const WIZARD_SUBCLASS_FEATURES = {
+    'Abjurer': {
+        3:  ['Abjuration Savant', 'Arcane Ward'],
+        6:  ['Projected Ward'],
+        10: ['Spell Breaker'],
+        14: ['Spell Resistance'],
+    },
+    'Diviner': {
+        3:  ['Divination Savant', 'Portent'],
+        6:  ['Expert Divination'],
+        10: ['The Third Eye'],
+        14: ['Greater Portent'],
+    },
+    'Evoker': {
+        3:  ['Evocation Savant', 'Potent Cantrip'],
+        6:  ['Sculpt Spells'],
+        10: ['Empowered Evocation'],
+        14: ['Overchannel'],
+    },
+    'Illusionist': {
+        3:  ['Illusion Savant', 'Improved Illusions'],
+        6:  ['Phantasmal Creatures'],
+        10: ['Illusory Self'],
+        14: ['Illusory Reality'],
+    },
+}
+
+export const WIZARD_ASI_LEVELS = [4, 8, 12, 16]
+
+export function getWizardFeatures(player, newLevel) {
+    const base = (WIZARD_BASE_FEATURES[newLevel] || []).filter(f => f)
+    const subFeatures = player.subclass
+        ? (WIZARD_SUBCLASS_FEATURES[player.subclass]?.[newLevel] || [])
+        : []
+    return [...base, ...subFeatures]
+}
+
+// Cantrips: 3 at L1, 4 at L4, 5 at L10
+export function wizardCantrips(level) {
+    if (level >= 10) return 5
+    if (level >= 4)  return 4
+    return 3
+}
+
+// Prepared spells from PHB table (INT mod added by player, tracked here as base)
+export function wizardPreparedSpells(level) {
+    const table = [0,4,5,6,7,9,10,11,12,14,15,16,16,17,18,19,21,22,23,24,25]
+    return table[level] || 25
+}
+
+// Full caster slot summary (shared with Bard/Cleric/Druid/Sorcerer)
+export function wizardSlotSummary(level) {
+    const table = {
+        1:[2,0,0,0,0,0,0,0,0], 2:[3,0,0,0,0,0,0,0,0], 3:[4,2,0,0,0,0,0,0,0],
+        4:[4,3,0,0,0,0,0,0,0], 5:[4,3,2,0,0,0,0,0,0], 6:[4,3,3,0,0,0,0,0,0],
+        7:[4,3,3,1,0,0,0,0,0], 8:[4,3,3,2,0,0,0,0,0], 9:[4,3,3,3,1,0,0,0,0],
+        10:[4,3,3,3,2,0,0,0,0], 11:[4,3,3,3,2,1,0,0,0], 12:[4,3,3,3,2,1,0,0,0],
+        13:[4,3,3,3,2,1,1,0,0], 14:[4,3,3,3,2,1,1,0,0], 15:[4,3,3,3,2,1,1,1,0],
+        16:[4,3,3,3,2,1,1,1,0], 17:[4,3,3,3,2,1,1,1,1], 18:[4,3,3,3,3,1,1,1,1],
+        19:[4,3,3,3,3,2,1,1,1], 20:[4,3,3,3,3,2,2,1,1],
+    }
+    return (table[level] || table[20]).filter(s => s > 0).join('/')
 }

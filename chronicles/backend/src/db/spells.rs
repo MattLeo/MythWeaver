@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
+use sqlx::Row;
 use uuid::Uuid;
 
 // ─── Spell Queries ────────────────────────────────────────────────────────────
@@ -80,31 +81,53 @@ pub async fn get_spell_by_name(pool: &SqlitePool, name: &str) -> Result<Option<V
     })))
 }
 
-pub async fn search_spells(pool: &SqlitePool, query: &str, wizard_only: bool) -> Result<Vec<Value>> {
+pub async fn search_spells(
+    pool: &SqlitePool,
+    query: &str,
+    wizard_only: bool,
+    class_name: Option<&str>,
+) -> Result<Vec<Value>> {
     let pattern = format!("%{}%", query);
-    let wizard_filter: i64 = if wizard_only { 1 } else { 0 };
 
-    let rows = sqlx::query!(
+    // Build the class filter clause
+    let class_filter = match class_name {
+        Some("Wizard") | None if wizard_only => "AND is_wizard_spell = 1",
+        Some("Cleric")   => "AND is_cleric_spell = 1",
+        Some("Druid")    => "AND is_druid_spell = 1",
+        Some("Bard")     => "AND is_bard_spell = 1",
+        Some("Paladin")  => "AND is_paladin_spell = 1",
+        Some("Ranger")   => "AND is_ranger_spell = 1",
+        Some("Sorcerer") => "AND is_sorcerer_spell = 1",
+        Some("Warlock")  => "AND is_warlock_spell = 1",
+        Some("Wizard")   => "AND is_wizard_spell = 1",
+        _                => "",
+    };
+
+    let sql = format!(
         "SELECT id, name, level, school, casting_time, duration, concentration, description
          FROM spells
          WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?))
-           AND (? = 0 OR is_wizard_spell = 1)
+           {}
          ORDER BY level, name
          LIMIT 20",
-        pattern, pattern, wizard_filter
-    )
-    .fetch_all(pool)
-    .await?;
+        class_filter
+    );
+
+    let rows = sqlx::query(&sql)
+        .bind(&pattern)
+        .bind(&pattern)
+        .fetch_all(pool)
+        .await?;
 
     Ok(rows.iter().map(|r| json!({
-        "id": r.id,
-        "name": r.name,
-        "level": r.level,
-        "school": r.school,
-        "casting_time": r.casting_time,
-        "duration": r.duration,
-        "concentration": r.concentration,
-        "description": r.description,
+        "id":            r.get::<String, _>("id"),
+        "name":          r.get::<String, _>("name"),
+        "level":         r.get::<i64, _>("level"),
+        "school":        r.get::<String, _>("school"),
+        "casting_time":  r.get::<String, _>("casting_time"),
+        "duration":      r.get::<String, _>("duration"),
+        "concentration": r.get::<i64, _>("concentration"),
+        "description":   r.get::<String, _>("description"),
     })).collect())
 }
 
@@ -435,13 +458,13 @@ pub fn paladin_slot_table(level: i64) -> [i64; 5] {
     }
 }
 
-pub async fn seed_paladin_spell_slots(
+pub async fn seed_half_caster_spell_slots(
     pool: &SqlitePool,
     campaign_id: &str,
     player_id: &str,
-    paladin_level: i64,
+    class_level: i64,
 ) -> Result<()> {
-    let slots = paladin_slot_table(paladin_level);
+    let slots = paladin_slot_table(class_level);
  
     for (i, &max) in slots.iter().enumerate() {
         let level = (i + 1) as i64;
@@ -479,6 +502,116 @@ pub async fn seed_paladin_spell_slots(
             .execute(pool).await?;
         }
     }
+ 
+    Ok(())
+}
+
+pub fn at_slot_table(rogue_level: i64) -> [i64; 4] {
+    match rogue_level {
+        3 | 4   => [2,0,0,0],
+        5 | 6   => [3,0,0,0],
+        7 | 8 | 9 => [4,2,0,0],
+        10 | 11 | 12 => [4,3,0,0],
+        13 | 14 | 15 => [4,3,2,0],
+        16 | 17 | 18 => [4,3,3,0],
+        19 | 20 => [4,3,3,1],
+        _       => [0,0,0,0],
+    }
+}
+ 
+pub async fn seed_arcane_trickster_spell_slots(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    rogue_level: i64,
+) -> Result<()> {
+    let slots = at_slot_table(rogue_level);
+ 
+    for (i, &max) in slots.iter().enumerate() {
+        let level = (i + 1) as i64;
+ 
+        if max == 0 {
+            sqlx::query!(
+                "DELETE FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+                player_id, level
+            )
+            .execute(pool).await?;
+            continue;
+        }
+ 
+        let existing = sqlx::query!(
+            "SELECT id, current_slots FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+            player_id, level
+        )
+        .fetch_optional(pool).await?;
+ 
+        if let Some(row) = existing {
+            let new_current = row.current_slots.min(max);
+            sqlx::query!(
+                "UPDATE spell_slots SET max_slots = ?, current_slots = ?, updated_at = datetime('now') WHERE id = ?",
+                max, new_current, row.id
+            )
+            .execute(pool).await?;
+        } else {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query!(
+                "INSERT INTO spell_slots
+                 (id, campaign_id, player_id, slot_level, current_slots, max_slots)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                id, campaign_id, player_id, level, max, max
+            )
+            .execute(pool).await?;
+        }
+    }
+ 
+    Ok(())
+}
+
+pub fn warlock_slot_table(warlock_level: i64) -> (i64, i64) {
+    // Returns (slot_count, slot_level)
+    let slot_level = match warlock_level {
+        1..=2   => 1,
+        3..=4   => 2,
+        5..=6   => 3,
+        7..=8   => 4,
+        _       => 5,
+    };
+    let slot_count = match warlock_level {
+        1       => 1,
+        2..=10  => 2,
+        11..=16 => 3,
+        _       => 4,
+    };
+    (slot_count, slot_level)
+}
+ 
+pub async fn seed_warlock_spell_slots(
+    pool: &SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    warlock_level: i64,
+) -> Result<()> {
+    let (slot_count, slot_level) = warlock_slot_table(warlock_level);
+ 
+    // Delete ALL existing Pact Magic slots (1-5) since the active level may change.
+    // We keep only the current level's slots.
+    for level in 1i64..=5 {
+        sqlx::query!(
+            "DELETE FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+            player_id, level
+        )
+        .execute(pool).await?;
+    }
+ 
+    // Insert the single slot level with the correct count
+    let id = Uuid::new_v4().to_string();
+    sqlx::query!(
+        "INSERT INTO spell_slots
+         (id, campaign_id, player_id, slot_level, current_slots, max_slots)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        id, campaign_id, player_id, slot_level, slot_count, slot_count
+    )
+    .execute(pool).await?;
  
     Ok(())
 }
@@ -898,4 +1031,54 @@ pub async fn validate_cast(
         "concentration_warning": false,
         "spell": spell,
     }))
+}
+
+pub async fn get_class_spells(pool: &SqlitePool, class_name: &str) -> Result<Vec<Value>> {
+    let col = match class_name {
+        "Wizard" | "Eldritch Knight" | "Arcane Trickster" => "is_wizard_spell",
+        "Cleric"   => "is_cleric_spell",
+        "Druid"    => "is_druid_spell",
+        "Bard"     => "is_bard_spell",
+        "Paladin"  => "is_paladin_spell",
+        "Ranger"   => "is_ranger_spell",
+        "Sorcerer" => "is_sorcerer_spell",
+        "Warlock"  => "is_warlock_spell",
+        _          => return Ok(vec![]),
+    };
+
+    let sql = format!(
+        "SELECT id, name, level, school, casting_time, duration, concentration, description,
+                damage_die, damage_die_count, damage_type, save_type, attack_type, target_type,
+                has_backend_resolver, scales_with_level,
+                cantrip_dice_5, cantrip_dice_11, cantrip_dice_17, slot_scale_dice
+         FROM spells
+         WHERE {} = 1
+         ORDER BY level, name",
+        col
+    );
+
+    let rows = sqlx::query(&sql).fetch_all(pool).await?;
+
+    Ok(rows.iter().map(|r| json!({
+        "id":                r.get::<String, _>("id"),
+        "name":              r.get::<String, _>("name"),
+        "level":             r.get::<i64, _>("level"),
+        "school":            r.get::<String, _>("school"),
+        "casting_time":      r.get::<String, _>("casting_time"),
+        "duration":          r.get::<String, _>("duration"),
+        "concentration":     r.get::<i64, _>("concentration"),
+        "description":       r.get::<String, _>("description"),
+        "damage_die":        r.get::<Option<String>, _>("damage_die"),
+        "damage_die_count":  r.get::<Option<i64>, _>("damage_die_count"),
+        "damage_type":       r.get::<Option<String>, _>("damage_type"),
+        "save_type":         r.get::<Option<String>, _>("save_type"),
+        "attack_type":       r.get::<Option<String>, _>("attack_type"),
+        "target_type":       r.get::<Option<String>, _>("target_type"),
+        "has_backend_resolver": r.get::<i64, _>("has_backend_resolver"),
+        "scales_with_level": r.get::<i64, _>("scales_with_level"),
+        "cantrip_dice_5":    r.get::<Option<i64>, _>("cantrip_dice_5"),
+        "cantrip_dice_11":   r.get::<Option<i64>, _>("cantrip_dice_11"),
+        "cantrip_dice_17":   r.get::<Option<i64>, _>("cantrip_dice_17"),
+        "slot_scale_dice":   r.get::<Option<i64>, _>("slot_scale_dice"),
+    })).collect())
 }

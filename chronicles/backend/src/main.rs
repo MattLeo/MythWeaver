@@ -26,10 +26,10 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite:./data/mythweaver.db".to_string());
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .expect("ANTHROPIC_API_KEY must be set");
-    let model = std::env::var("ANTHROPIC_MODEL")
-        .unwrap_or_else(|_| "claude-haiku-4-5-20251001".to_string());
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .expect("OPENROUTER_API_KEY must be set");
+    let model = std::env::var("LLM_MODEL")
+        .unwrap_or_else(|_| "inclusionai/ling-2.6-1t:free".to_string());
     let port = std::env::var("PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse::<u16>()
@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/campaigns/:id", get(api::get_campaign_state).delete(api::delete_campaign))
         .route("/api/campaigns/:id/player-state", get(api::get_player_state))
         .route("/api/campaigns/:id/level-up", post(api::level_up))
+        .route("/api/campaigns/:id/notes", get(api::get_notes_handler).put(api::update_notes_handler))
 
         // ── Sessions ─────────────────────────────────────────────────────────
         .route("/api/campaigns/:id/session", post(api::start_session))
@@ -91,6 +92,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/campaigns/:id/spells/search", post(api::search_spells_handler))
         .route("/api/campaigns/:id/spells/slots", get(api::get_spell_slots_handler))
         .route("/api/campaigns/:id/spells/slots/seed", post(api::seed_ek_slots_handler))
+        .route("/api/campaigns/:id/bonus-damage", post(api::apply_bonus_damage_handler))
+        .route("/api/campaigns/:id/spells/browse", get(api::browse_spells_handler))
+        .route("/api/spells/browse/:class_name", get(api::browse_class_spells_handler))
 
         // ── Concentration ────────────────────────────────────────────────────
         .route("/api/campaigns/:id/concentration", get(api::get_concentration_handler))
@@ -101,6 +105,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/campaigns/:id/war-bonds/create", post(api::create_war_bond_handler))
         .route("/api/campaigns/:id/war-bonds/break", post(api::break_war_bond_handler))
         .route("/api/campaigns/:id/war-bonds/summon", post(api::summon_bonded_weapon_handler))
+
+        // ── Feats ───────────────────────────────────────────────────────────
+        .route("/api/feats", get(api::list_feats_handler))
+        .route("/api/campaigns/:id/feats", get(api::get_available_feats_handler))
+        .route("/api/campaigns/:id/player-feats", get(api::get_player_feats_handler))
 
         .layer(cors)
         .with_state(app_state);

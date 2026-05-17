@@ -613,15 +613,31 @@ fn start_combat_tool() -> Value {
                         "properties": {
                             "enemy_name": { "type": "string" },
                             "enemy_description": { "type": "string" },
+                            "enemy_type": { 
+                                "type": "string", 
+                                "enum": ["humanoid_basic", "humanoid_ranged", "humanoid_magic", "beast"] ,
+                                "desciription":  "Determines combat behavior. humanoid_basic/beast = melee only. humanoid_ranged = ranged attacks. humanoid_magic = casts spells from spell_list."
+                            },
                             "enemy_hp": { "type": "integer" },
                             "enemy_ac": { "type": "integer" },
                             "enemy_damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
                             "enemy_damage_bonus": { "type": "integer" },
                             "enemy_damage_type": { "type": "string" },
                             "enemy_attack_bonus": { "type": "integer" },
-                            "enemy_weapon_name": { "type": "string", "description": "Name of the weapon or natural attack e.g. 'rusty shortsword', 'claws', 'bone club'" }
+                            "enemy_weapon_name": { "type": "string", "description": "Name of the weapon or natural attack e.g. 'rusty shortsword', 'claws', 'bone club'" },
+                            "spell_list": {
+                                "type": "array",
+                                "description": "Required for humanoid_magic type. Choose 2-4 spells from the available spell list.",
+                                "items": { 
+                                    "type": "string",
+                                    "enum": [
+                                        "fire_bolt", "ray_of_frost", "poison_spray", "magic_missile", 
+                                        "burning_hands", "chill_touch", "thunderwave"
+                                    ]
+                                }
+                            }
                         },
-                        "required": ["enemy_name","enemy_hp","enemy_ac","enemy_damage_die","enemy_damage_type"]
+                        "required": ["enemy_name","enemy_hp","enemy_ac","enemy_damage_die","enemy_damage_type", "enemy_type"]
                     }
                 },
                 "allies": {

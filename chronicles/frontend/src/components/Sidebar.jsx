@@ -82,7 +82,7 @@ ${STYLES}
 export default function Sidebar({
   player, abilities, items, companions, campaignTime,
   isOpen, onNewAdventure, levelUpAvailable, onLevelUp,
-  onInventory, onAbilities, onSpells
+  onInventory, onAbilities, onSpells, onNotes, knownSpells,
 }) {
   if (!player) return null
 
@@ -96,9 +96,7 @@ export default function Sidebar({
   const xpPct = xpProgress(player.experience, player.level)
 
   const isEK = player.subclass === 'Eldritch Knight'
-  const canCastSpells = isEK
-    || ['Bard', 'Cleric', 'Druid', 'Paladin'].includes(player.class)
-    || (player.class === 'Monk' && knownSpells.some(s => s.level === 0))
+  const canCastSpells = knownSpells.length > 0
 
   return (
     <>
@@ -253,6 +251,13 @@ export default function Sidebar({
               ✦ Spells
             </button>
           )}
+          <button
+            className="btn-ghost"
+            onClick={onNotes}
+            style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
+          >
+            ✦ Notes
+          </button>
         </div>
 
 

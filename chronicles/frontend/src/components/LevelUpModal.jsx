@@ -3,10 +3,13 @@ import { STYLES } from '../styles.js'
 import {
     FIGHTER_SUBCLASSES, BARBARIAN_SUBCLASSES, BARD_SUBCLASSES,
     CLERIC_SUBCLASSES, DRUID_SUBCLASSES, MONK_SUBCLASSES, PALADIN_SUBCLASSES,
-    ALL_MANEUVERS, STAT_KEYS, STAT_LABELS,
-    FIGHTER_ASI_LEVELS,
+    ALL_MANEUVERS, STAT_KEYS, STAT_LABELS, FIGHTER_ASI_LEVELS,
     getFighterFeatures, getBarbarianFeatures, getBardFeatures,
     getClericFeatures, getDruidFeatures, getMonkFeatures, getPaladinFeatures,
+    RANGER_SUBCLASSES, getRangerFeatures, ROGUE_SUBCLASSES,
+    getRogueFeatures, SORCERER_SUBCLASSES, getSorcererFeatures,
+    WARLOCK_SUBCLASSES, getWarlockFeatures, WIZARD_SUBCLASSES,
+    getWizardFeatures,
 } from '../constants.js'
 import { searchSpells } from '../api/client.js'
 
@@ -163,9 +166,9 @@ ${STYLES}
 `
 
 const SCHOOL_COLORS = {
-  abjuration: '#7ec8e3', evocation: '#f5a96a', divination: '#f5e87e',
-  conjuration: '#b5a9f5', enchantment: '#f5a9c8', illusion: '#a9f5d0',
-  necromancy: '#b0f5a9', transmutation: '#f5cfa9',
+    abjuration: '#7ec8e3', evocation: '#f5a96a', divination: '#f5e87e',
+    conjuration: '#b5a9f5', enchantment: '#f5a9c8', illusion: '#a9f5d0',
+    necromancy: '#b0f5a9', transmutation: '#f5cfa9',
 }
 
 const mod = v => Math.floor((v - 10) / 2)
@@ -178,7 +181,7 @@ function maneuversToGainAtLevel(level) {
 }
 function ekNewCantrips(level) { return level === 3 ? 2 : level === 10 ? 1 : 0 }
 function ekNewPrepared(level) {
-    return ({ 3:3, 4:1, 7:1, 10:2, 13:2, 16:2, 19:1 })[level] || 0
+    return ({ 3: 3, 4: 1, 7: 1, 10: 2, 13: 2, 16: 2, 19: 1 })[level] || 0
 }
 
 export default function LevelUpModal({ player, levelUpResult, campaignId, onComplete, onClose }) {
@@ -192,30 +195,40 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         wild_shape_uses, wild_shape_cr, druid_cantrips, druid_prepared_spells, druid_slot_summary,
         focus_points, martial_arts_die, unarmored_movement,
         lay_on_hands_pool, paladin_channel_divinity, paladin_prepared_spells, paladin_slot_summary,
+        favored_enemy_uses, ranger_prepared_spells, ranger_slot_summary, sneak_attack_dice, at_slot_summary,
+        at_prepared_spells, at_cantrips, sorcery_points, sorcerer_cantrips, sorcerer_prepared_spells,
+        sorcerer_slot_summary, warlock_slot_level, warlock_slot_count, warlock_prepared_spells,
+        warlock_cantrips, warlock_invocations, wizard_cantrips, wizard_prepared_spells, wizard_slot_summary,
     } = levelUpResult
 
-    const isFighter   = player.class === 'Fighter'
+    const isFighter = player.class === 'Fighter'
     const isBarbarian = player.class === 'Barbarian'
-    const isBard      = player.class === 'Bard'
-    const isCleric    = player.class === 'Cleric'
-    const isDruid     = player.class === 'Druid'
-    const isMonk      = player.class === 'Monk'
-    const isPaladin   = player.class === 'Paladin'
+    const isBard = player.class === 'Bard'
+    const isCleric = player.class === 'Cleric'
+    const isDruid = player.class === 'Druid'
+    const isMonk = player.class === 'Monk'
+    const isPaladin = player.class === 'Paladin'
+    const isRanger = player.class === 'Ranger'
+    const isRogue = player.class === 'Rogue'
+    const isSorcerer = player.class === 'Sorcerer'
+    const isWarlock = player.class === 'Warlock'
+    const isWizard = player.class === 'Wizard'
 
-    const isBattleMaster     = player.subclass === 'Battle Master'
-    const maneuversToGain    = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
+    const isBattleMaster = player.subclass === 'Battle Master'
+    const maneuversToGain = isBattleMaster ? maneuversToGainAtLevel(new_level) : 0
     const canReplaceManeuver = isBattleMaster && new_level >= 7
 
     const [subclass, setSubclass] = useState(null)
-    const isEKChosen    = subclass === 'Eldritch Knight'
-    const isExistingEK  = player.subclass === 'Eldritch Knight'
-    const isEK          = isEKChosen || isExistingEK
+    const isEKChosen = subclass === 'Eldritch Knight'
+    const isExistingEK = player.subclass === 'Eldritch Knight'
+    const isEK = isEKChosen || isExistingEK
     const needsEKSpells = isEK && (ekNewCantrips(new_level) > 0 || ekNewPrepared(new_level) > 0)
+    const isAT = isRogue && (player.subclass === 'Arcane Trickster')
 
     const steps = useMemo(() => {
         const s = ['summary']
         if (subclass_choice_required) s.push('subclass')
-        if (asi_available) s.push('asi')
+        if (asi_available) s.push('asi_or_feat')
         if (maneuversToGain > 0) s.push('maneuvers')
         if (needsEKSpells) s.push('ek_spells')
         return s
@@ -234,8 +247,13 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const [searching, setSearching] = useState(false)
     const [selectedCantrips, setSelectedCantrips] = useState([])
     const [selectedPrepared, setSelectedPrepared] = useState([])
+    const [asiOrFeat, setAsiOrFeat] = useState('asi')
+    const [selectedFeat, setSelectedFeat] = useState(null)
+    const [featChoices, setFeatChoices] = useState({})
+    const [availableFeats, setAvailableFeats] = useState([])
+    const [loadingFeats, setLoadingFeats] = useState(false)
 
-    const cantripSlots  = ekNewCantrips(new_level)
+    const cantripSlots = ekNewCantrips(new_level)
     const preparedSlots = ekNewPrepared(new_level)
 
     useEffect(() => {
@@ -255,9 +273,13 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const canAdvance = () => {
         if (currentStep === 'summary') return true
         if (currentStep === 'subclass') return subclass !== null
-        if (currentStep === 'asi') {
-            if (asiMode === '+2') return asi1 !== null
-            return asi1 !== null && asi2 !== null && asi1 !== asi2
+        if (currentStep === 'asi_or_feat') {
+            if (asiOrFeat === 'asi') {
+                if (asiMode === '+2') return asi1 !== null
+                return asi1 !== null && asi2 !== null && asi1 !== asi2
+            }
+            if (asiOrFeat === 'feat') return selectedFeat !== null
+            return false
         }
         if (currentStep === 'maneuvers') return selectedManeuvers.length === maneuversToGain
         if (currentStep === 'ek_spells') {
@@ -270,9 +292,15 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
     const handleConfirm = async () => {
         const choices = {}
         if (subclass) choices.subclass = subclass
-        if (asi_available && asi1) {
-            choices.asi_stat1 = asi1
-            choices.asi_stat2 = (asiMode === '+1+1' && asi2) ? asi2 : asi1
+        if (asi_available) {
+            if (asiOrFeat === 'feat' && selectedFeat) {
+                choices.feat_id = selectedFeat.id
+                if (Object.keys(featChoices).length > 0)
+                    choices.feat_choices = JSON.stringify(featChoices)
+            } else if (asi1) {
+                choices.asi_stat1 = asi1
+                choices.asi_stat2 = (asiMode === '+1+1' && asi2) ? asi2 : asi1
+            }
         }
         if (selectedManeuvers.length > 0) choices.new_maneuvers = selectedManeuvers
         if (replacedManeuver) choices.replaced_maneuver = replacedManeuver
@@ -297,40 +325,38 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
         else if (selectedPrepared.length < preparedSlots) setSelectedPrepared(s => [...s, spell])
     }
 
-    const activeList   = ekSpellTab === 'cantrip' ? selectedCantrips : selectedPrepared
-    const activeToggle = ekSpellTab === 'cantrip' ? toggleCantrip    : togglePrepared
-    const activeMax    = ekSpellTab === 'cantrip' ? cantripSlots      : preparedSlots
+    const activeList = ekSpellTab === 'cantrip' ? selectedCantrips : selectedPrepared
+    const activeToggle = ekSpellTab === 'cantrip' ? toggleCantrip : togglePrepared
+    const activeMax = ekSpellTab === 'cantrip' ? cantripSlots : preparedSlots
     const activeResults = ekSpellTab === 'cantrip'
         ? spellResults.filter(s => s.level === 0)
         : spellResults.filter(s => s.level > 0 && s.level <= 2)
 
-    const subclassOptions = isPaladin
-        ? PALADIN_SUBCLASSES
-        : isMonk
-            ? MONK_SUBCLASSES
-            : isCleric
-                ? CLERIC_SUBCLASSES
-                : isDruid
-                    ? DRUID_SUBCLASSES
-                    : isBarbarian
-                        ? BARBARIAN_SUBCLASSES
-                        : isBard
-                            ? BARD_SUBCLASSES
-                            : FIGHTER_SUBCLASSES
+    const subclassOptions = isPaladin ? PALADIN_SUBCLASSES
+        : isWizard ? WIZARD_SUBCLASSES
+            : isWarlock ? WARLOCK_SUBCLASSES
+                : isSorcerer ? SORCERER_SUBCLASSES
+                    : isRogue ? ROGUE_SUBCLASSES
+                        : isRanger ? RANGER_SUBCLASSES
+                            : isMonk ? MONK_SUBCLASSES
+                                : isCleric ? CLERIC_SUBCLASSES
+                                    : isDruid ? DRUID_SUBCLASSES
+                                        : isBarbarian ? BARBARIAN_SUBCLASSES
+                                            : isBard ? BARD_SUBCLASSES
+                                                : FIGHTER_SUBCLASSES
 
-    const subclassLabel = isPaladin
-        ? 'Choose your Sacred Oath'
-        : isMonk
-            ? 'Choose your Monastic Tradition'
-            : isCleric
-                ? 'Choose your Divine Domain'
-                : isDruid
-                    ? 'Choose your Druid Circle'
-                    : isBarbarian
-                        ? 'Choose your Primal Path'
-                        : isBard
-                            ? 'Choose your Bard College'
-                            : 'Choose your Fighter subclass'
+    const subclassLabel = isPaladin ? 'Choose your Sacred Oath'
+        : isWizard ? 'Choose your Arcane Tradition'
+            : isWarlock ? 'Choose your Otherworldly Patron'
+                : isSorcerer ? 'Choose your Sorcerous Origin'
+                    : isRogue ? 'Choose your Roguish Archetype'
+                        : isRanger ? 'Choose your Ranger Conclave'
+                            : isMonk ? 'Choose your Monastic Tradition'
+                                : isCleric ? 'Choose your Divine Domain'
+                                    : isDruid ? 'Choose your Druid Circle'
+                                        : isBarbarian ? 'Choose your Primal Path'
+                                            : isBard ? 'Choose your Bard College'
+                                                : 'Choose your Fighter subclass'
 
     const moonCR = player.subclass === 'Circle of the Moon' ? Math.floor(new_level / 3) : null
 
@@ -366,7 +392,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         <div className="lu-info-row"><span>Weapon Masteries</span><span className="lu-info-val">{weapon_mastery_count}</span></div>
                                         {action_surge_uses > 0 && <div className="lu-info-row"><span>Action Surge Uses</span><span className="lu-info-val">{action_surge_uses}</span></div>}
                                         {indomitable_max > 0 && <div className="lu-info-row"><span>Indomitable Uses</span><span className="lu-info-val">{indomitable_max}</span></div>}
-                                        {isEK && <div className="lu-info-row"><span>Spell Slots</span><span className="lu-info-val" style={{ color: '#b5a9f5' }}>{({3:'2×L1',4:'3×L1',7:'4L1 2L2',10:'4L1 3L2',13:'4L1 3L2 2L3',16:'4L1 3L2 3L3',19:'4L1 3L2 3L3 1L4'})[new_level]||'Updated'}</span></div>}
+                                        {isEK && <div className="lu-info-row"><span>Spell Slots</span><span className="lu-info-val" style={{ color: '#b5a9f5' }}>{({ 3: '2×L1', 4: '3×L1', 7: '4L1 2L2', 10: '4L1 3L2', 13: '4L1 3L2 2L3', 16: '4L1 3L2 3L3', 19: '4L1 3L2 3L3 1L4' })[new_level] || 'Updated'}</span></div>}
                                     </>)}
 
                                     {isBarbarian && (<>
@@ -419,6 +445,120 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                         {new_level === 6 && <div className="lu-info-row"><span>Aura of Protection</span><span className="lu-info-val">10 ft, +CHA to saves</span></div>}
                                         {new_level === 18 && <div className="lu-info-row"><span>Aura Expansion</span><span className="lu-info-val">30 ft aura</span></div>}
                                     </>)}
+
+                                    {isRanger && (<>
+                                        <div className="lu-info-row">
+                                            <span>Favored Enemy Uses</span>
+                                            <span className="lu-info-val">{favored_enemy_uses}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Prepared Spells</span>
+                                            <span className="lu-info-val">{ranger_prepared_spells}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Spell Slots</span>
+                                            <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{ranger_slot_summary}</span>
+                                        </div>
+                                        {new_level >= 5 && <div className="lu-info-row"><span>Attacks per Action</span><span className="lu-info-val">{extra_attacks}</span></div>}
+                                        {new_level === 6 && <div className="lu-info-row"><span>Roving</span><span className="lu-info-val">+10 ft, Climb & Swim Speed</span></div>}
+                                        {new_level === 14 && <div className="lu-info-row"><span>Nature's Veil Uses</span><span className="lu-info-val">{favored_enemy_uses}</span></div>}
+                                    </>)}
+
+                                    {isRogue && (<>
+                                        <div className="lu-info-row">
+                                            <span>Sneak Attack</span>
+                                            <span className="lu-info-val">{sneak_attack_dice}d6</span>
+                                        </div>
+                                        {new_level === 2 && <div className="lu-info-row"><span>Cunning Action</span><span className="lu-info-val">Dash/Disengage/Hide</span></div>}
+                                        {new_level === 5 && <div className="lu-info-row"><span>Cunning Strike</span><span className="lu-info-val">Unlocked</span></div>}
+                                        {new_level === 7 && <div className="lu-info-row"><span>Reliable Talent</span><span className="lu-info-val">9 or lower = 10</span></div>}
+                                        {isAT && at_slot_summary && (<>
+                                            <div className="lu-info-row">
+                                                <span>Spell Slots</span>
+                                                <span className="lu-info-val" style={{ fontSize: '.72rem', color: '#b5a9f5' }}>{at_slot_summary}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Prepared Spells</span>
+                                                <span className="lu-info-val" style={{ color: '#b5a9f5' }}>{at_prepared_spells}</span>
+                                            </div>
+                                            <div className="lu-info-row">
+                                                <span>Cantrips Known</span>
+                                                <span className="lu-info-val" style={{ color: '#b5a9f5' }}>{at_cantrips}</span>
+                                            </div>
+                                        </>)}
+                                    </>)}
+
+
+                                    {isSorcerer && (<>
+                                        {sorcery_points > 0 && <div className="lu-info-row">
+                                            <span>Sorcery Points</span>
+                                            <span className="lu-info-val">{sorcery_points}</span>
+                                        </div>}
+                                        <div className="lu-info-row">
+                                            <span>Cantrips Known</span>
+                                            <span className="lu-info-val">{sorcerer_cantrips}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Prepared Spells</span>
+                                            <span className="lu-info-val">{sorcerer_prepared_spells}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Spell Slots</span>
+                                            <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{sorcerer_slot_summary}</span>
+                                        </div>
+                                        {new_level === 2 && <div className="lu-info-row"><span>Font of Magic</span><span className="lu-info-val">Slots ↔ SP</span></div>}
+                                        {new_level === 5 && <div className="lu-info-row"><span>Sorcerous Restoration</span><span className="lu-info-val">Regain SP on Short Rest</span></div>}
+                                        {new_level === 7 && <div className="lu-info-row"><span>Sorcery Incarnate</span><span className="lu-info-val">2 Metamagic per spell</span></div>}
+                                    </>)}
+
+                                    {isWarlock && (<>
+                                        <div className="lu-info-row">
+                                            <span>Pact Magic Slots</span>
+                                            <span className="lu-info-val" style={{ color: '#c4a7e7' }}>
+                                                {warlock_slot_count}×L{warlock_slot_level}
+                                            </span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Prepared Spells</span>
+                                            <span className="lu-info-val" style={{ color: '#c4a7e7' }}>{warlock_prepared_spells}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Cantrips Known</span>
+                                            <span className="lu-info-val">{warlock_cantrips}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Eldritch Invocations</span>
+                                            <span className="lu-info-val">{warlock_invocations}</span>
+                                        </div>
+                                        {new_level === 2 && <div className="lu-info-row"><span>Magical Cunning</span><span className="lu-info-val">Unlocked</span></div>}
+                                        {new_level === 9 && <div className="lu-info-row"><span>Contact Patron</span><span className="lu-info-val">Unlocked</span></div>}
+                                        {new_level === 11 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L6 spell</span></div>}
+                                        {new_level === 13 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L7 spell</span></div>}
+                                        {new_level === 15 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L8 spell</span></div>}
+                                        {new_level === 17 && <div className="lu-info-row"><span>Mystic Arcanum</span><span className="lu-info-val">L9 spell</span></div>}
+                                    </>)}
+
+                                    {isWizard && (<>
+                                        <div className="lu-info-row">
+                                            <span>Cantrips Known</span>
+                                            <span className="lu-info-val">{wizard_cantrips}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Prepared Spells</span>
+                                            <span className="lu-info-val">{wizard_prepared_spells}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>Spell Slots</span>
+                                            <span className="lu-info-val" style={{ fontSize: '.72rem' }}>{wizard_slot_summary}</span>
+                                        </div>
+                                        <div className="lu-info-row">
+                                            <span>New Spellbook Spells</span>
+                                            <span className="lu-info-val">{new_level === 1 ? 6 : 2}</span>
+                                        </div>
+                                        {new_level === 5 && <div className="lu-info-row"><span>Memorize Spell</span><span className="lu-info-val">Short Rest swap</span></div>}
+                                        {new_level === 18 && <div className="lu-info-row"><span>Spell Mastery</span><span className="lu-info-val">L1+L2 at will</span></div>}
+                                        {new_level === 20 && <div className="lu-info-row"><span>Signature Spells</span><span className="lu-info-val">2×L3 free/rest</span></div>}
+                                    </>)}
                                 </div>
 
                                 {new_features.filter(f => f).length > 0 && (<>
@@ -454,48 +594,108 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                             )}
                         </>)}
 
-                        {currentStep === 'asi' && (<>
-                            <div className="lu-step-label">Ability Score Improvement</div>
-                            <div className="lu-asi-mode">
-                                <button className={`lu-mode-btn${asiMode === '+2' ? ' sel' : ''}`}
-                                    onClick={() => { setAsiMode('+2'); setAsi2(null) }}>+2 to one stat</button>
-                                <button className={`lu-mode-btn${asiMode === '+1+1' ? ' sel' : ''}`}
-                                    onClick={() => setAsiMode('+1+1')}>+1 to two stats</button>
+                        {currentStep === 'asi_or_feat' && (<>
+                            <div className="lu-step-label">
+                                {new_level === 19 ? 'Epic Boon' : 'Ability Score Improvement or Feat'}
                             </div>
-                            {asiMode === '+2' ? (<>
-                                <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginBottom: '.6rem' }}>Choose one stat to increase by 2</div>
-                                <div className="lu-stat-grid">
-                                    {STAT_KEYS.map(k => (
-                                        <div key={k} className={`lu-stat${asi1 === k ? ' sel' : ''}`} onClick={() => setAsi1(k)}>
-                                            <div className="lu-stat-label">{STAT_LABELS[k]}</div>
-                                            <div className="lu-stat-val">{player[k]}</div>
-                                            <div className="lu-stat-mod">{fmt(player[k])} → {fmt(player[k] + 2)}</div>
-                                        </div>
-                                    ))}
+                            <div className="lu-asi-mode">
+                                {new_level !== 19 && (
+                                    <button className={`lu-mode-btn${asiOrFeat === 'asi' ? ' sel' : ''}`}
+                                        onClick={() => setAsiOrFeat('asi')}>
+                                        Ability Score Improvement
+                                    </button>
+                                )}
+                                <button className={`lu-mode-btn${asiOrFeat === 'feat' ? ' sel' : ''}`}
+                                    onClick={() => {
+                                        setAsiOrFeat('feat')
+                                        if (availableFeats.length === 0) {
+                                            setLoadingFeats(true)
+                                            const cat = new_level === 19 ? '?category=epic_boon' : ''
+                                            fetch(`/api/campaigns/${campaignId}/feats${cat}`)
+                                                .then(r => r.json())
+                                                .then(d => setAvailableFeats(d.feats || []))
+                                                .finally(() => setLoadingFeats(false))
+                                        }
+                                    }}>
+                                    {new_level === 19 ? 'Choose Epic Boon' : 'Take a Feat'}
+                                </button>
+                            </div>
+
+                            {asiOrFeat === 'asi' && (<>
+                                <div className="lu-asi-mode" style={{ marginTop: '.6rem' }}>
+                                    <button className={`lu-mode-btn${asiMode === '+2' ? ' sel' : ''}`}
+                                        onClick={() => { setAsiMode('+2'); setAsi2(null) }}>+2 to one stat</button>
+                                    <button className={`lu-mode-btn${asiMode === '+1+1' ? ' sel' : ''}`}
+                                        onClick={() => setAsiMode('+1+1')}>+1 to two stats</button>
                                 </div>
-                            </>) : (<>
-                                <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginBottom: '.6rem' }}>
-                                    Choose two different stats to increase by 1 each
-                                    {asi1 && !asi2 && <span style={{ color: 'var(--gold)' }}> — now choose second stat</span>}
-                                </div>
-                                <div className="lu-stat-grid">
-                                    {STAT_KEYS.map(k => {
-                                        const isFirst = asi1 === k, isSecond = asi2 === k, isSel = isFirst || isSecond
-                                        return (
-                                            <div key={k} className={`lu-stat${isSel ? ' sel' : ''}`}
-                                                onClick={() => {
-                                                    if (isFirst) { setAsi1(asi2); setAsi2(null) }
-                                                    else if (isSecond) { setAsi2(null) }
-                                                    else if (!asi1) setAsi1(k)
-                                                    else if (!asi2 && k !== asi1) setAsi2(k)
-                                                }}>
+                                {/* existing stat grid JSX unchanged */}
+                                {asiMode === '+2' ? (<>
+                                    <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginBottom: '.6rem' }}>Choose one stat to increase by 2</div>
+                                    <div className="lu-stat-grid">
+                                        {STAT_KEYS.map(k => (
+                                            <div key={k} className={`lu-stat${asi1 === k ? ' sel' : ''}`} onClick={() => setAsi1(k)}>
                                                 <div className="lu-stat-label">{STAT_LABELS[k]}</div>
                                                 <div className="lu-stat-val">{player[k]}</div>
-                                                <div className="lu-stat-mod">{isSel ? `${fmt(player[k])} → ${fmt(player[k]+1)}` : fmt(player[k])}</div>
+                                                <div className="lu-stat-mod">{fmt(player[k])} → {fmt(player[k] + 2)}</div>
                                             </div>
-                                        )
-                                    })}
-                                </div>
+                                        ))}
+                                    </div>
+                                </>) : (<>
+                                    <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginBottom: '.6rem' }}>
+                                        Choose two different stats to increase by 1 each
+                                        {asi1 && !asi2 && <span style={{ color: 'var(--gold)' }}> — now choose second stat</span>}
+                                    </div>
+                                    <div className="lu-stat-grid">
+                                        {STAT_KEYS.map(k => {
+                                            const isFirst = asi1 === k, isSecond = asi2 === k, isSel = isFirst || isSecond
+                                            return (
+                                                <div key={k} className={`lu-stat${isSel ? ' sel' : ''}`}
+                                                    onClick={() => {
+                                                        if (isFirst) { setAsi1(asi2); setAsi2(null) }
+                                                        else if (isSecond) { setAsi2(null) }
+                                                        else if (!asi1) setAsi1(k)
+                                                        else if (!asi2 && k !== asi1) setAsi2(k)
+                                                    }}>
+                                                    <div className="lu-stat-label">{STAT_LABELS[k]}</div>
+                                                    <div className="lu-stat-val">{player[k]}</div>
+                                                    <div className="lu-stat-mod">{isSel ? `${fmt(player[k])} → ${fmt(player[k] + 1)}` : fmt(player[k])}</div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </>)}
+                            </>)}
+
+                            {asiOrFeat === 'feat' && (<>
+                                {loadingFeats ? (
+                                    <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginTop: '.6rem' }}>Loading feats…</div>
+                                ) : (
+                                    <div className="lu-feat-list" style={{ marginTop: '.6rem', maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '.4rem' }}>
+                                        {availableFeats.map(feat => (
+                                            <div key={feat.id}
+                                                className={`lu-subclass${selectedFeat?.id === feat.id ? ' sel' : ''}`}
+                                                onClick={() => { setSelectedFeat(feat); setFeatChoices({}) }}>
+                                                <div className="lu-subclass-name">{feat.name}</div>
+                                                <div className="lu-subclass-desc">{feat.description}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {selectedFeat && JSON.parse(selectedFeat.ability_score_options || '[]').length > 0 && (
+                                    <div style={{ marginTop: '.6rem' }}>
+                                        <div style={{ fontSize: '.76rem', color: 'var(--dim)', marginBottom: '.4rem' }}>Choose stat to increase (+1):</div>
+                                        <div className="lu-stat-grid">
+                                            {JSON.parse(selectedFeat.ability_score_options).map(k => (
+                                                <div key={k} className={`lu-stat${featChoices.stat === k ? ' sel' : ''}`}
+                                                    onClick={() => setFeatChoices(c => ({ ...c, stat: k }))}>
+                                                    <div className="lu-stat-label">{STAT_LABELS[k]}</div>
+                                                    <div className="lu-stat-val">{player[k]}</div>
+                                                    <div className="lu-stat-mod">{fmt(player[k])} → {fmt(player[k] + 1)}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </>)}
                         </>)}
 
@@ -575,7 +775,7 @@ export default function LevelUpModal({ player, levelUpResult, campaignId, onComp
                                             onClick={() => !known && !atMax && activeToggle({ id: spell.id, name: spell.name, school: spell.school })}>
                                             <span style={{ fontSize: '.9rem', color: SCHOOL_COLORS[spell.school] || '#b5a9f5' }}>{spell.level === 0 ? '⊕' : spell.level}</span>
                                             <span className="ek-spell-name">{spell.name}</span>
-                                            <span className={`ek-school-badge${['abjuration','evocation'].includes(spell.school) ? ' recommended' : ''}`}>{spell.school}</span>
+                                            <span className={`ek-school-badge${['abjuration', 'evocation'].includes(spell.school) ? ' recommended' : ''}`}>{spell.school}</span>
                                             {isSel && <span className="ek-spell-check">✓</span>}
                                             {known && <span style={{ fontSize: '.6rem', color: 'var(--dim)' }}>known</span>}
                                         </div>

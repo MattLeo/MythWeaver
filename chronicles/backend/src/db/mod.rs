@@ -14,6 +14,7 @@ pub mod events;
 pub mod fighter;
 pub mod shop;
 pub mod spells;
+pub mod feats;
 
 pub async fn connect(database_url: &str) -> Result<SqlitePool> {
     std::fs::create_dir_all("data")?;
@@ -30,12 +31,44 @@ pub async fn connect(database_url: &str) -> Result<SqlitePool> {
 }
 
 pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
-    let migration_sql = include_str!("../../migrations/001_initial_schema.sql");
+    let initial_sql = include_str!("../../migrations/001_initial_schema.sql");
 
-    sqlx::query(migration_sql)
+    sqlx::query(initial_sql)
         .execute(pool)
         .await
         .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+
+    let spells_sql = include_str!("../../migrations/002_spells_seed.sql");
+    let class_lists = include_str!("../../migrations/004_spells_class_lists.sql");
+    let spell_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM spells")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
+    if spell_count == 0 {
+        sqlx::query(spells_sql)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+
+        sqlx::query(class_lists)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+    }
+
+    let feats_sql = include_str!("../../migrations/003_feats_seed.sql");
+    let feat_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM feats")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
+    if feat_count == 0 {
+        sqlx::query(feats_sql)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("Migration error: {}", e))?;
+    }
 
     tracing::info!("Database migrations complete");
     Ok(())

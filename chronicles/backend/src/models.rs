@@ -193,6 +193,26 @@ pub struct LevelUpResult {
     pub lay_on_hands_pool: i64,
     pub paladin_channel_divinity: i64,
     pub paladin_prepared_spells: i64,
+    // Ranger
+    pub favored_enemy_uses: i64,
+    pub ranger_prepared_spells: i64,
+    // Rogue
+    pub sneak_attack_dice: i64,
+    pub at_prepared_spells: i64,
+    pub at_cantrips: i64,
+    // Sorcerer
+    pub sorcery_points: i64,
+    pub sorcerer_cantrips: i64,
+    pub sorcerer_prepared_spells: i64,
+    // Warlock
+    pub warlock_slot_level: i64,
+    pub warlock_slot_count: i64,
+    pub warlock_prepared_spells: i64,
+    pub warlock_cantrips: i64,
+    pub warlock_invocations: i64,
+    // Wizard
+    pub wizard_cantrips: i64,
+    pub wizard_prepared_spells: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -647,6 +667,12 @@ pub struct CreateCampaignRequest {
     pub thaumaturge_cantrip: Option<String>,
     pub primal_order: Option<String>, 
     pub magician_cantrip: Option<String>,
+    pub background_feat_id: Option<String>,
+    pub background_feat_choices: Option<String>,
+    pub starting_cantrips: Option<Vec<String>>,
+    pub starting_spells: Option<Vec<String>>,
+    pub magic_initiate_cantrips: Option<Vec<String>>,
+    pub magic_initiate_spell: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -694,4 +720,6 @@ pub struct LevelUpRequest {
     pub asi_stat2: Option<String>,
     pub new_maneuvers: Option<Vec<String>>,
     pub replaced_maneuver: Option<String>,
+    pub feat_id: Option<String>,
+    pub feat_choices: Option<String>,
 }

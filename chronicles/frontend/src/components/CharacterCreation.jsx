@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { STYLES } from '../styles.js'
+import { getSpellsByClass } from '../api/client.js'
 import {
   CLASSES, SPECIES, BACKGROUNDS, CLASS_EQUIPMENT, SEX_OPTIONS,
   STAT_KEYS, STAT_LABELS_ARRAY, statModifier, formatModifier, hitDieForClass,
@@ -12,6 +13,75 @@ const rollBlock = () => Array.from({ length: 6 }, () => {
   const r = [d(6), d(6), d(6), d(6)].sort((a, b) => a - b)
   return r[1] + r[2] + r[3]
 })
+
+const STARTING_CANTRIP_COUNTS = {
+  Wizard: 3, Cleric: 3, Sorcerer: 4, Bard: 2, Druid: 2, Warlock: 2,
+}
+const STARTING_SPELL_COUNTS = {
+  Wizard: 6, Bard: 4, Sorcerer: 2, Warlock: 2,
+}
+const CANTRIP_CLASSES = Object.keys(STARTING_CANTRIP_COUNTS)
+const KNOWN_SPELL_CLASSES = Object.keys(STARTING_SPELL_COUNTS)
+const MI_LISTS = ['Cleric', 'Druid', 'Wizard']
+
+const SCHOOL_COLORS_SPELL = {
+  abjuration: '#7ec8e3', conjuration: '#b5a9f5', divination: '#f5e87e',
+  enchantment: '#f5a9c8', evocation: '#f5a96a', illusion: '#a9f5d0',
+  necromancy: '#b0f5a9', transmutation: '#f5cfa9',
+}
+const SCHOOL_GLYPHS_SPELL = {
+  abjuration: '🛡', conjuration: '✦', divination: '👁',
+  enchantment: '♡', evocation: '⚡', illusion: '◈',
+  necromancy: '☽', transmutation: '⟳',
+}
+const DAMAGE_TYPE_COLORS_SPELL = {
+  fire: '#f5764a', cold: '#7ec8e3', lightning: '#ffe066', acid: '#a8e86e',
+  poison: '#8bcf6e', necrotic: '#b0f5a9', radiant: '#fff3a3', psychic: '#f5a9c8',
+  force: '#c4a9f5', thunder: '#a9c4f5', piercing: '#d0c8b8', slashing: '#d0c8b8', bludgeoning: '#d0c8b8',
+}
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `${r},${g},${b}`
+}
+function formatCastingTime(ct) {
+  if (!ct) return '—'
+  return ct
+    .replace('bonus_action', 'Bonus Action')
+    .replace('reaction', 'Reaction')
+    .replace('action', 'Action')
+    .replace('1_minute', '1 Min')
+    .replace('10_minutes', '10 Min')
+    .replace('1_hour', '1 Hr')
+    .replace(/_/g, ' ')
+}
+
+function formatRange(rangeType, rangeFeet) {
+  if (rangeType === 'self') return 'Self'
+  if (rangeType === 'touch') return 'Touch'
+  if (rangeType === 'special') return 'Special'
+  if (rangeFeet) return `${rangeFeet} ft`
+  return rangeType || '—'
+}
+
+function formatDuration(dur) {
+  if (!dur) return '—'
+  return dur
+    .replace('concentration_1_minute', '1 Min ◉')
+    .replace('concentration_10_minutes', '10 Min ◉')
+    .replace('concentration_1_hour', '1 Hr ◉')
+    .replace('instantaneous', 'Instant')
+    .replace('until_dispelled', '∞')
+    .replace('until_dispelled_or_triggered', '∞/Trigger')
+    .replace('1_minute', '1 Min')
+    .replace('10_minutes', '10 Min')
+    .replace('1_hour', '1 Hr')
+    .replace('8_hours', '8 Hr')
+    .replace('24_hours', '24 Hr')
+    .replace('1_round', '1 Round')
+    .replace(/_/g, ' ')
+}
 
 const CREATION_STYLES = `
 ${STYLES}
@@ -117,6 +187,12 @@ ${STYLES}
 }
 .info-box strong { color: var(--goldl); font-family: 'Cinzel', serif; font-size: .72rem; letter-spacing: .06em; }
 .sex-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.pick-card.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.pick-card.disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
 `
 
 // ─── Step definitions ─────────────────────────────────────────────────────────
@@ -158,11 +234,16 @@ const SCHOOL_COLORS_CC = {
   Abjuration: '#7ec8e3', Necromancy: '#b0f5a9', Conjuration: '#b5a9f5',
 }
 
-function buildSteps(race, background, playerClass, divineOrder, primalOrder) {
+function buildSteps(race, background, playerClass, divineOrder, primalOrder, backgroundFeatId) {
   const steps = ['name', 'sex', 'species']
   const sp = getSpeciesByName(race)
   if (sp?.subtype) steps.push('species_subtype')
   steps.push('class')
+
+  // Spell selection for casting classes — happens right after class choice
+  if (CANTRIP_CLASSES.includes(playerClass)) steps.push('starting_cantrips')
+  if (KNOWN_SPELL_CLASSES.includes(playerClass)) steps.push('starting_spells')
+
   if (playerClass === 'Cleric') {
     steps.push('divine_order')
     if (divineOrder === 'Thaumaturge') steps.push('thaumaturge_cantrip')
@@ -171,8 +252,138 @@ function buildSteps(race, background, playerClass, divineOrder, primalOrder) {
     steps.push('primal_order')
     if (primalOrder === 'Magician') steps.push('magician_cantrip')
   }
-  steps.push('background', 'background_asi', 'stats', 'equipment', 'backstory')
+
+  steps.push('background', 'background_asi', 'background_feat')
+
+  // Magic Initiate requires spell selection after feat is chosen
+  if (backgroundFeatId === 'feat_magic_initiate') {
+    steps.push('magic_initiate_list')
+    steps.push('magic_initiate_spells')
+  }
+
+  steps.push('stats', 'equipment', 'backstory')
   return steps
+}
+
+function CreationSpellCard({ spell, isSelected, isDisabled, onClick }) {
+  const school = spell.school || 'evocation'
+  const color = SCHOOL_COLORS_SPELL[school] || '#c4a9f5'
+  const glyph = SCHOOL_GLYPHS_SPELL[school] || '✦'
+  const isCantrip = spell.level === 0
+  return (
+    <div
+      onClick={() => !isDisabled && onClick(spell)}
+      style={{
+        padding: '8px 10px', marginBottom: 4, borderRadius: 8, border: '1px solid',
+        borderColor: isSelected ? color : 'rgba(255,255,255,0.06)',
+        background: isSelected
+          ? `linear-gradient(135deg, rgba(${hexToRgb(color)},0.12), rgba(${hexToRgb(color)},0.04))`
+          : 'rgba(255,255,255,0.02)',
+        boxShadow: isSelected ? `0 0 0 1px ${color}40, inset 0 0 20px ${color}08` : 'none',
+        cursor: isDisabled ? 'not-allowed' : 'pointer',
+        opacity: isDisabled ? 0.35 : 1,
+        transition: 'all 0.15s',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 14, width: 18, textAlign: 'center', flexShrink: 0, color }}>{glyph}</span>
+        <span style={{ flex: 1, fontSize: 13, color: '#d0c8b8', lineHeight: 1.2 }}>{spell.name}</span>
+        {isCantrip
+          ? <span style={{ fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 8, background: 'rgba(255,255,255,0.1)', color: '#aaa', flexShrink: 0 }}>⊕</span>
+          : <span style={{ fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 8, background: `${color}22`, color, flexShrink: 0 }}>{spell.level}</span>
+        }
+      </div>
+      {spell.concentration === 1 && (
+        <span style={{ fontSize: 10, color: '#f5a96a', marginTop: 2, paddingLeft: 26 }}>◉ conc</span>
+      )}
+    </div>
+  )
+}
+
+function CreationSpellDetail({ spell }) {
+  if (!spell) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12 }}>
+      <div style={{ fontSize: 48, color: '#2a2a3a' }}>✦</div>
+      <p style={{ color: '#444', fontSize: 14 }}>Select a spell to view details</p>
+    </div>
+  )
+
+  const school = spell.school || 'evocation'
+  const color = SCHOOL_COLORS_SPELL[school] || '#c4a9f5'
+  const glyph = SCHOOL_GLYPHS_SPELL[school] || '✦'
+  const isCantrip = spell.level === 0
+  const dmgColor = DAMAGE_TYPE_COLORS_SPELL[spell.damage_type] || '#d0c8b8'
+
+  return (
+    <div style={{ padding: '0 0 1rem 0', display: 'flex', flexDirection: 'column', gap: 14, height: '100%', overflowY: 'auto' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 14, borderBottom: `1px solid ${color}40` }}>
+        <span style={{ fontSize: 28, color, lineHeight: 1 }}>{glyph}</span>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#f0ead6', letterSpacing: '-0.01em' }}>{spell.name}</div>
+          <div style={{ fontSize: 13, color: `${color}cc`, marginTop: 3 }}>
+            {isCantrip ? 'Cantrip' : `Level ${spell.level}`} · {school.charAt(0).toUpperCase() + school.slice(1)}
+          </div>
+        </div>
+      </div>
+
+      {/* Stats chips */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Cast', val: formatCastingTime(spell.casting_time) },
+          { label: 'Range', val: formatRange(spell.range_type, spell.range_feet) },
+          { label: 'Duration', val: formatDuration(spell.duration) },
+        ].map(({ label, val }) => (
+          <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 2, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 8, padding: '6px 12px' }}>
+            <span style={{ fontSize: 10, color: '#666', letterSpacing: '.06em', textTransform: 'uppercase' }}>{label}</span>
+            <span style={{ fontSize: 13, color: '#d0c8b8' }}>{val}</span>
+          </div>
+        ))}
+        {spell.concentration === 1 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, background: 'rgba(245,169,106,0.08)', border: '1px solid rgba(245,169,106,0.3)', borderRadius: 8, padding: '6px 12px' }}>
+            <span style={{ fontSize: 10, color: '#f5a96a', textTransform: 'uppercase', letterSpacing: '.06em' }}>◉ Conc</span>
+          </div>
+        )}
+        {spell.ritual === 1 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, background: 'rgba(126,200,227,0.08)', border: '1px solid rgba(126,200,227,0.3)', borderRadius: 8, padding: '6px 12px' }}>
+            <span style={{ fontSize: 10, color: '#7ec8e3', textTransform: 'uppercase', letterSpacing: '.06em' }}>⊕ Ritual</span>
+          </div>
+        )}
+      </div>
+
+      {/* Components */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {spell.has_verbal === 1 && <span style={{ fontSize: 12, padding: '3px 10px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: '#aaa' }}>V</span>}
+        {spell.has_somatic === 1 && <span style={{ fontSize: 12, padding: '3px 10px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: '#aaa' }}>S</span>}
+        {spell.has_material === 1 && (
+          <span style={{ fontSize: 12, padding: '3px 10px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: '#aaa', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            M ({spell.material_component || '—'})
+          </span>
+        )}
+      </div>
+
+      {/* Damage */}
+      {spell.damage_die && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', border: `1px solid ${dmgColor}33`, borderRadius: 8, fontSize: 15 }}>
+          <span style={{ color: dmgColor, fontWeight: 700 }}>{spell.damage_die_count}{spell.damage_die}</span>
+          <span style={{ color: dmgColor, opacity: 0.7, textTransform: 'capitalize' }}>{spell.damage_type}</span>
+          {spell.save_type && (
+            <span style={{ fontSize: 11, padding: '2px 8px', background: 'rgba(255,255,255,0.06)', borderRadius: 4, color: '#999', marginLeft: 'auto' }}>
+              {spell.save_type.toUpperCase()} save
+            </span>
+          )}
+          {spell.attack_type && (
+            <span style={{ fontSize: 11, padding: '2px 8px', background: 'rgba(255,255,255,0.06)', borderRadius: 4, color: '#999', marginLeft: 'auto' }}>
+              {spell.attack_type === 'ranged_spell' ? 'Ranged Spell Attack' : 'Melee Spell Attack'}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Description */}
+      <div style={{ fontSize: 13, color: '#9098b8', lineHeight: 1.65 }}>{spell.description}</div>
+    </div>
+  )
 }
 
 export default function CharacterCreation({ onComplete }) {
@@ -191,11 +402,53 @@ export default function CharacterCreation({ onComplete }) {
     thaumaturge_cantrip: '',  // Cleric Thaumaturge: chosen extra cantrip
     primal_order: '',         // Druid: "Warden" | "Magician"
     magician_cantrip: '',     // Druid Magician: chosen extra cantrip
+    background_feat_id: '',
+    background_feat_choices: {},
+    starting_cantrips: [],
+    starting_spells: [],
+    magic_initiate_list: '',
+    magic_initiate_cantrips: [],
+    magic_initiate_spell: '',
   })
 
-  const steps = buildSteps(char.race, char.background, char.player_class, char.divine_order, char.primal_order)
+  const steps = buildSteps(
+    char.race, char.background, char.player_class,
+    char.divine_order, char.primal_order, char.background_feat_id
+  )
   const [stepIndex, setStepIndex] = useState(0)
   const currentStep = steps[stepIndex]
+  const [originFeats, setOriginFeats] = useState([])
+  const [classSpells, setClassSpells] = useState([])
+  const [miSpells, setMiSpells] = useState([])
+  const [spellsLoading, setSpellsLoading] = useState(false)
+  const [selectedSpell, setSelectedSpell] = useState(null)
+
+  useEffect(() => {
+    fetch('/api/feats?category=origin')
+      .then(r => r.json())
+      .then(d => setOriginFeats(d.feats || []))
+      .catch(() => { })
+  }, [])
+
+  useEffect(() => {
+    if (!['starting_cantrips', 'starting_spells'].includes(currentStep)) return
+    if (!char.player_class || classSpells.length > 0) return
+    setSpellsLoading(true)
+    getSpellsByClass(char.player_class)
+      .then(d => setClassSpells(d.spells || []))
+      .catch(() => { })
+      .finally(() => setSpellsLoading(false))
+  }, [currentStep, char.player_class])
+
+  useEffect(() => {
+    if (currentStep !== 'magic_initiate_spells' || !char.magic_initiate_list) return
+    if (miSpells.length > 0) return   // ← add this
+    setSpellsLoading(true)
+    getSpellsByClass(char.magic_initiate_list)
+      .then(d => setMiSpells(d.spells || []))
+      .catch(() => { })
+      .finally(() => setSpellsLoading(false))
+  }, [currentStep, char.magic_initiate_list])
 
   const upd = (k, v) => setChar(c => ({ ...c, [k]: v }))
 
@@ -245,8 +498,17 @@ export default function CharacterCreation({ onComplete }) {
       case 'backstory': return true
       case 'divine_order': return !!char.divine_order
       case 'thaumaturge_cantrip': return !!char.thaumaturge_cantrip
-      case 'primal_order':     return !!char.primal_order
+      case 'primal_order': return !!char.primal_order
       case 'magician_cantrip': return !!char.magician_cantrip
+      case 'background_feat': return !!char.background_feat_id
+      case 'starting_cantrips':
+        return char.starting_cantrips.length === (STARTING_CANTRIP_COUNTS[char.player_class] || 0)
+      case 'starting_spells':
+        return char.starting_spells.length === (STARTING_SPELL_COUNTS[char.player_class] || 0)
+      case 'magic_initiate_list':
+        return !!char.magic_initiate_list
+      case 'magic_initiate_spells':
+        return char.magic_initiate_cantrips.length === 2 && !!char.magic_initiate_spell
       default: return true
     }
   }
@@ -261,7 +523,10 @@ export default function CharacterCreation({ onComplete }) {
       player_species_subtype: char.species_subtype || null,
       player_class: char.player_class,
       player_background: char.background,
-      player_background_feat: bg?.feat || null,
+      background_feat_id: char.background_feat_id || null,
+      background_feat_choices: Object.keys(char.background_feat_choices).length > 0
+        ? JSON.stringify(char.background_feat_choices)
+        : null,
       player_background_skill_1: bg?.skills[0] || 'Athletics',
       player_background_skill_2: bg?.skills[1] || 'Perception',
       player_background_tool: bg?.tool || 'None',
@@ -280,6 +545,10 @@ export default function CharacterCreation({ onComplete }) {
       thaumaturge_cantrip: char.thaumaturge_cantrip || null,
       primal_order: char.primal_order || null,
       magician_cantrip: char.magician_cantrip || null,
+      starting_cantrips: char.starting_cantrips,
+      starting_spells: char.starting_spells,
+      magic_initiate_cantrips: char.magic_initiate_cantrips,
+      magic_initiate_spell: char.magic_initiate_spell || null,
     })
   }
 
@@ -397,7 +666,12 @@ export default function CharacterCreation({ onComplete }) {
                 <div
                   key={c}
                   className={`pick${char.player_class === c ? ' sel' : ''}`}
-                  onClick={() => upd('player_class', c)}
+                  onClick={() => {
+                    upd('player_class', c)
+                    upd('starting_cantrips', [])
+                    upd('starting_spells', [])
+                    setClassSpells([])
+                  }}
                 >
                   {c}
                 </div>
@@ -498,6 +772,24 @@ export default function CharacterCreation({ onComplete }) {
           </>
         )
       }
+
+      case 'background_feat':
+        return (
+          <>
+            <h2>Background Feat</h2>
+            <p className="card-sub">Your background grants you one Origin feat.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '.5rem', maxHeight: '340px', overflowY: 'auto' }}>
+              {originFeats.map(feat => (
+                <div key={feat.id}
+                  className={`equip-card${char.background_feat_id === feat.id ? ' sel' : ''}`}
+                  onClick={() => upd('background_feat_id', feat.id)}>
+                  <div className="equip-label">{feat.name}</div>
+                  <div className="equip-desc">{feat.description}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )
 
       case 'stats': {
         const finalStats = STAT_KEYS.map((k, i) => {
@@ -736,7 +1028,159 @@ export default function CharacterCreation({ onComplete }) {
               ))}
             </div>
           </>
-        )  
+        )
+
+      case 'starting_cantrips': {
+        const needed = STARTING_CANTRIP_COUNTS[char.player_class] || 0
+        const cantrips = classSpells.filter(s => s.level === 0)
+        const toggle = (spell) => {
+          const already = char.starting_cantrips.includes(spell.id)
+          if (already) upd('starting_cantrips', char.starting_cantrips.filter(id => id !== spell.id))
+          else if (char.starting_cantrips.length < needed) upd('starting_cantrips', [...char.starting_cantrips, spell.id])
+        }
+        return (
+          <>
+            <h2>Starting Cantrips</h2>
+            <p className="card-sub">
+              Choose {needed} cantrip{needed !== 1 ? 's' : ''} from the {char.player_class} spell list.
+              &nbsp;({char.starting_cantrips.length}/{needed} chosen)
+            </p>
+            {spellsLoading ? <p className="card-sub">Loading spells…</p> : (
+              <div style={{ display: 'flex', gap: '1rem', height: 340 }}>
+                <div style={{ width: 220, flexShrink: 0, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'var(--gold) var(--surf)' }}>
+                  {cantrips.map(s => (
+                    <CreationSpellCard
+                      key={s.id} spell={s}
+                      isSelected={char.starting_cantrips.includes(s.id)}
+                      isDisabled={!char.starting_cantrips.includes(s.id) && char.starting_cantrips.length >= needed}
+                      onClick={spell => { toggle(spell); setSelectedSpell(spell) }}
+                    />
+                  ))}
+                </div>
+                <div style={{ flex: 1, borderLeft: '1px solid rgba(255,255,255,0.06)', paddingLeft: '1rem', overflowY: 'auto' }}>
+                  <CreationSpellDetail spell={selectedSpell} />
+                </div>
+              </div>
+            )}
+          </>
+        )
+      }
+
+      case 'starting_spells': {
+        const needed = STARTING_SPELL_COUNTS[char.player_class] || 0
+        const spells = classSpells.filter(s => s.level === 1)
+        const toggle = (spell) => {
+          const already = char.starting_spells.includes(spell.id)
+          if (already) upd('starting_spells', char.starting_spells.filter(id => id !== spell.id))
+          else if (char.starting_spells.length < needed) upd('starting_spells', [...char.starting_spells, spell.id])
+        }
+        return (
+          <>
+            <h2>Starting {char.player_class === 'Wizard' ? 'Spellbook' : 'Spells'}</h2>
+            <p className="card-sub">
+              Choose {needed} level 1 spell{needed !== 1 ? 's' : ''} for your {char.player_class === 'Wizard' ? 'spellbook' : 'known spells'}.
+              &nbsp;({char.starting_spells.length}/{needed} chosen)
+            </p>
+            {spellsLoading ? <p className="card-sub">Loading spells…</p> : (
+              <div style={{ display: 'flex', gap: '1rem', height: 340 }}>
+                <div style={{ width: 220, flexShrink: 0, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'var(--gold) var(--surf)' }}>
+                  {spells.map(s => (
+                    <CreationSpellCard
+                      key={s.id} spell={s}
+                      isSelected={char.starting_spells.includes(s.id)}
+                      isDisabled={!char.starting_spells.includes(s.id) && char.starting_spells.length >= needed}
+                      onClick={spell => { toggle(spell); setSelectedSpell(spell) }}
+                    />
+                  ))}
+                </div>
+                <div style={{ flex: 1, borderLeft: '1px solid rgba(255,255,255,0.06)', paddingLeft: '1rem', overflowY: 'auto' }}>
+                  <CreationSpellDetail spell={selectedSpell} />
+                </div>
+              </div>
+            )}
+          </>
+        )
+      }
+
+      case 'magic_initiate_list':
+        return (
+          <>
+            <h2>Magic Initiate</h2>
+            <p className="card-sub">
+              Choose a spell list to learn from. You'll pick two cantrips and one level 1 spell from it.
+            </p>
+            <div className="pick-grid-2">
+              {MI_LISTS.map(list => (
+                <div
+                  key={list}
+                  className={`pick-card${char.magic_initiate_list === list ? ' sel' : ''}`}
+                  onClick={() => {
+                    upd('magic_initiate_list', list)
+                    upd('magic_initiate_cantrips', [])
+                    upd('magic_initiate_spell', '')
+                    setMiSpells([])
+                  }}
+                >
+                  <div className="pick-card-name">{list} List</div>
+                  <div className="pick-card-desc">
+                    {list === 'Cleric' && 'Divine magic — healing, radiant damage, protection'}
+                    {list === 'Druid' && 'Nature magic — elementals, animals, plants'}
+                    {list === 'Wizard' && 'Arcane magic — the broadest selection of spells'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )
+
+      case 'magic_initiate_spells': {
+        const miCantrips = miSpells.filter(s => s.level === 0)
+        const miLevel1 = miSpells.filter(s => s.level === 1)
+        const toggleMiCantrip = (spell) => {
+          const already = char.magic_initiate_cantrips.includes(spell.id)
+          if (already) upd('magic_initiate_cantrips', char.magic_initiate_cantrips.filter(id => id !== spell.id))
+          else if (char.magic_initiate_cantrips.length < 2) upd('magic_initiate_cantrips', [...char.magic_initiate_cantrips, spell.id])
+        }
+        return (
+          <>
+            <h2>Magic Initiate Spells</h2>
+            <p className="card-sub">
+              Choose 2 cantrips and 1 level 1 spell from the {char.magic_initiate_list} list.
+            </p>
+            {spellsLoading ? <p className="card-sub">Loading spells…</p> : (
+              <div style={{ display: 'flex', gap: '1rem', height: 380 }}>
+                <div style={{ width: 220, flexShrink: 0, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'var(--gold) var(--surf)' }}>
+                  <div style={{ fontSize: '.72rem', color: 'var(--goldl)', fontFamily: "'Cinzel',serif", letterSpacing: '.05em', padding: '4px 0 6px' }}>
+                    Cantrips ({char.magic_initiate_cantrips.length}/2)
+                  </div>
+                  {miCantrips.map(s => (
+                    <CreationSpellCard
+                      key={s.id} spell={s}
+                      isSelected={char.magic_initiate_cantrips.includes(s.id)}
+                      isDisabled={!char.magic_initiate_cantrips.includes(s.id) && char.magic_initiate_cantrips.length >= 2}
+                      onClick={spell => { toggleMiCantrip(spell); setSelectedSpell(spell) }}
+                    />
+                  ))}
+                  <div style={{ fontSize: '.72rem', color: 'var(--goldl)', fontFamily: "'Cinzel',serif", letterSpacing: '.05em', padding: '10px 0 6px', borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: 4 }}>
+                    Level 1 Spell {char.magic_initiate_spell ? '✓' : '(choose 1)'}
+                  </div>
+                  {miLevel1.map(s => (
+                    <CreationSpellCard
+                      key={s.id} spell={s}
+                      isSelected={char.magic_initiate_spell === s.id}
+                      isDisabled={false}
+                      onClick={spell => { upd('magic_initiate_spell', spell.id); setSelectedSpell(spell) }}
+                    />
+                  ))}
+                </div>
+                <div style={{ flex: 1, borderLeft: '1px solid rgba(255,255,255,0.06)', paddingLeft: '1rem', overflowY: 'auto' }}>
+                  <CreationSpellDetail spell={selectedSpell} />
+                </div>
+              </div>
+            )}
+          </>
+        )
+      }
 
       default:
         return null
@@ -762,11 +1206,11 @@ export default function CharacterCreation({ onComplete }) {
 
           <div className="cnav">
             {stepIndex > 0
-              ? <button className="btn-ghost" onClick={() => setStepIndex(i => i - 1)}>← Back</button>
+              ? <button className="btn-ghost" onClick={() => { setStepIndex(i => i - 1); setSelectedSpell(null) }}>← Back</button>
               : <div />
             }
             {!isLast
-              ? <button className="btn-gold" disabled={!canAdvance()} onClick={() => setStepIndex(i => i + 1)}>
+              ? <button className="btn-gold" disabled={!canAdvance()} onClick={() => { setStepIndex(i => i + 1); setSelectedSpell(null) }}>
                 Continue →
               </button>
               : <button className="btn-gold" disabled={!canAdvance()} onClick={handleComplete}>
