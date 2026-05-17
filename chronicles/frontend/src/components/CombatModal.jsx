@@ -150,10 +150,10 @@ ${STYLES}
 
 .enemy-card {
   display: flex; flex-direction: column; align-items: center;
-  gap: .25rem; cursor: pointer; transition: all .2s;
-  position: relative; padding: .4rem .25rem;
+  gap: .3rem; cursor: pointer; transition: all .2s;
+  position: relative; padding: .5rem;
   border-radius: 3px; border: 1px solid transparent;
-  width: 100%;
+  width: 80px;
 }
 
 .enemy-card:hover:not(.dead):not(.disabled) {
@@ -864,7 +864,7 @@ function SpellPicker({ spells, slots, concentration, charLevel, onCast, onClose,
 export default function CombatModal({
     campaignId, player, abilities,
     initiativeBonus = 0, hasAdvantage = false,
-    onCombatEnd, onPlayerUpdate,
+    onCombatEnd, onPlayerUpdate, initialKnownSpells,
 }) {
     const [phase, setPhase] = useState('initiative')
     const [combatState, setCombatState] = useState(null)
@@ -891,7 +891,7 @@ export default function CombatModal({
     const [pendingSpell, setPendingSpell] = useState(null)
     const [isCrit, setIsCrit] = useState(false)
 
-    const [knownSpells, setKnownSpells] = useState([])
+    const [knownSpells, setKnownSpells] = useState(initialKnownSpells)
     const [spellSlots, setSpellSlots] = useState([])
     const [concentration, setConcentration] = useState(null)
     const [warBonds, setWarBonds] = useState([])

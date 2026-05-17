@@ -551,6 +551,7 @@ export default function App() {
           hasAdvantage={false}
           onCombatEnd={handleCombatEnd}
           onPlayerUpdate={() => refreshPlayerState(campaign.id)}
+          initialKnownSpells={knownSpells}
         />
       )}
 
