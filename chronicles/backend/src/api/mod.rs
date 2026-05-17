@@ -360,17 +360,24 @@ pub async fn create_campaign(
         let _ = spells_db::learn_spell(pool, &camp.id, &p.id, spell_id, "prepared", &class_source).await;
     }
 
-    // ── Lineage cantrips (granted automatically by species/subtype) ───────────
-    let lineage_cantrips: &[&str] = match (p.race.as_str(), p.species_subtype.as_deref()) {
-        ("Elf",      Some("High Elf"))              => &["spell_prestidigitation"],
-        ("Elf",      Some("Wood Elf"))              => &["spell_druidcraft"],
-        ("Gnome",    Some("Forest Gnome"))          => &["spell_minor_illusion"],
-        ("Gnome",    Some("Rock Gnome"))            => &["spell_mending", "spell_prestidigitation"],
-        ("Half-Elf", Some("High Elf Heritage"))     => &["spell_prestidigitation"],
-        _                                           => &[],
+// ── Lineage cantrips + spells ─────────────────────────────────────────────
+    let (lineage_cantrips, lineage_spells): (&[&str], &[&str]) = match (p.race.as_str(), p.species_subtype.as_deref()) {
+        ("Elf", Some("High Elf"))               => (&["spell_prestidigitation"],               &["spell_detect_magic", "spell_misty_step"]),
+        ("Elf", Some("Wood Elf"))               => (&["spell_druidcraft"],                     &["spell_longstrider", "spell_pass_without_trace"]),
+        ("Elf", Some("Drow"))                   => (&["spell_dancing_lights"],                 &["spell_faerie_fire", "spell_darkness"]),
+        ("Gnome", Some("Forest Gnome"))         => (&["spell_minor_illusion"],                 &[]),
+        ("Gnome", Some("Rock Gnome"))           => (&["spell_mending", "spell_prestidigitation"], &[]),
+        ("Half-Elf", Some("High Elf Heritage")) => (&["spell_prestidigitation"],               &[]),
+        ("Tiefling", Some("Abyssal"))           => (&["spell_thaumaturgy", "spell_poison_spray"],  &["spell_ray_of_sickness", "spell_hold_person"]),
+        ("Tiefling", Some("Chthonic"))          => (&["spell_thaumaturgy", "spell_chill_touch"],   &["spell_false_life", "spell_ray_of_enfeeblement"]),
+        ("Tiefling", _)                         => (&["spell_thaumaturgy", "spell_fire_bolt"],     &["spell_hellish_rebuke", "spell_darkness"]),
+        _                                       => (&[], &[]),
     };
     for spell_id in lineage_cantrips {
         let _ = spells_db::learn_spell(pool, &camp.id, &p.id, spell_id, "cantrip", "lineage").await;
+    }
+    for spell_id in lineage_spells {
+        let _ = spells_db::learn_spell(pool, &camp.id, &p.id, spell_id, "always_prepared", "lineage").await;
     }
 
     // ── Magic Initiate feat spells ────────────────────────────────────────────
