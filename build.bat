@@ -11,7 +11,7 @@ cd chronicles\backend
 cargo build --release
 cd ..\..
 
-echo [3/4] Building desktop app (generates icons + installer)...
+echo [3/4] Building desktop app...
 cd chronicles\desktop
 cargo tauri icon src-tauri\icons\mythweaver.png
 cargo tauri build

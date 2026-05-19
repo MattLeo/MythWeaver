@@ -21,10 +21,20 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
-    "resources": [
-      "../../backend/target/release/mythweaver.exe",
-      "../../backend/.env"
-    ],
-    "externalBin": []
+    "resources": {
+      "../../backend/target/release/mythweaver.exe": "mythweaver.exe",
+      "../../backend/.env": ".env",
+      "../../frontend/dist": "frontend/dist",
+      "../../frontend/package.json": "frontend/package.json",
+      "../../frontend/node_modules": "frontend/node_modules",
+      "../../frontend/vite.config.js": "frontend/vite.config.js",
+      "binaries/node.exe": "node.exe"
+    },
+    "externalBin": [],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

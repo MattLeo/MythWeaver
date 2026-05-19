@@ -497,8 +497,8 @@ export async function summonBondedWeapon(campaignId, itemId) {
 // ─── Feats ───────────────────────────────────────────────────────────────────
 
 export async function listFeats(category = null) {
-    const url = category ? `/api/feats?category=${category}` : '/api/feats'
-    const res = await fetch(url.startsWith('http') ? url : `${BASE.replace('/api', '')}${url}`)
+    const url = category ? `${BASE}/feats?category=${category}` : `${BASE}/feats`
+    const res = await fetch(url)
     if (!res.ok) throw new Error('Failed to list feats')
     return res.json()
 }
