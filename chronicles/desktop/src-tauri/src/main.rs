@@ -50,7 +50,8 @@ fn main() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| resource_dir.clone());
 
-            
+            let vite_temp = app_data.join("MythWeaver\\temp");
+            std::fs::create_dir_all(&vite_temp).ok();
 
             // Spawn frontend via vite preview
             match Command::new(&node)
