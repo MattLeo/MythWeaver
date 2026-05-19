@@ -639,6 +639,12 @@ pub async fn level_up(
         pool, &campaign_id, &p.id, &p.class, result.new_level, subclass_now
     ).await;
 
+    if p.class == "Cleric" {
+        seed_level_up_spells_cleric(
+            pool, &campaign_id, &p.id, result.new_level, subclass_now
+        ).await;
+    }
+
     let updated = match player::get_player_by_campaign(pool, &campaign_id).await {
         Ok(Some(p)) => p,
         _ => return (StatusCode::INTERNAL_SERVER_ERROR,
@@ -3065,6 +3071,39 @@ async fn seed_level_up_abilities_cleric(
         },
  
         _ => {}
+    }
+}
+
+async fn seed_level_up_spells_cleric(
+    pool: &sqlx::SqlitePool,
+    campaign_id: &str,
+    player_id: &str,
+    new_level: i64,
+    subclass: Option<&str>,
+) {
+    let spells: &[&str] = match (subclass, new_level) {
+        (Some("Life Domain"), 3)     => &["spell_aid", "spell_bless", "spell_cure_wounds", "spell_lesser_restoration"],
+        (Some("Life Domain"), 5)     => &["spell_mass_healing_word", "spell_revivify"],
+        (Some("Life Domain"), 7)     => &["spell_aura_of_life", "spell_death_ward"],
+        (Some("Life Domain"), 9)     => &["spell_greater_restoration", "spell_mass_cure_wounds"],
+        (Some("Light Domain"), 3)    => &["spell_burning_hands", "spell_faerie_fire", "spell_scorching_ray", "spell_see_invisibility"],
+        (Some("Light Domain"), 5)    => &["spell_daylight", "spell_fireball"],
+        (Some("Light Domain"), 7)    => &["spell_arcane_eye", "spell_wall_of_fire"],
+        (Some("Light Domain"), 9)    => &["spell_flame_strike", "spell_scrying"],
+        (Some("Trickery Domain"), 3) => &["spell_charm_person", "spell_disguise_self", "spell_invisibility", "spell_pass_without_trace"],
+        (Some("Trickery Domain"), 5) => &["spell_hypnotic_pattern", "spell_nondetection"],
+        (Some("Trickery Domain"), 7) => &["spell_confusion", "spell_dimension_door"],
+        (Some("Trickery Domain"), 9) => &["spell_dominate_person", "spell_modify_memory"],
+        (Some("War Domain"), 3)      => &["spell_guiding_bolt", "spell_magic_weapon", "spell_shield_of_faith", "spell_spiritual_weapon"],
+        (Some("War Domain"), 5)      => &["spell_crusaders_mantle", "spell_spirit_guardians"],
+        (Some("War Domain"), 7)      => &["spell_fire_shield", "spell_freedom_of_movement"],
+        (Some("War Domain"), 9)      => &["spell_hold_monster", "spell_steel_wind_strike"],
+        _                            => return,
+    };
+
+    for spell_id in spells {
+        let source = subclass.unwrap_or("cleric").to_lowercase().replace(' ', "_");
+        let _ = spells_db::learn_spell(pool, campaign_id, player_id, spell_id, "always_prepared", &source).await;
     }
 }
 

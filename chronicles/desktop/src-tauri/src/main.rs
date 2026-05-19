@@ -56,6 +56,8 @@ fn main() {
                     "--host",
                 ])
                 .current_dir(&frontend_dir)
+                .env("TEMP", std::env::temp_dir())
+                .env("TMP", std::env::temp_dir())
                 .spawn()
             {
                 Ok(child) => {

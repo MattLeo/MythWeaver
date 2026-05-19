@@ -902,6 +902,7 @@ export default function CombatModal({
     const [shakingEnemy, setShakingEnemy] = useState(null)
     const [playerAttacking, setPlayerAttacking] = useState(false)
     const [attackingEnemyId, setAttackingEnemyId] = useState(null)
+    const [displayOrder, setDisplayOrder] = useState([])
 
     const [log, setLog] = useState([])
     const logRef = useRef(null)
@@ -1004,6 +1005,7 @@ export default function CombatModal({
 
             const freshState = await api.getCombatState(campaignId)
             setCombatState(freshState)
+            setDisplayOrder(freshState.turn_order || [])
             const actor = freshState?.current_actor
 
             if (actor?.participant_type === 'player') {
@@ -1647,6 +1649,7 @@ export default function CombatModal({
     const endTurn = async () => {
         setSelectedAction(null); setSelectedTarget(null)
         setShowSkillsMenu(false); setShowSpellPicker(false)
+        setDisplayOrder(prev => [...prev.slice(1), prev[0]])
         setPhase('enemy_turns')
         addLog('--- Player turn ends ---', 'system')
         try {
@@ -1658,6 +1661,16 @@ export default function CombatModal({
                 if (t.action === 'skip' || !t.text) continue
                 addLog(t.text, t.hit ? (t.damage ? 'hit' : 'system') : 'miss')
                 await refreshCombat()
+                
+                setDisplayOrder(prev => {
+                    const shifted = [...prev.slice(1), prev[0]]
+                    return shifted.filter(p => {
+                        if (p.participant_type === 'player') return true
+                        const live = (combatState?.enemies || []).find(e => e.id === p.id)
+                        return live ? live.is_alive : true
+                    })
+                })
+
                 if (t.player_downed) {
                     await refreshCombat()
                     if (onPlayerUpdate) await onPlayerUpdate()
@@ -1806,12 +1819,12 @@ export default function CombatModal({
                     )}
 
                     {/* Turn Order Bar */}
-                    {phase !== 'initiative' && turnOrder.length > 0 && (
+                    {phase !== 'initiative' && displayOrder.length > 0 && (
                         <div className="turn-order-bar">
-                            {turnOrder.filter(p => p.is_alive).map((p, i) => (
+                            {displayOrder.map((p, i) => (
                                 <div key={p.id + i} className={[
                                     'turn-chip', p.participant_type,
-                                    currentActor?.id === p.id ? 'active' : '',
+                                    i === 0 ? 'active' : '',
                                 ].filter(Boolean).join(' ')}>
                                     <span className="turn-chip-icon">
                                         {p.participant_type === 'player' ? '⚔' :
