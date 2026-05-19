@@ -46,13 +46,6 @@ fn main() {
                 Err(e) => println!("Backend failed to start: {}", e),
             }
 
-            let app_data = std::env::var("LOCALAPPDATA")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| resource_dir.clone());
-
-            let vite_temp = app_data.join("MythWeaver\\temp");
-            std::fs::create_dir_all(&vite_temp).ok();
-
             // Spawn frontend via vite preview
             match Command::new(&node)
                 .args([
@@ -63,8 +56,8 @@ fn main() {
                     "--host",
                 ])
                 .current_dir(&frontend_dir)
-                .env("TEMP", app_data.join("MythWeaver\\temp"))
-                .env("TMP", app_data.join("MythWeaver\\temp"))
+                .env("TEMP", std::env::temp_dir())
+                .env("TMP", std::env::temp_dir())
                 .spawn()
             {
                 Ok(child) => {
