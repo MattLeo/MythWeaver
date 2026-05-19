@@ -639,7 +639,7 @@ function EnemyIcon({ isAlly = false }) {
             <path d="M26 34 L32 28 L38 34" stroke="#6a9a7a" strokeWidth="1.5" />
         </svg>
     ) : (
-<svg viewBox="0 0 64 64" fill="none">
+        <svg viewBox="0 0 64 64" fill="none">
             {/* SWORD 1: Top-Left to Bottom-Right */}
             <path d="M12 12 L22 22 M22 22 L44 44" stroke="#6a2a2a" strokeWidth="2.5" strokeLinecap="round" />
             {/* Hilt / Guard */}
@@ -658,8 +658,8 @@ function EnemyIcon({ isAlly = false }) {
 
             {/* MAIN SKULL (Centered exactly at 32, 28) */}
             {/* Crown / Sides */}
-            <path d="M22 24 C22 16, 42 16, 42 24 C42 28, 40 32, 38 34 L38 42 L26 42 L26 34 C24 32, 22 28, 22 24 Z" 
-                  fill="#2a1010" stroke="#4a1a1a" strokeWidth="2" strokeLinejoin="round" />
+            <path d="M22 24 C22 16, 42 16, 42 24 C42 28, 40 32, 38 34 L38 42 L26 42 L26 34 C24 32, 22 28, 22 24 Z"
+                fill="#2a1010" stroke="#4a1a1a" strokeWidth="2" strokeLinejoin="round" />
             {/* Teeth Grids */}
             <path d="M30 38 L30 42 M34 38 L34 42 M32 38 L32 42" stroke="#4a1a1a" strokeWidth="1.5" />
             {/* Angry Eyes */}
@@ -995,6 +995,7 @@ export default function CombatModal({
     const round = combatState?.round_number || 1
     const isPlayerTurn = currentActor?.participant_type === 'player'
     const canAct = phase === 'player_turn' && isPlayerTurn
+    const companions = combatState?.companions || []
 
     const totalSlotsLeft = spellSlots.reduce((a, s) => a + s.current_slots, 0)
 
@@ -1990,12 +1991,30 @@ export default function CombatModal({
                                     </div>
                                     <div className="combatant-hp-text">{player.current_hp}/{player.max_hp} HP</div>
                                     <div className="combatant-class">{player.class}{player.subclass ? ` · ${player.subclass.split(' ').map(w => w[0]).join('')}` : ''}</div>
-                                    {canCastSpells && totalSlotsLeft > 0 && (
-                                        <div style={{ fontSize: '.55rem', color: '#b5a9f5', marginTop: '.15rem' }}>
-                                            ✦ {totalSlotsLeft} slot{totalSlotsLeft !== 1 ? 's' : ''}
-                                        </div>
-                                    )}
+                                        {canCastSpells && totalSlotsLeft > 0 && (
+                                            <div style={{ fontSize: '.55rem', color: '#b5a9f5', marginTop: '.15rem' }}>
+                                                ✦ {totalSlotsLeft} slot{totalSlotsLeft !== 1 ? 's' : ''}
+                                            </div>
+                                        )}
                                 </div>
+
+                                {companions.map(comp => (
+                                    <div key={comp.id} className={[
+                                        'combatant-card comp-card',
+                                        comp.current_hp === 0 ? 'downed' : '',
+                                        currentActor?.id === comp.id ? 'active-turn' : '',
+                                    ].filter(Boolean).join(' ')}>
+                                        <div className="combatant-name">{comp.name}</div>
+                                        <div className="combatant-hp-bar">
+                                            <div className="combatant-hp-fill" style={{
+                                                width: `${Math.max(0, (comp.current_hp / comp.max_hp) * 100)}%`,
+                                                background: hpColor(comp.current_hp / comp.max_hp * 100)
+                                            }} />
+                                        </div>
+                                        <div className="combatant-hp-text">{comp.current_hp}/{comp.max_hp} HP</div>
+                                        <div className="combatant-class">Companion</div>
+                                    </div>
+                                ))}
 
                                 {npcAllies.map(ally => (
                                     <div key={ally.id} className={[

@@ -6,6 +6,7 @@ use uuid::Uuid;
 use rand::Rng;
 
 use crate::models::Player;
+use crate::db::companions::get_active_companions;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -367,10 +368,12 @@ pub async fn get_combat_state(
         .unwrap_or_default();
 
     let current_actor = turn_order.get(enc.turn_index as usize).cloned();
+    let companions = get_active_companions(pool, campaign_id).await.unwrap_or_default();
 
     Ok(Some(json!({
         "encounter": enc,
         "enemies": enemies,
+        "companions": companions,
         "turn_order": turn_order,
         "current_actor": current_actor,
         "round_number": enc.round_number,
