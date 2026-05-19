@@ -12,6 +12,11 @@ chronicles/backend/.env
 chronicles/frontend/node_modules/
 chronicles/frontend/dist/
 
+# Desktop
+chronicles/desktop/src-tauri/target/*
+chronicles/desktop/src-tauri/Cargo.lock
+chronicles/desktop/src-tauri/.vscode/*
+
 # OS
 .DS_Store
 Thumbs.db
