@@ -336,6 +336,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
   const isEK = playerSubclass === 'Eldritch Knight'
   const isArcaneTrickster = playerSubclass === 'Arcane Trickster'
   const showWarBonds = isEK
+  const maxLearnableLevel = slots.length > 0 ? Math.max(...slots.map(s => s.slot_level)) : 0
 
 
   const LEARN_HINTS = {
@@ -557,6 +558,21 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
               <span style={{ color: totalSlotsLeft > 0 ? '#f5cfa9' : '#666' }}>
                 {totalSlotsLeft} slot{totalSlotsLeft !== 1 ? 's' : ''} remaining
               </span>
+              {(() => {
+                const lvl = player?.level || 1
+                const mod = (s) => Math.floor(((s || 10) - 10) / 2)
+                const limit = playerClass === 'Cleric' || playerClass === 'Druid' ? lvl + mod(player?.wis)
+                  : playerClass === 'Paladin' ? Math.floor(lvl / 2) + mod(player?.cha)
+                    : playerClass === 'Ranger' ? Math.floor(lvl / 2) + mod(player?.wis)
+                      : playerClass === 'Wizard' ? lvl + mod(player?.int)
+                        : null
+                if (limit === null) return null
+                return (
+                  <span style={{ color: '#888', fontSize: 11, marginLeft: 12 }}>
+                    {prepared.length}/{limit} prepared
+                  </span>
+                )
+              })()}
             </div>
           </div>
         )}
@@ -747,7 +763,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
 
                     {/* Level filter pills */}
                     <div style={styles.filterRow}>
-                      {['all', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].map(l => {
+                      {['all', '0', ...Array.from({ length: maxLearnableLevel }, (_, i) => String(i + 1))].map(l => {
                         const hasSpells = l === 'all' || browseSpells.some(s =>
                           String(s.level) === l &&
                           (browseFilter.length < 2 || s.name.toLowerCase().includes(browseFilter.toLowerCase()))
@@ -779,7 +795,7 @@ export default function SpellsModal({ campaignId, player, onClose, onCastInComba
                       const nameMatch = s => browseFilter.length < 2 ||
                         s.name.toLowerCase().includes(browseFilter.toLowerCase())
                       const levels = browseLevelFilter === 'all'
-                        ? [...new Set(browseSpells.map(s => s.level))].sort((a, b) => a - b)
+                        ? [...new Set(browseSpells.map(s => s.level))].filter(l => l === 0 || l <= maxLearnableLevel).sort((a, b) => a - b)
                         : [parseInt(browseLevelFilter)]
 
                       return levels.map(lvl => {
