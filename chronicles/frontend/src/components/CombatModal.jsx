@@ -639,12 +639,34 @@ function EnemyIcon({ isAlly = false }) {
             <path d="M26 34 L32 28 L38 34" stroke="#6a9a7a" strokeWidth="1.5" />
         </svg>
     ) : (
-        <svg viewBox="0 0 64 64" fill="none">
-            <path d="M32 8 L40 24 L56 26 L44 38 L47 54 L32 46 L17 54 L20 38 L8 26 L24 24 Z"
-                stroke="#6a2a2a" strokeWidth="1.5" fill="#2a1010" />
-            <circle cx="24" cy="26" r="3" fill="#c06060" opacity=".8" />
-            <circle cx="40" cy="26" r="3" fill="#c06060" opacity=".8" />
-            <path d="M24 38 Q32 44 40 38" stroke="#c06060" strokeWidth="1.5" fill="none" />
+<svg viewBox="0 0 64 64" fill="none">
+            {/* SWORD 1: Top-Left to Bottom-Right */}
+            <path d="M12 12 L22 22 M22 22 L44 44" stroke="#6a2a2a" strokeWidth="2.5" strokeLinecap="round" />
+            {/* Hilt / Guard */}
+            <path d="M40 48 L48 40" stroke="#4a1a1a" strokeWidth="3" strokeLinecap="round" />
+            {/* Handle & Pommel */}
+            <path d="M44 44 L50 50" stroke="#2a1010" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="52" cy="52" r="2" fill="#2a1010" />
+
+            {/* SWORD 2: Top-Right to Bottom-Left */}
+            <path d="M52 12 L42 22 M42 22 L20 44" stroke="#6a2a2a" strokeWidth="2.5" strokeLinecap="round" />
+            {/* Hilt / Guard */}
+            <path d="M24 48 L16 40" stroke="#4a1a1a" strokeWidth="3" strokeLinecap="round" />
+            {/* Handle & Pommel */}
+            <path d="M20 44 L14 50" stroke="#2a1010" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="52" r="2" fill="#2a1010" />
+
+            {/* MAIN SKULL (Centered exactly at 32, 28) */}
+            {/* Crown / Sides */}
+            <path d="M22 24 C22 16, 42 16, 42 24 C42 28, 40 32, 38 34 L38 42 L26 42 L26 34 C24 32, 22 28, 22 24 Z" 
+                  fill="#2a1010" stroke="#4a1a1a" strokeWidth="2" strokeLinejoin="round" />
+            {/* Teeth Grids */}
+            <path d="M30 38 L30 42 M34 38 L34 42 M32 38 L32 42" stroke="#4a1a1a" strokeWidth="1.5" />
+            {/* Angry Eyes */}
+            <path d="M26 24 Q29 26, 30 22 Q28 25, 26 24 Z" fill="#6a2a2a" />
+            <path d="M38 24 Q35 26, 34 22 Q36 25, 38 24 Z" fill="#6a2a2a" />
+            {/* Nose */}
+            <path d="M32 27 L31 30 L33 30 Z" fill="#4a1a1a" />
         </svg>
     )
 }
@@ -1661,7 +1683,7 @@ export default function CombatModal({
                 if (t.action === 'skip' || !t.text) continue
                 addLog(t.text, t.hit ? (t.damage ? 'hit' : 'system') : 'miss')
                 await refreshCombat()
-                
+
                 setDisplayOrder(prev => {
                     const shifted = [...prev.slice(1), prev[0]]
                     return shifted.filter(p => {
