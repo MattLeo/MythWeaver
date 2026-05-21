@@ -59,6 +59,9 @@ jobs:
             chronicles/desktop/src-tauri/tauri.conf.json > tmp.json
           mv tmp.json chronicles/desktop/src-tauri/tauri.conf.json
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
+
       - name: Build Tauri app
         run: |
           cd chronicles/desktop
