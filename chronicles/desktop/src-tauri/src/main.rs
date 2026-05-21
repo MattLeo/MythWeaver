@@ -26,8 +26,8 @@ fn main() {
         .setup(|app| {
             let resource_dir = app.path().resource_dir().unwrap();
 
-            let node = resource_dir.join("node.exe");
-            let backend_exe = resource_dir.join("mythweaver.exe");
+            let node = resource_dir.join(if cfg!(target_os = "windows") { "node.exe" } else { "node" });
+            let backend_exe = resource_dir.join(if cfg!(target_os = "windows") { "mythweaver.exe" } else { "mythweaver" });
             let frontend_dir = resource_dir.join("frontend");
 
             println!("Resource dir: {:?}", resource_dir);

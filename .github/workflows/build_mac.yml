@@ -1,0 +1,60 @@
+name: Build MythWeaver macOS
+
+on:
+  push:
+    branches: [anthropic_v3_mac]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Build frontend
+        run: |
+          cd chronicles/frontend
+          npm install
+          npm run build
+
+      - name: Build backend (universal)
+        run: |
+          cd chronicles/backend
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          lipo -create \
+            target/x86_64-apple-darwin/release/mythweaver \
+            target/aarch64-apple-darwin/release/mythweaver \
+            -output target/release/mythweaver
+
+      - name: Download macOS node binary
+        run: |
+          curl -L -o node.tar.gz https://nodejs.org/dist/v20.19.0/node-v20.19.0-darwin-x64.tar.gz
+          tar -xzf node.tar.gz
+          mkdir -p chronicles/desktop/src-tauri/binaries
+          cp node-v20.19.0-darwin-x64/bin/node chronicles/desktop/src-tauri/binaries/node
+
+      - name: Add macOS resources to tauri.conf.json
+        run: |
+          brew install jq
+          jq '.bundle.resources["../../backend/target/release/mythweaver"] = "mythweaver" | .bundle.resources["binaries/node"] = "node"' \
+            chronicles/desktop/src-tauri/tauri.conf.json > tmp.json
+          mv tmp.json chronicles/desktop/src-tauri/tauri.conf.json
+
+      - name: Build Tauri app
+        run: |
+          cd chronicles/desktop
+          cargo tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: chronicles/desktop/src-tauri/target/release/bundle/dmg/*.dmg

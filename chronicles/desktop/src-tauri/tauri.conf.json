@@ -19,22 +19,24 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico",
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.icns"
     ],
     "resources": {
-      "../../backend/target/release/mythweaver.exe": "mythweaver.exe",
       "../../backend/.env": ".env",
       "../../frontend/dist": "frontend/dist",
       "../../frontend/package.json": "frontend/package.json",
       "../../frontend/node_modules": "frontend/node_modules",
-      "../../frontend/vite.config.js": "frontend/vite.config.js",
-      "binaries/node.exe": "node.exe"
+      "../../frontend/vite.config.js": "frontend/vite.config.js"
     },
     "externalBin": [],
     "windows": {
       "nsis": {
         "installMode": "currentUser"
       }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
     }
   }
 }
