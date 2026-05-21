@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT spell_name FROM concentration WHERE player_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "spell_name",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "15e6565a6b27f41d5cd51979cf28e4e3ec35d63844e4a4f2bdd07465c55b00a5"
+}

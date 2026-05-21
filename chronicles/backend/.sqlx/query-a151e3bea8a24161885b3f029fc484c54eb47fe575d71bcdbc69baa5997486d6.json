@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, spell_id, spell_name, started_at, expires_at\n         FROM concentration WHERE player_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "spell_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "spell_name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "started_at",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "expires_at",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a151e3bea8a24161885b3f029fc484c54eb47fe575d71bcdbc69baa5997486d6"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM player_feats WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c01e32eb18e1e53d19dc7ff1d22b8f8a00ebc71890b315f00e2e44777795008c"
+}

@@ -1,0 +1,242 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT * FROM spells WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "level",
+        "ordinal": 2,
+        "type_info": "Int64"
+      },
+      {
+        "name": "school",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "casting_time",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "range_type",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "range_feet",
+        "ordinal": 6,
+        "type_info": "Int64"
+      },
+      {
+        "name": "has_verbal",
+        "ordinal": 7,
+        "type_info": "Int64"
+      },
+      {
+        "name": "has_somatic",
+        "ordinal": 8,
+        "type_info": "Int64"
+      },
+      {
+        "name": "has_material",
+        "ordinal": 9,
+        "type_info": "Int64"
+      },
+      {
+        "name": "material_component",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "duration",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "concentration",
+        "ordinal": 12,
+        "type_info": "Int64"
+      },
+      {
+        "name": "ritual",
+        "ordinal": 13,
+        "type_info": "Int64"
+      },
+      {
+        "name": "description",
+        "ordinal": 14,
+        "type_info": "Text"
+      },
+      {
+        "name": "damage_die",
+        "ordinal": 15,
+        "type_info": "Text"
+      },
+      {
+        "name": "damage_die_count",
+        "ordinal": 16,
+        "type_info": "Int64"
+      },
+      {
+        "name": "damage_type",
+        "ordinal": 17,
+        "type_info": "Text"
+      },
+      {
+        "name": "scales_with_level",
+        "ordinal": 18,
+        "type_info": "Int64"
+      },
+      {
+        "name": "cantrip_dice_5",
+        "ordinal": 19,
+        "type_info": "Int64"
+      },
+      {
+        "name": "cantrip_dice_11",
+        "ordinal": 20,
+        "type_info": "Int64"
+      },
+      {
+        "name": "cantrip_dice_17",
+        "ordinal": 21,
+        "type_info": "Int64"
+      },
+      {
+        "name": "slot_scale_dice",
+        "ordinal": 22,
+        "type_info": "Int64"
+      },
+      {
+        "name": "save_type",
+        "ordinal": 23,
+        "type_info": "Text"
+      },
+      {
+        "name": "attack_type",
+        "ordinal": 24,
+        "type_info": "Text"
+      },
+      {
+        "name": "target_type",
+        "ordinal": 25,
+        "type_info": "Text"
+      },
+      {
+        "name": "area_shape",
+        "ordinal": 26,
+        "type_info": "Text"
+      },
+      {
+        "name": "area_size_feet",
+        "ordinal": 27,
+        "type_info": "Int64"
+      },
+      {
+        "name": "has_backend_resolver",
+        "ordinal": 28,
+        "type_info": "Int64"
+      },
+      {
+        "name": "is_wizard_spell",
+        "ordinal": 29,
+        "type_info": "Int64"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 30,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_cleric_spell",
+        "ordinal": 31,
+        "type_info": "Int64"
+      },
+      {
+        "name": "is_druid_spell",
+        "ordinal": 32,
+        "type_info": "Int64"
+      },
+      {
+        "name": "is_bard_spell",
+        "ordinal": 33,
+        "type_info": "Int64"
+      },
+      {
+        "name": "is_paladin_spell",
+        "ordinal": 34,
+        "type_info": "Int64"
+      },
+      {
+        "name": "is_ranger_spell",
+        "ordinal": 35,
+        "type_info": "Int64"
+      },
+      {
+        "name": "is_sorcerer_spell",
+        "ordinal": 36,
+        "type_info": "Int64"
+      },
+      {
+        "name": "is_warlock_spell",
+        "ordinal": 37,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4fec767fb42d1d60d2c9d2a05b0f2591827bcdb82c77a442753781493dc2b690"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT wb.id, i.name as item_name\n           FROM war_bonds wb\n           JOIN items i ON wb.item_id = i.id\n           WHERE wb.player_id = ? AND wb.item_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "item_name",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "5377298b596dab0532e76f6cb07efff7835fcbb0022b30b1f3163c062cea1072"
+}

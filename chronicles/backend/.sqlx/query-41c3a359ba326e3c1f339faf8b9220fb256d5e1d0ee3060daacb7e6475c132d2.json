@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM concentration WHERE player_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "41c3a359ba326e3c1f339faf8b9220fb256d5e1d0ee3060daacb7e6475c132d2"
+}

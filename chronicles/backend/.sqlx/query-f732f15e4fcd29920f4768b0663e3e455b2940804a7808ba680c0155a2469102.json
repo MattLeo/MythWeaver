@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM known_spells WHERE player_id = ? AND spell_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f732f15e4fcd29920f4768b0663e3e455b2940804a7808ba680c0155a2469102"
+}

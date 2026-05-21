@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, name, category, prerequisite_level, prerequisite_feature,\n         prerequisite_ability, prerequisite_ability_score, description,\n         ability_score_options, ability_score_increase, repeatable, has_choice,\n         choice_description, grants_spells FROM feats\n         WHERE name LIKE ? ORDER BY name LIMIT 20",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "category",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "prerequisite_level",
+        "ordinal": 3,
+        "type_info": "Int64"
+      },
+      {
+        "name": "prerequisite_feature",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "prerequisite_ability",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "prerequisite_ability_score",
+        "ordinal": 6,
+        "type_info": "Int64"
+      },
+      {
+        "name": "description",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "ability_score_options",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "ability_score_increase",
+        "ordinal": 9,
+        "type_info": "Int64"
+      },
+      {
+        "name": "repeatable",
+        "ordinal": 10,
+        "type_info": "Int64"
+      },
+      {
+        "name": "has_choice",
+        "ordinal": 11,
+        "type_info": "Int64"
+      },
+      {
+        "name": "choice_description",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "grants_spells",
+        "ordinal": 13,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "3dec5e280d7eb4b7a667239158a37cfad96f980e9b30a2fcd37d726a857f9734"
+}

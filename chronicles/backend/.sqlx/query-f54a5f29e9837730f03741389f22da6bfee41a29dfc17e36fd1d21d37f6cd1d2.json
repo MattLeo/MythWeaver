@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ks.spell_id, s.name, s.school, s.casting_time, s.range_type,\n                  s.duration, s.concentration, s.description,\n                  s.damage_die, s.damage_die_count, s.damage_type,\n                  s.save_type, s.attack_type, s.target_type,\n                  s.has_backend_resolver,\n                  s.cantrip_dice_5, s.cantrip_dice_11, s.cantrip_dice_17\n           FROM known_spells ks\n           JOIN spells s ON ks.spell_id = s.id\n           WHERE ks.player_id = ? AND ks.spell_type = 'cantrip'\n           ORDER BY s.name",
+  "describe": {
+    "columns": [
+      {
+        "name": "spell_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "school",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "casting_time",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "range_type",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "duration",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "concentration",
+        "ordinal": 6,
+        "type_info": "Int64"
+      },
+      {
+        "name": "description",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "damage_die",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "damage_die_count",
+        "ordinal": 9,
+        "type_info": "Int64"
+      },
+      {
+        "name": "damage_type",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "save_type",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "attack_type",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "target_type",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "has_backend_resolver",
+        "ordinal": 14,
+        "type_info": "Int64"
+      },
+      {
+        "name": "cantrip_dice_5",
+        "ordinal": 15,
+        "type_info": "Int64"
+      },
+      {
+        "name": "cantrip_dice_11",
+        "ordinal": 16,
+        "type_info": "Int64"
+      },
+      {
+        "name": "cantrip_dice_17",
+        "ordinal": 17,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f54a5f29e9837730f03741389f22da6bfee41a29dfc17e36fd1d21d37f6cd1d2"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO concentration (id, campaign_id, player_id, spell_id, spell_name, expires_at)\n         VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "3a869258586bb5339d2d3fa9e83308f34bb44d996baaa4d8bdaa64dbf26543c0"
+}

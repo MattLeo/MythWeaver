@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO player_feats\n         (id, campaign_id, player_id, feat_id, feat_name, source, level_taken, choices)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "be730a61b4510a6126ec3b57d5dfd1a8c516fab994d54bfa868a04af61d7810a"
+}

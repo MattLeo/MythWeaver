@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE war_bonds SET is_summoned = 1 WHERE player_id = ? AND item_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "29d0f4d5e2d6ace7e050ec7879233d9ec413063783264f64a0a25d15a3f011c6"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE spell_slots SET max_slots = ?, current_slots = ?, updated_at = datetime('now') WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "a121bf5a4adc90fd1d0993e2355369fed7d5fb1a80a7a94c2b892ba267377899"
+}

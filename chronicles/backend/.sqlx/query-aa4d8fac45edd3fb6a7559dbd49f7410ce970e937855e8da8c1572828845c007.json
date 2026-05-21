@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO known_spells (id, campaign_id, player_id, spell_id, spell_type, source)\n         VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "aa4d8fac45edd3fb6a7559dbd49f7410ce970e937855e8da8c1572828845c007"
+}

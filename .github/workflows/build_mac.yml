@@ -25,7 +25,17 @@ jobs:
           npm install
           npm run build
 
+      - name: Set up SQLx offline mode
+        run: |
+          cd chronicles/backend
+          cargo install sqlx-cli --no-default-features --features sqlite
+          DATABASE_URL=sqlite:./dev.db sqlx database create
+          DATABASE_URL=sqlite:./dev.db sqlx migrate run
+          DATABASE_URL=sqlite:./dev.db cargo sqlx prepare
+
       - name: Build backend (universal)
+        env:
+          SQLX_OFFLINE: true
         run: |
           cd chronicles/backend
           cargo build --release --target x86_64-apple-darwin

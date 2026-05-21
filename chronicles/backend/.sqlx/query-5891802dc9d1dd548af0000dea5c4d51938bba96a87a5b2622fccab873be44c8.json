@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT slot_level FROM spell_slots\n         WHERE player_id = ? AND slot_level >= ? AND current_slots > 0\n         ORDER BY slot_level ASC\n         LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "slot_level",
+        "ordinal": 0,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5891802dc9d1dd548af0000dea5c4d51938bba96a87a5b2622fccab873be44c8"
+}

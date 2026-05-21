@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM war_bonds WHERE player_id = ? AND item_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "fed12622304b4522f865a662cde770627492688dcbbd9ceb2141930678f90e22"
+}

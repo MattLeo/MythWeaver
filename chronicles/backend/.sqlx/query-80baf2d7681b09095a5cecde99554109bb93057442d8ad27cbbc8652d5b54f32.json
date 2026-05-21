@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO spell_slots (id, campaign_id, player_id, slot_level, current_slots, max_slots)\n                 VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "80baf2d7681b09095a5cecde99554109bb93057442d8ad27cbbc8652d5b54f32"
+}

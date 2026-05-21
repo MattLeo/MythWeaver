@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM spell_slots WHERE player_id = ? AND slot_level = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "01861a900c1ca00942393aa40140831b89e431e0b04a1e4906f3f432fffcf309"
+}

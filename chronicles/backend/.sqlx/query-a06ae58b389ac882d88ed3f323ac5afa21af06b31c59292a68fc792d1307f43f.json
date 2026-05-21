@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO war_bonds (id, campaign_id, player_id, item_id, is_summoned)\n         VALUES (?, ?, ?, ?, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a06ae58b389ac882d88ed3f323ac5afa21af06b31c59292a68fc792d1307f43f"
+}

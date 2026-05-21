@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as cnt FROM war_bonds WHERE player_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "cnt",
+        "ordinal": 0,
+        "type_info": "Int"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1719213467842ef4ca09849da3c4263d92d5a9e5d6e9b94e8a85c0132eab8b52"
+}

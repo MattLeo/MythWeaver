@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT slot_level, current_slots, max_slots\n         FROM spell_slots\n         WHERE player_id = ?\n         ORDER BY slot_level",
+  "describe": {
+    "columns": [
+      {
+        "name": "slot_level",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "current_slots",
+        "ordinal": 1,
+        "type_info": "Int64"
+      },
+      {
+        "name": "max_slots",
+        "ordinal": 2,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "69473a4e975e0969f9cdf8ebbdb8bcf1f1ed12701d1b7670082ee453a839cc20"
+}

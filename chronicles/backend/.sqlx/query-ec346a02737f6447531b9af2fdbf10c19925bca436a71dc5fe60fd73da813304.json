@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT wb.id, wb.item_id, wb.is_summoned, i.name as item_name\n           FROM war_bonds wb\n           JOIN items i ON wb.item_id = i.id\n           WHERE wb.player_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "item_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_summoned",
+        "ordinal": 2,
+        "type_info": "Int64"
+      },
+      {
+        "name": "item_name",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ec346a02737f6447531b9af2fdbf10c19925bca436a71dc5fe60fd73da813304"
+}
