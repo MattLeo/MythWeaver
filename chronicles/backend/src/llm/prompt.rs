@@ -182,7 +182,7 @@ pub fn build_system_prompt(
     let feat_str = player
         .background_feat
         .as_ref()
-        .map(|f| format!("\n- Background Feat: {} (not yet mechanically implemented — narrate appropriately)", f))
+        .map(|f| format!("\n- Background Feat: {}", f))
         .unwrap_or_default();
 
     let backstory_str = player
