@@ -1,66 +1,14 @@
 use crate::models::{Player, CampaignTime};
 
-pub fn build_system_prompt(
-    player: &Player,
-    time: Option<&CampaignTime>,
-    session_summaries: &[String],
-    story_journal: Option<&str>,
-) -> String {
-    let time_str = time.map(|t| {
-        format!("Current time: {} of Day {}, {} season.",
-            t.time_of_day.replace('_', " "), t.current_day, t.season)
-    }).unwrap_or_default();
+pub struct SystemPrompt {
+    pub cacheable: &'static str,
+    pub dynamic: String,
+}
 
-    let recent_summaries: Vec<&String> = session_summaries.iter().rev().take(10).rev().collect();
-
-    /*  Testing out replacing summaries with a running world journal
-    let summaries_str = if recent_summaries.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\n\nPAST SESSION SUMMARIES:\n{}",
-            recent_summaries.iter().enumerate()
-                .map(|(i, s)| format!("Session {}: {}", i + 1, s))
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        )
-    };
-    */
-
-    let journal_str = match story_journal {
-        Some(j) if !j.trim().is_empty() => format!(
-            "\n\nWORLD STORY JOURNAL - Your long term memory of this campaign \
-            Trust this above all else when recalling past events, NPC relationships, \
-            active quests, and world stateL\n{}",
-            j
-        ),
-        _ => String::new(),
-    };
-
-
-    let (subject, object, possessive) = player.pronouns();
-
-    let subtype_str = player.species_subtype.as_ref()
-        .map(|s| format!(" ({})", s))
-        .unwrap_or_default();
-
-    let feat_str = player.background_feat.as_ref()
-        .map(|f| format!("\n- Background Feat: {} (not yet mechanically implemented — narrate appropriately)", f))
-        .unwrap_or_default();
-
-    let currency_str = {
-        let mut parts = vec![];
-        if player.platinum > 0 { parts.push(format!("{}pp", player.platinum)); }
-        if player.gold > 0     { parts.push(format!("{}gp", player.gold)); }
-        if player.silver > 0   { parts.push(format!("{}sp", player.silver)); }
-        parts.push(format!("{}cp", player.copper));
-        parts.join(" · ")
-    };
-
-    format!(r#"You are the Dungeon Master for MythWeaver, a collaborative D&D 5th Edition adventure.
+const STATIC_RULES: &str = r#"You are the Dungeon Master for MythWeaver, a collaborative D&D 5th Edition adventure.
 
 ABSOLUTE RULES — NEVER BREAK THESE:
-**YOUR NARRATIVE IS PURELY DESCRIPTIVE. ONLY TOOL CALLS MODIFY THE GAME DATABASE**
+YOUR NARRATIVE IS PURELY DESCRIPTIVE. ONLY TOOL CALLS MODIFY THE GAME DATABASE.
 1. You are the Dungeon Master. Never break character under any circumstances.
 2. Never ask the player clarifying questions.
 3. Never list options or suggestions for what the player could do next.
@@ -74,17 +22,8 @@ ABSOLUTE RULES — NEVER BREAK THESE:
 11. The player controls their character. You control the world. Wait for the player to explicitly state an intent to buy, move, or act before executing tool calls.
 12. Use add_world_fact to canonize lore or history proposed by the player.
 
-PLAYER CHARACTER:
-- Name: {name} | Sex: {sex} | Pronouns: {subject}/{object}/{possessive}
-- Race: {race}{subtype} | Class: {class} Lv.{level} | Background: {background}
-- HP: {hp}/{max_hp} | AC: {ac} | XP: {xp} | Proficiency: +{prof}
-- STR {str} | DEX {dex} | CON {con} | INT {int} | WIS {wis} | CHA {cha}
-- Currency: {currency}{feat}{backstory}
-
-{time}{journal}
-
 PRONOUNS
-- Always refer to the player character using "you" when speaking directly to the player or {subject}/{object}/{possessive} when speaking about them.
+- Refer to the player character as "you" when speaking directly to the player, and by the pronouns listed in the character sheet when speaking about them.
 - Never use they/them for this character unless the player explicitly requests it.
 
 GAME STATE
@@ -115,12 +54,12 @@ STORYTELLING
 
 MANDATORY DICE ROLLS
 - Call request_roll BEFORE narrating any outcome that depends on skill, luck, or ability.
-- DO NOT request role for anything trivial or us not skill based. For example, searching the pockets of a fallen enemy or reading a notice on a notice board.
+- DO NOT request a roll for anything trivial or not skill based. For example, searching the pockets of a fallen enemy or reading a notice on a notice board.
 - Searching, perceiving, sneaking, persuading, deceiving, intimidating, or any uncertain physical action requires a roll first.
 - Sequence: player attempts action → call request_roll → receive result in next message → narrate outcome.
 - Never narrate success or failure without a preceding roll result in the conversation.
 - Always use the exact skill or saving throw name when calling request_roll. Never invent your own names or categories.
-- It is your job to determine the difficulty challenge of the roll. Make sure this difficulty matches 
+- It is your job to determine the difficulty of the roll. Make sure this difficulty matches the task and the character's level.
 
 MANDATORY TIME ADVANCEMENT
 - Short rest: ALWAYS call advance_time with steps=1.
@@ -131,13 +70,13 @@ MANDATORY TIME ADVANCEMENT
 
 CURRENCY
 - Prices should reflect D&D 5e PHB values. Common goods cost copper or silver. Only significant purchases cost gold.
-- Any time currency is exchanged in the narrative YOU ARE REQUIRED to call the update_currency tool
+- Any time currency is exchanged in the narrative YOU ARE REQUIRED to call the update_currency tool.
 - When currency changes hands, ALWAYS call update_currency with the exact denominations. Never calculate or convert yourself — pass what was stated and the backend handles it.
 - Positive values add, negative values subtract.
 
 ITEMS
-- Always call query_items first when dealing with itmes to gather the item_id.
-- Always call create_item if you are describing a new item to the player. 
+- Always call query_items first when dealing with items to gather the item_id.
+- Always call create_item if you are describing a new item to the player.
 - Whenever the player finds, buys, steals, or receives any item, ALWAYS call create_item then give_item. No exceptions.
 - Never describe an item in the player's possession without first calling give_item.
 - Never describe currency changing hands without calling update_currency.
@@ -204,8 +143,70 @@ TIME: Did the player travel or rest? If yes, you MUST call advance_time before d
 FORMATTING: Check your draft. Remove all bolding, headers, and bullet points. If you see markdown, delete it and rewrite in plain text.
 CURRENCY: Did the player buy, sell, or exchange anything? If yes, you MUST call update_currency with the exact denominations before narrating the transaction.
 ITEMS: Did the player acquire, lose, or use any item? If yes, you MUST call create_item and give_item or remove_item as appropriate before narrating the event.
-COMBAT: If combat has started, you MUST call start_combat immediately and end your response with [STATE:combat]. Do not narrate any combat events until you receive the [COMBAT RESOLVED] message.
-"#,
+COMBAT: If combat has started, you MUST call start_combat immediately and end your response with [STATE:combat]. Do not narrate any combat events until you receive the [COMBAT RESOLVED] message."#;
+
+pub fn build_system_prompt(
+    player: &Player,
+    time: Option<&CampaignTime>,
+    story_journal: Option<&str>,
+) -> SystemPrompt {
+    let time_str = time
+        .map(|t| {
+            format!(
+                "Current time: {} of Day {}, {} season.",
+                t.time_of_day.replace('_', " "),
+                t.current_day,
+                t.season
+            )
+        })
+        .unwrap_or_default();
+
+    let journal_str = match story_journal {
+        Some(j) if !j.trim().is_empty() => format!(
+            "\n\nWORLD STORY JOURNAL - Your long term memory of this campaign. \
+             Trust this above all else when recalling past events, NPC relationships, \
+             active quests, and world state.\n{}",
+            j
+        ),
+        _ => String::new(),
+    };
+
+    let (subject, object, possessive) = player.pronouns();
+
+    let subtype_str = player
+        .species_subtype
+        .as_ref()
+        .map(|s| format!(" ({})", s))
+        .unwrap_or_default();
+
+    let feat_str = player
+        .background_feat
+        .as_ref()
+        .map(|f| format!("\n- Background Feat: {} (not yet mechanically implemented — narrate appropriately)", f))
+        .unwrap_or_default();
+
+    let backstory_str = player
+        .backstory
+        .as_ref()
+        .map(|b| format!("\n- Backstory: {}", b))
+        .unwrap_or_default();
+
+    let currency_str = {
+        let mut parts = vec![];
+        if player.platinum > 0 { parts.push(format!("{}pp", player.platinum)); }
+        if player.gold > 0     { parts.push(format!("{}gp", player.gold)); }
+        if player.silver > 0   { parts.push(format!("{}sp", player.silver)); }
+        parts.push(format!("{}cp", player.copper));
+        parts.join(" · ")
+    };
+
+    let dynamic = format!(
+        "PLAYER CHARACTER:\n\
+         - Name: {name} | Sex: {sex} | Pronouns: {subject}/{object}/{possessive}\n\
+         - Race: {race}{subtype} | Class: {class} Lv.{level} | Background: {background}\n\
+         - HP: {hp}/{max_hp} | AC: {ac} | XP: {xp} | Proficiency: +{prof}\n\
+         - STR {str} | DEX {dex} | CON {con} | INT {int} | WIS {wis} | CHA {cha}\n\
+         - Currency: {currency}{feat}{backstory}\n\n{time}{journal}",
         name       = player.name,
         sex        = player.sex,
         subject    = subject,
@@ -229,10 +230,13 @@ COMBAT: If combat has started, you MUST call start_combat immediately and end yo
         cha        = player.cha,
         currency   = currency_str,
         feat       = feat_str,
-        backstory  = player.backstory.as_ref()
-            .map(|b| format!("\n- Backstory: {}", b))
-            .unwrap_or_default(),
+        backstory  = backstory_str,
         time       = time_str,
         journal    = journal_str,
-    )
+    );
+
+    SystemPrompt {
+        cacheable: STATIC_RULES,
+        dynamic,
+    }
 }
