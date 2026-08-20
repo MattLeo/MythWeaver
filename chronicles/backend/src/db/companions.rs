@@ -15,8 +15,9 @@ pub async fn create_companion(
         "INSERT INTO companions (
             id, campaign_id, name, companion_type, description,
             personality, disposition, current_hp, max_hp, armor_class,
+            attack_bonus, damage_die, damage_bonus, damage_type,
             current_location_id, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(&id)
     .bind(campaign_id)
@@ -28,6 +29,10 @@ pub async fn create_companion(
     .bind(data["current_hp"].as_i64().unwrap_or(10))
     .bind(data["max_hp"].as_i64().unwrap_or(10))
     .bind(data["armor_class"].as_i64().unwrap_or(10))
+    .bind(data["attack_bonus"].as_i64().unwrap_or(2))
+    .bind(data["damage_die"].as_str().unwrap_or("d6"))
+    .bind(data["damage_bonus"].as_i64().unwrap_or(0))
+    .bind(data["damage_type"].as_str().unwrap_or("slashing"))
     .bind(data["location_id"].as_str())
     .bind(data["notes"].as_str())
     .execute(pool)

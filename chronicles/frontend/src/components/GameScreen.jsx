@@ -157,20 +157,20 @@ export default function GameScreen({
           {messages.map(msg => (
             msg.role === 'dm'
               ? <div key={msg.id} className="msg-dm">
-                  <div className="dm-lbl">⚔ Dungeon Master</div>
-                  {msg.content.split('\n').filter(l => l.trim()).map((p, i) => (
-                    <p key={i}>{p}</p>
-                  ))}
-                  {msg.tools_used && msg.tools_used.length > 0 && (
-                    <div style={{ marginTop: '.5rem', fontSize: '.65rem', color: 'var(--dim)', fontFamily: 'Cinzel, serif', letterSpacing: '.1em' }}>
-                      ⚙ {msg.tools_used.join(' · ')}
-                    </div>
-                  )}
-                </div>
+                <div className="dm-lbl">⚔ Dungeon Master</div>
+                {msg.content.split('\n').filter(l => l.trim()).map((p, i) => (
+                  <p key={i}>{p}</p>
+                ))}
+                {msg.tools_used && msg.tools_used.length > 0 && (
+                  <div style={{ marginTop: '.5rem', fontSize: '.65rem', color: 'var(--dim)', fontFamily: 'Cinzel, serif', letterSpacing: '.1em' }}>
+                    ⚙ {msg.tools_used.join(' · ')}
+                  </div>
+                )}
+              </div>
               : <div key={msg.id} className="msg-pl">
-                  <div className="pl-lbl">✦ {player?.name || 'You'}</div>
-                  {msg.content}
-                </div>
+                <div className="pl-lbl">✦ {player?.name || 'You'}</div>
+                {msg.content}
+              </div>
           ))}
 
           {loading && (

@@ -3,7 +3,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
-use std::sync::Arc;
 
 use crate::models::GameState;
 use crate::tools;
@@ -12,25 +11,28 @@ pub mod executor;
 pub mod prompt;
 
 const MAX_TOOL_ITERATIONS: usize = 10;
+const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+const ANTHROPIC_VERSION: &str = "2023-06-01";
+const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
+const GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 #[derive(Clone)]
 pub struct LlmClient {
     client: Client,
-    base_url: String,
+    api_key: String,
     model: String,
 }
 
 impl LlmClient {
-    pub fn new(base_url: String, model: String) -> Self {
+    pub fn new(api_key: String, model: String) -> Self {
         Self {
             client: Client::new(),
-            base_url,
+            api_key,
             model,
         }
     }
 
-    /// Run the full agentic loop: send messages, handle tool calls,
-    /// repeat until a clean narrative response is returned.
+
     pub async fn run_agentic_loop(
         &self,
         pool: &SqlitePool,
@@ -40,6 +42,7 @@ impl LlmClient {
         game_state: &GameState,
     ) -> Result<AgentResult> {
         let available_tools = tools::tools_for_state(game_state);
+        let anthropic_tools = convert_tools_to_anthropic(&available_tools);
         let mut current_messages = messages.clone();
         let mut tool_calls_made: Vec<ToolCallRecord> = vec![];
         let mut roll_request: Option<RollRequest> = None;
@@ -47,98 +50,122 @@ impl LlmClient {
         for iteration in 0..MAX_TOOL_ITERATIONS {
             tracing::debug!("Agent loop iteration {}", iteration);
 
-            let response = self.chat_completion(
+            let response = self.chat_completion_anthropic(
                 system_prompt,
                 &current_messages,
-                &available_tools,
+                &anthropic_tools,
             ).await?;
 
-            let choice = response.choices.into_iter().next()
-                .ok_or_else(|| anyhow::anyhow!("No choices in response"))?;
+            let stop_reason = response.stop_reason.as_deref().unwrap_or("end_turn");
 
-            let message = choice.message;
+            let narrative_text: String = response.content.iter()
+                .filter(|b| b.block_type == "text")
+                .filter_map(|b| b.text.clone())
+                .collect::<Vec<_>>()
+                .join("");
 
-            // If no tool calls, we have a clean narrative response
-            if message.tool_calls.is_none() || message.tool_calls.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
-                let content = message.content.unwrap_or_default();
+            let tool_uses: Vec<AnthropicToolUse> = response.content.iter()
+                .filter(|b| b.block_type == "tool_use")
+                .filter_map(|b| {
+                    Some(AnthropicToolUse {
+                        id: b.id.clone()?,
+                        name: b.name.clone()?,
+                        input: b.input.clone()?,
+                    })
+                })
+                .collect();
+
+            if stop_reason == "end_turn" || tool_uses.is_empty() {
                 return Ok(AgentResult {
-                    narrative: content,
+                    narrative: narrative_text,
                     tool_calls_made,
                     roll_request,
                 });
             }
 
-            // Process tool calls
-            let tool_calls = message.tool_calls.unwrap();
-
-            // Add assistant message with tool calls to history
+            // Store the full assistant turn (text + tool_use blocks) in history
             current_messages.push(ChatMessage {
                 role: "assistant".to_string(),
-                content: message.content,
-                tool_calls: Some(tool_calls.clone()),
-                tool_call_id: None,
+                content: if narrative_text.is_empty() { None } else { Some(narrative_text.clone()) },
+                anthropic_content: Some(response.content.clone()),
+                tool_results: None,
             });
 
-            // Check if any tool call is request_roll (requires frontend interaction)
-            for tc in &tool_calls {
-                if tc.function.name == "request_roll" {
-                    let args: Value = serde_json::from_str(&tc.function.arguments)?;
-                    roll_request = Some(RollRequest {
-                        tool_call_id: tc.id.clone(),
-                        die: args["die"].as_str().unwrap_or("d20").to_string(),
-                        skill: args["skill"].as_str().unwrap_or("").to_string(),
-                        dc: args["dc"].as_i64().unwrap_or(10),
-                        reason: args["reason"].as_str().unwrap_or("").to_string(),
-                    });
-
-                    // Return early — frontend must handle the roll
-                    return Ok(AgentResult {
-                        narrative: String::new(),
-                        tool_calls_made,
-                        roll_request,
-                    });
-                }
+            // Handle request_roll immediately — return before executing other tools
+            if let Some(tc) = tool_uses.iter().find(|t| t.name == "request_roll") {
+                roll_request = Some(RollRequest {
+                    tool_call_id: tc.id.clone(),
+                    die: tc.input["die"].as_str().unwrap_or("d20").to_string(),
+                    skill: tc.input["skill"].as_str().unwrap_or("").to_string(),
+                    dc: tc.input["dc"].as_i64().unwrap_or(10),
+                    reason: tc.input["reason"].as_str().unwrap_or("").to_string(),
+                });
+                return Ok(AgentResult {
+                    narrative: narrative_text,
+                    tool_calls_made,
+                    roll_request,
+                });
             }
 
-            // Execute all tool calls
-            for tc in &tool_calls {
-                let args: Value = serde_json::from_str(&tc.function.arguments)
-                    .unwrap_or(json!({}));
+            // Execute all other tools and collect results
+            let mut tool_result_blocks: Vec<Value> = vec![];
 
-                tracing::info!("Executing tool: {} with args: {}", tc.function.name, args);
+            for tc in &tool_uses {
+                tracing::info!("Executing tool: {} with args: {}", tc.name, tc.input);
 
                 let result = executor::execute_tool(
                     pool,
                     campaign_id,
-                    &tc.function.name,
-                    &args,
+                    &tc.name,
+                    &tc.input,
                 ).await;
 
                 let result_str = match result {
                     Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_default(),
                     Err(e) => {
-                        tracing::error!("Tool '{}' error: {}", tc.function.name, e);
+                        tracing::error!("Tool '{}' error: {}", tc.name, e);
                         format!("{{\"error\": \"{}\"}}", e)
                     }
                 };
 
                 tool_calls_made.push(ToolCallRecord {
-                    tool_name: tc.function.name.clone(),
-                    args: args.clone(),
+                    tool_name: tc.name.clone(),
+                    args: tc.input.clone(),
                     result: result_str.clone(),
                 });
 
-                // Add tool result to message history
-                current_messages.push(ChatMessage {
-                    role: "tool".to_string(),
-                    content: Some(result_str),
-                    tool_calls: None,
-                    tool_call_id: Some(tc.id.clone()),
-                });
+                tool_result_blocks.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": tc.id,
+                    "content": result_str
+                }));
             }
+
+            // Anthropic tool results go as a user message with a content array
+            current_messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: None,
+                anthropic_content: None,
+                tool_results: Some(tool_result_blocks),
+            });
         }
 
         Err(anyhow::anyhow!("Agent loop exceeded maximum iterations"))
+    }
+
+
+    pub async fn narrate_combat_result(&self, system: &str, result: &Value) -> Result<String> {
+        let prompt = format!(
+            "Combat result: {}. Write exactly 1-2 sentences of vivid combat narrative describing this outcome. Use ONLY the names and details provided in the combat result above. Do not invent or add any characters, enemies, or details not present in the result. No markdown. No lists.",
+            serde_json::to_string(result).unwrap_or_default()
+        );
+        let messages = vec![ChatMessage::user(&prompt)];
+        let response = self.chat_completion_anthropic(system, &messages, &[]).await?;
+        let content = response.content.iter()
+            .find(|b| b.block_type == "text")
+            .and_then(|b| b.text.clone())
+            .unwrap_or_else(|| "The attack lands.".to_string());
+        Ok(content)
     }
 
     async fn chat_completion(
@@ -146,28 +173,127 @@ impl LlmClient {
         system: &str,
         messages: &[ChatMessage],
         tools: &[Value],
-    ) -> Result<ChatResponse> {
+    ) -> Result<OpenRouterResponse> {
+        let mut openrouter_messages: Vec<Value> = vec![];
+ 
+        // System prompt goes as first message
+        openrouter_messages.push(json!({
+            "role": "system",
+            "content": system
+        }));
+ 
+        // Build the rest of the messages
+        for msg in messages {
+            // Tool results — each becomes a separate "tool" role message
+            if let Some(results) = &msg.tool_results {
+                for result in results {
+                    openrouter_messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": result["tool_use_id"],
+                        "content": result["content"]
+                    }));
+                }
+                continue;
+            }
+ 
+            // Assistant messages with tool calls stored
+            if msg.role == "assistant" {
+                if let Some(blocks) = &msg.anthropic_content {
+                    let text = blocks.iter()
+                        .find(|b| b.block_type == "text")
+                        .and_then(|b| b.text.clone())
+                        .unwrap_or_default();
+ 
+                    let tool_calls: Vec<Value> = blocks.iter()
+                        .filter(|b| b.block_type == "tool_use")
+                        .filter_map(|b| {
+                            let id = b.id.as_ref()?;
+                            let name = b.name.as_ref()?;
+                            let input = b.input.as_ref()?;
+                            Some(json!({
+                                "id": id,
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": serde_json::to_string(input).unwrap_or_default()
+                                }
+                            }))
+                        })
+                        .collect();
+ 
+                    let mut assistant_msg = json!({ "role": "assistant" });
+                    if !text.is_empty() {
+                        assistant_msg["content"] = json!(text);
+                    }
+                    if !tool_calls.is_empty() {
+                        assistant_msg["tool_calls"] = json!(tool_calls);
+                    }
+                    openrouter_messages.push(assistant_msg);
+                    continue;
+                }
+            }
+ 
+            // Plain user or assistant message
+            openrouter_messages.push(json!({
+                "role": msg.role,
+                "content": msg.content.as_deref().unwrap_or("")
+            }));
+        }
+ 
         let mut payload = json!({
             "model": self.model,
-            "messages": build_messages(system, messages),
-            "stream": false,
-            "think": false,
-            "options": {
-                "temperature": 0.85,
-                "top_p": 0.95,
-                "top_k": 20,
-                "num_predict": 1024
-            }
+            "max_tokens": 1024,
+            "messages": openrouter_messages,
+        });
+ 
+        if !tools.is_empty() {
+            payload["tools"] = json!(tools);
+        }
+ 
+        let response = self.client
+            .post(ANTHROPIC_URL)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .header("HTTP-Referer", "https://mythweaver.app")
+            .header("X-Title", "MythWeaver Chronicles")
+            .json(&payload)
+            .send()
+            .await?;
+ 
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await?;
+            return Err(anyhow::anyhow!("Anthropic API error {}: {}", status, body));
+        }
+ 
+        let or_response: OpenRouterResponse = response.json().await?;
+        Ok(or_response)
+    }
+
+    async fn chat_completion_anthropic(
+        &self,
+        system: &str,
+        messages: &[ChatMessage],
+        tools: &[Value],
+    ) -> Result<AnthropicResponse> {
+        let anthropic_messages = build_anthropic_messages(messages);
+
+        let mut payload = json!({
+            "model": self.model,
+            "max_tokens": 1024,
+            "system": system,          // <-- system is top-level, not a message
+            "messages": anthropic_messages,
         });
 
         if !tools.is_empty() {
             payload["tools"] = json!(tools);
         }
 
-        let url = format!("{}/v1/chat/completions", self.base_url);
-
         let response = self.client
-            .post(&url)
+            .post(ANTHROPIC_URL)
+            .header("x-api-key", &self.api_key)          // <-- different auth header
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("Content-Type", "application/json")
             .json(&payload)
             .send()
             .await?;
@@ -175,41 +301,69 @@ impl LlmClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await?;
-            return Err(anyhow::anyhow!("LLM API error {}: {}", status, body));
+            return Err(anyhow::anyhow!("Anthropic API error {}: {}", status, body));
         }
 
-        let chat_response: ChatResponse = response.json().await?;
-        Ok(chat_response)
+        let anthropic_response: AnthropicResponse = response.json().await?;
+        Ok(anthropic_response)
     }
 }
 
-fn build_messages(system: &str, messages: &[ChatMessage]) -> Vec<Value> {
-    let mut result = vec![json!({
-        "role": "system",
-        "content": system
-    })];
+// ─── Tool format conversion ───────────────────────────────────────────────────
 
-    for msg in messages {
-        let mut m = json!({
-            "role": msg.role
-        });
+fn convert_tools_to_anthropic(tools: &[Value]) -> Vec<Value> {
+    tools.iter().map(|t| {
+        let function = &t["function"];
+        json!({
+            "name": function["name"],
+            "description": function["description"],
+            "input_schema": function["parameters"]
+        })
+    }).collect()
+}
 
-        if let Some(content) = &msg.content {
-            m["content"] = json!(content);
+fn convert_tools_for_openrouter(tools: &[Value]) -> Vec<Value> {
+    tools.iter().map(|t| {
+        let function = &t["function"];
+        json!({
+            "type": "function",
+            "function": {
+                "name": function["name"],
+                "description": function["description"],
+                "parameters": function["parameters"]
+            }
+        })
+    }).collect()
+}
+
+// ─── Message building ─────────────────────────────────────────────────────────
+
+fn build_anthropic_messages(messages: &[ChatMessage]) -> Vec<Value> {
+    messages.iter().map(|msg| {
+        // Tool results → user message with content array of tool_result blocks
+        if let Some(results) = &msg.tool_results {
+            return json!({
+                "role": "user",
+                "content": results
+            });
         }
 
-        if let Some(tool_calls) = &msg.tool_calls {
-            m["tool_calls"] = json!(tool_calls);
+        // Assistant messages with tool_use blocks
+        if msg.role == "assistant" {
+            if let Some(content_blocks) = &msg.anthropic_content {
+                return json!({
+                    "role": "assistant",
+                    "content": content_blocks
+                });
+            }
         }
 
-        if let Some(tool_call_id) = &msg.tool_call_id {
-            m["tool_call_id"] = json!(tool_call_id);
-        }
-
-        result.push(m);
-    }
-
-    result
+        // Plain messages
+        json!({
+            "role": msg.role,
+            "content": msg.content.as_deref().unwrap_or("")
+        })
+    }).collect()
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -218,8 +372,8 @@ fn build_messages(system: &str, messages: &[ChatMessage]) -> Vec<Value> {
 pub struct ChatMessage {
     pub role: String,
     pub content: Option<String>,
-    pub tool_calls: Option<Vec<ToolCall>>,
-    pub tool_call_id: Option<String>,
+    pub anthropic_content: Option<Vec<AnthropicContentBlock>>,
+    pub tool_results: Option<Vec<Value>>,
 }
 
 impl ChatMessage {
@@ -227,8 +381,8 @@ impl ChatMessage {
         Self {
             role: "user".to_string(),
             content: Some(content.to_string()),
-            tool_calls: None,
-            tool_call_id: None,
+            anthropic_content: None,
+            tool_results: None,
         }
     }
 
@@ -236,40 +390,37 @@ impl ChatMessage {
         Self {
             role: "assistant".to_string(),
             content: Some(content.to_string()),
-            tool_calls: None,
-            tool_call_id: None,
+            anthropic_content: None,
+            tool_results: None,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCall {
-    pub id: String,
+pub struct AnthropicContentBlock {
     #[serde(rename = "type")]
-    pub call_type: String,
-    pub function: ToolCallFunction,
+    pub block_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCallFunction {
+#[derive(Debug, Clone)]
+struct AnthropicToolUse {
+    pub id: String,
     pub name: String,
-    pub arguments: String,
+    pub input: Value,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatResponse {
-    choices: Vec<ChatChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatChoice {
-    message: ChatResponseMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatResponseMessage {
-    content: Option<String>,
-    tool_calls: Option<Vec<ToolCall>>,
+struct AnthropicResponse {
+    pub content: Vec<AnthropicContentBlock>,
+    pub stop_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -293,4 +444,33 @@ pub struct RollRequest {
     pub skill: String,
     pub dc: i64,
     pub reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterResponse {
+    pub choices: Vec<OpenRouterChoice>,
+}
+ 
+#[derive(Debug, Deserialize)]
+struct OpenRouterChoice {
+    pub message: OpenRouterMessage,
+    pub finish_reason: Option<String>,
+}
+ 
+#[derive(Debug, Deserialize)]
+struct OpenRouterMessage {
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<OpenRouterToolCall>>,
+}
+ 
+#[derive(Debug, Deserialize)]
+struct OpenRouterToolCall {
+    pub id: String,
+    pub function: OpenRouterFunction,
+}
+ 
+#[derive(Debug, Deserialize)]
+struct OpenRouterFunction {
+    pub name: String,
+    pub arguments: String, // JSON string, needs parsing
 }

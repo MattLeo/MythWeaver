@@ -1,13 +1,8 @@
-import { useState } from 'react'
 import { STYLES } from '../styles.js'
+import { xpProgress, xpToNextLevel, formatModifier } from '../constants.js'
 
 const STAT_LABELS = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA']
 const STAT_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha']
-const DICE = [4, 6, 8, 10, 12, 20]
-
-const mod = (v) => Math.floor((v - 10) / 2)
-const fmt = (v) => { const m = mod(v); return (m >= 0 ? '+' : '') + m }
-const d = (n) => Math.floor(Math.random() * n) + 1
 
 const SIDEBAR_STYLES = `
 ${STYLES}
@@ -22,21 +17,6 @@ ${STYLES}
 .hp-bar { background: var(--bord); border-radius: 1px; height: 5px; margin: .4rem 0 .2rem; }
 .hp-fill { height: 100%; border-radius: 1px; transition: width .6s, background .6s; }
 .hp-txt { font-size: .8rem; }
-.hp-adj { display: flex; align-items: center; gap: .4rem; margin-top: .4rem; }
-.hp-adj button {
-  background: var(--elev); border: 1px solid var(--bord);
-  color: var(--text); width: 26px; height: 26px;
-  border-radius: 2px; cursor: pointer; font-size: .9rem;
-  display: flex; align-items: center; justify-content: center;
-}
-.hp-adj button:hover { border-color: var(--gold); color: var(--gold); }
-.hp-adj input {
-  background: var(--elev); border: 1px solid var(--bord);
-  color: var(--text); width: 42px; text-align: center;
-  border-radius: 2px; padding: .2rem; font-size: .78rem;
-  font-family: 'Cinzel', serif;
-}
-.hp-adj input:focus { outline: none; border-color: var(--gold); }
 .inv-i {
   font-size: .76rem; color: var(--dim); padding: .18rem 0;
   border-bottom: 1px solid var(--bord);
@@ -44,17 +24,14 @@ ${STYLES}
 .inv-i:last-child { border-bottom: none; }
 .inv-i.equipped { color: var(--goldl); }
 .gp { font-size: .82rem; color: var(--gold); margin-top: .4rem; }
-.dice-row { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
-.roll-res { font-family: 'Cinzel', serif; font-size: .8rem; color: var(--goldl); margin-top: .3rem; }
-.roll-hint { font-size: .68rem; color: var(--dim); margin-top: .35rem; line-height: 1.5; }
 .ability-row {
   display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: nowrap;
   font-size: .75rem; padding: .18rem 0; border-bottom: 1px solid var(--bord);
 }
 .ability-row:last-child { border-bottom: none; }
-.ability-name { color: var(--dim); flex: 1; }
-.ability-uses { font-family: 'Cinzel', serif; color: var(--gold); font-size: .7rem; }
-.ability-uses.empty { color: var(--red); }
+.ability-name { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ability-uses { font-family: 'Cinzel', serif; color: var(--gold); font-size: .7rem; white-space: nowrap; margin-left: .5rem; }
 .time-display {
   font-family: 'Cinzel', serif; font-size: .72rem;
   color: var(--goldl); text-transform: uppercase; letter-spacing: .1em;
@@ -72,7 +49,27 @@ ${STYLES}
 .xp-bar { background: var(--bord); border-radius: 1px; height: 3px; margin: .3rem 0 .15rem; }
 .xp-fill { height: 100%; border-radius: 1px; background: var(--gold); transition: width .8s; }
 .xp-txt { font-size: .68rem; color: var(--dim); }
-
+.btn-level-up {
+  width: 100%; margin-top: .6rem;
+  background: linear-gradient(135deg, #2a1f06, #4a3510);
+  border: 1px solid var(--gold); border-radius: 2px;
+  color: var(--goldl); cursor: pointer;
+  font-family: 'Cinzel', serif; font-size: .72rem;
+  font-weight: 700; letter-spacing: .15em; text-transform: uppercase;
+  padding: .55rem 1rem;
+  transition: all .2s;
+  animation: level-up-pulse 2s ease-in-out infinite;
+}
+.btn-level-up:hover {
+  background: linear-gradient(135deg, #4a3510, #6a4e18);
+  border-color: var(--goldl); color: #f0d878;
+  box-shadow: 0 0 20px rgba(200,150,42,.5);
+  animation: none;
+}
+@keyframes level-up-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(200,150,42,.2); }
+  50% { box-shadow: 0 0 18px rgba(200,150,42,.55); border-color: var(--goldl); }
+}
 @media(max-width:700px) {
   .sidebar {
     position: fixed; left: 0; top: 0; bottom: 0; z-index: 10;
@@ -82,10 +79,11 @@ ${STYLES}
 }
 `
 
-export default function Sidebar({ player, abilities, items, companions, campaignTime, isOpen, onNewAdventure }) {
-  const [hpDelta, setHpDelta] = useState('1')
-  const [lastRoll, setLastRoll] = useState(null)
-
+export default function Sidebar({
+  player, abilities, items, companions, campaignTime,
+  isOpen, onNewAdventure, levelUpAvailable, onLevelUp,
+  onInventory, onAbilities, onSpells, onNotes, knownSpells,
+}) {
   if (!player) return null
 
   const hpPct = player.max_hp > 0 ? Math.max(0, (player.current_hp / player.max_hp) * 100) : 0
@@ -94,13 +92,11 @@ export default function Sidebar({ player, abilities, items, companions, campaign
   const equipped = items?.filter(i => i.is_equipped) || []
   const inventory = items?.filter(i => !i.is_equipped) || []
 
-  // XP progress
-  const xpThresholds = [0,300,900,2700,6500,14000,23000,34000,48000,64000,85000,100000,120000,140000,165000,195000,225000,265000,305000,355000]
-  const currentThreshold = xpThresholds[player.level - 1] || 0
-  const nextThreshold = xpThresholds[player.level] || xpThresholds[xpThresholds.length - 1]
-  const xpPct = ((player.experience - currentThreshold) / (nextThreshold - currentThreshold)) * 100
+  const nextThreshold = xpToNextLevel(player.level)
+  const xpPct = xpProgress(player.experience, player.level)
 
-  const rollDie = (n) => setLastRoll(`d${n}: ${d(n)}`)
+  const isEK = player.subclass === 'Eldritch Knight'
+  const canCastSpells = knownSpells.length > 0
 
   return (
     <>
@@ -110,7 +106,12 @@ export default function Sidebar({ player, abilities, items, companions, campaign
         {/* Identity */}
         <div>
           <div className="cn-name">{player.name}</div>
-          <div className="cn-sub">Level {player.level} {player.race} {player.class}</div>
+          <div className="cn-sub">
+            Level {player.level} {player.race} {player.class}
+          </div>
+          <div className='cn-sub'>
+            {player.subclass ? `${player.subclass}` : ''}
+          </div>
           <div className="cn-sub">{player.background}</div>
         </div>
 
@@ -129,16 +130,17 @@ export default function Sidebar({ player, abilities, items, companions, campaign
           </div>
           <div className="hp-txt" style={{ color: hpCol }}>
             {player.current_hp} / {player.max_hp}
-            {player.temp_hp > 0 && <span style={{ color: 'var(--goldl)' }}> (+{player.temp_hp} temp)</span>}
+            {player.temp_hp > 0 && (
+              <span style={{ color: 'var(--goldl)' }}> (+{player.temp_hp} temp)</span>
+            )}
           </div>
 
-          {/* Death saves — shown when player is at 0 HP */}
           {player.current_hp === 0 && !player.is_dead && (
             <div className="death-saves">
               <div className="ds-group">
                 <div className="ds-label">Successes</div>
                 <div className="ds-dots">
-                  {[0,1,2].map(i => (
+                  {[0, 1, 2].map(i => (
                     <div key={i} className={`ds-dot${i < player.death_save_successes ? ' success-filled' : ''}`} />
                   ))}
                 </div>
@@ -146,7 +148,7 @@ export default function Sidebar({ player, abilities, items, companions, campaign
               <div className="ds-group">
                 <div className="ds-label">Failures</div>
                 <div className="ds-dots">
-                  {[0,1,2].map(i => (
+                  {[0, 1, 2].map(i => (
                     <div key={i} className={`ds-dot${i < player.death_save_failures ? ' failure-filled' : ''}`} />
                   ))}
                 </div>
@@ -166,7 +168,14 @@ export default function Sidebar({ player, abilities, items, companions, campaign
           <div className="xp-bar">
             <div className="xp-fill" style={{ width: `${Math.min(100, xpPct)}%` }} />
           </div>
-          <div className="xp-txt">{player.experience.toLocaleString()} XP · Next: {nextThreshold.toLocaleString()}</div>
+          <div className="xp-txt">
+            {player.experience.toLocaleString()} XP · Next: {nextThreshold.toLocaleString()}
+          </div>
+          {levelUpAvailable && (
+            <button className="btn-level-up" onClick={onLevelUp}>
+              ✦ Level Up ✦
+            </button>
+          )}
         </div>
 
         {/* Stats */}
@@ -176,25 +185,15 @@ export default function Sidebar({ player, abilities, items, companions, campaign
             <div key={key} className="stat-r">
               <span className="sr-l">{STAT_LABELS[i]}</span>
               <span className="sr-v">{player[key]}</span>
-              <span className="sr-m">{fmt(player[key])}</span>
+              <span className="sr-m">{formatModifier(player[key])}</span>
             </div>
           ))}
         </div>
 
-        {/* Abilities */}
-        {abilities && abilities.length > 0 && (
-          <div className="sec">
-            <div className="sec-title">Class Abilities</div>
-            {abilities.map(ab => (
-              <div key={ab.id} className="ability-row">
-                <span className="ability-name">{ab.name}</span>
-                <span className={`ability-uses${ab.current_uses === 0 ? ' empty' : ''}`}>
-                  {ab.refresh_type === 'per_turn' ? '∞' : `${ab.current_uses}/${ab.max_uses}`}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+
+        {/* Class Abilities */}
+
+
 
         {/* Equipped */}
         {equipped.length > 0 && (
@@ -210,6 +209,7 @@ export default function Sidebar({ player, abilities, items, companions, campaign
 
         {/* Inventory */}
         <div className="sec">
+          {/*
           <div className="sec-title">Inventory</div>
           {inventory.length === 0
             ? <div className="inv-i">Empty</div>
@@ -217,12 +217,51 @@ export default function Sidebar({ player, abilities, items, companions, campaign
               <div key={item.id} className="inv-i">
                 {item.quantity > 1 ? `${item.name} ×${item.quantity}` : item.name}
               </div>
-            ))
+            )) 
           }
-          <div className="gp">⊙ {player.gold} gp</div>
+          */}
+
+          <div className="gp">
+            {player.platinum > 0 && <span>⊙ {player.platinum}pp · </span>}
+            {player.gold > 0 && <span>{player.gold}gp · </span>}
+            {player.silver > 0 && <span>{player.silver}sp · </span>}
+            <span>{player.copper}cp</span>
+          </div>
+
+          <button
+            className="btn-ghost"
+            onClick={onInventory}
+            style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
+          >
+            ⚔ Inventory
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={onAbilities}
+            style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
+          >
+            ✦ Abilities
+          </button>
+          {canCastSpells && (
+            <button
+              className="btn-ghost"
+              onClick={onSpells}
+              style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
+            >
+              ✦ Spells
+            </button>
+          )}
+          <button
+            className="btn-ghost"
+            onClick={onNotes}
+            style={{ width: '100%', marginTop: '.4rem', textAlign: 'center' }}
+          >
+            ✦ Notes
+          </button>
         </div>
 
-        {/* Active companions */}
+
+        {/* Companions */}
         {companions && companions.length > 0 && (
           <div className="sec">
             <div className="sec-title">Companions</div>
@@ -237,24 +276,17 @@ export default function Sidebar({ player, abilities, items, companions, campaign
           </div>
         )}
 
-        {/* Dice roller */}
-        <div className="sec">
-          <div className="sec-title">Dice Roller</div>
-          <div className="dice-row">
-            {DICE.map(n => (
-              <button key={n} className="btn-sm" onClick={() => rollDie(n)}>d{n}</button>
-            ))}
-          </div>
-          {lastRoll && <div className="roll-res">🎲 {lastRoll}</div>}
-          <p className="roll-hint">Roll here for reference — the DM will request rolls automatically.</p>
-        </div>
-
         {/* New adventure */}
         <div style={{ marginTop: 'auto', paddingTop: '.75rem' }}>
-          <button className="btn-ghost" style={{ width: '100%', fontSize: '.72rem' }} onClick={onNewAdventure}>
+          <button
+            className="btn-ghost"
+            style={{ width: '100%', fontSize: '.72rem' }}
+            onClick={onNewAdventure}
+          >
             ✦ New Adventure
           </button>
         </div>
+
       </div>
     </>
   )

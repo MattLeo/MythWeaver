@@ -35,6 +35,38 @@ pub async fn get_campaign(pool: &SqlitePool, id: &str) -> Result<Option<Campaign
     Ok(campaign)
 }
 
+pub async fn list_campaigns(pool: &SqlitePool) -> Result<Vec<Campaign>> {
+    Ok(sqlx::query_as::<_, Campaign>(
+        "SELECT * FROM campaigns ORDER BY updated_at DESC"
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn get_story_journal(pool:&SqlitePool, campaign_id: &str) -> Result<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT story_journal FROM campaigns WHERE id = ?"
+    )
+    .bind(campaign_id)
+    .fetch_optional(pool)
+    .await?
+    .flatten())
+}
+
+pub async fn update_story_journal(pool: &SqlitePool, campaign_id: &str, journal: &str
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE campaigns SET story_journal = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(journal)
+    .bind(campaign_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+
+
 // ─── Session ──────────────────────────────────────────────────────────────────
 
 pub async fn create_session(pool: &SqlitePool, campaign_id: &str) -> Result<Session> {
@@ -134,6 +166,17 @@ pub async fn get_session_messages(pool: &SqlitePool, session_id: &str) -> Result
     Ok(messages)
 }
 
+pub async fn get_recent_messages(pool: &SqlitePool, campaign_id: &str, limit: i64) -> Result<Vec<crate::models::Message>> {
+    Ok(sqlx::query_as::<_, crate::models::Message>(
+        "SELECT * FROM messages WHERE campaign_id = ?
+         ORDER BY created_at DESC LIMIT ?"
+    )
+    .bind(campaign_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?)
+}
+
 // ─── Session Summaries ────────────────────────────────────────────────────────
 
 pub async fn save_session_summary(
@@ -176,4 +219,28 @@ pub async fn get_session_summaries(
     .await?;
 
     Ok(summaries)
+}
+
+// ─── Player Notes ─────────────────────────────────────────────────────────────
+
+pub async fn get_player_notes(pool: &SqlitePool, campaign_id: &str) -> Result<String> {
+    let notes: Option<String> = sqlx::query_scalar(
+        "SELECT player_notes FROM campaigns WHERE id = ?"
+    )
+    .bind(campaign_id)
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+    Ok(notes.unwrap_or_default())
+}
+
+pub async fn update_player_notes(pool: &SqlitePool, campaign_id: &str, notes: &str) -> Result<()> {
+    sqlx::query(
+        "UPDATE campaigns SET player_notes = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(notes)
+    .bind(campaign_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }

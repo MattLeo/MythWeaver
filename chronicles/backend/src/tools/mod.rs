@@ -1,15 +1,14 @@
 use serde_json::{json, Value};
 use crate::models::GameState;
 
-/// Returns the tool definitions appropriate for the current game state
 pub fn tools_for_state(state: &GameState) -> Vec<Value> {
     match state {
         GameState::Exploration => exploration_tools(),
-        GameState::Combat => combat_tools(),
-        GameState::Dialogue => dialogue_tools(),
-        GameState::Rest => rest_tools(),
-        GameState::Leveling => leveling_tools(),
-        GameState::Shopping => shopping_tools(),
+        GameState::Combat      => combat_tools(),
+        GameState::Dialogue    => exploration_tools(),
+        GameState::Rest        => rest_tools(),
+        GameState::Leveling    => leveling_tools(),
+        GameState::Shopping    => shopping_tools(),
     }
 }
 
@@ -21,29 +20,33 @@ fn exploration_tools() -> Vec<Value> {
     tools.extend(item_tools());
     tools.extend(companion_query_tools());
     tools.extend(time_tools());
-    tools.extend(event_tools());
     tools.extend(session_tools());
+    tools.extend(progression_tools());
+    tools.extend(fighter_exploration_tools());
+    tools.extend(mechanical_tools());
+    tools.push(start_combat_tool());
     tools
 }
 
 fn combat_tools() -> Vec<Value> {
+    // Combat is now fully UI-driven. The model only initiates combat
+    // and awards XP after victory. Everything else is handled by the
+    // combat UI making direct API calls to the backend.
     let mut tools = vec![];
     tools.extend(world_query_tools());
-    tools.extend(mechanical_tools());
-    tools.extend(companion_combat_tools());
-    tools.extend(ability_tools());
-    tools.extend(death_tools());
     tools.extend(session_tools());
-    tools
-}
-
-fn dialogue_tools() -> Vec<Value> {
-    let mut tools = vec![];
-    tools.extend(world_query_tools());
-    tools.extend(world_write_tools());
-    tools.extend(world_mutation_tools());
-    tools.extend(companion_query_tools());
-    tools.extend(session_tools());
+    tools.push(start_combat_tool());
+    tools.push(tool("award_experience",
+        "Award XP to the player after combat ends.",
+        json!({
+            "type": "object",
+            "properties": {
+                "amount": { "type": "integer" },
+                "reason": { "type": "string" }
+            },
+            "required": ["amount", "reason"]
+        })
+    ));
     tools
 }
 
@@ -56,11 +59,7 @@ fn rest_tools() -> Vec<Value> {
 }
 
 fn leveling_tools() -> Vec<Value> {
-    let mut tools = vec![];
-    tools.extend(progression_tools());
-    tools.extend(ability_tools());
-    tools.extend(world_query_tools());
-    tools
+    vec![]
 }
 
 fn shopping_tools() -> Vec<Value> {
@@ -69,10 +68,11 @@ fn shopping_tools() -> Vec<Value> {
     tools.extend(item_tools());
     tools.extend(world_mutation_tools());
     tools.extend(session_tools());
+    tools.push(open_shop_tool());
     tools
 }
 
-// ─── Tool Category Builders ───────────────────────────────────────────────────
+// ─── World Query ──────────────────────────────────────────────────────────────
 
 fn world_query_tools() -> Vec<Value> {
     vec![
@@ -87,61 +87,63 @@ fn world_query_tools() -> Vec<Value> {
             })
         ),
         tool("query_npc",
-            "Get an NPC by name or ID. Returns appearance, personality, disposition, location, alive status, and notes.",
+            "Get an NPC by name or ID.",
             json!({
                 "type": "object",
                 "properties": {
-                    "identifier": { "type": "string", "description": "NPC name or ID" }
+                    "identifier": { "type": "string" }
                 },
                 "required": ["identifier"]
             })
         ),
         tool("query_world_facts",
-            "Search canonized world lore by keyword. Returns matching facts, history, factions, and quests.",
+            "Search canonized world lore by keyword.",
             json!({
                 "type": "object",
                 "properties": {
-                    "keyword": { "type": "string", "description": "Search term" }
+                    "keyword": { "type": "string" }
                 },
                 "required": ["keyword"]
             })
         ),
+        /* -- Already being handled by query location 
         tool("query_nearby_npcs",
-            "Get all NPCs currently at a given location.",
+            "Get all NPCs at a given location.",
             json!({
                 "type": "object",
                 "properties": {
-                    "location_id": { "type": "string", "description": "Location ID to query" }
+                    "location_id": { "type": "string" }
                 },
                 "required": ["location_id"]
             })
         ),
+        */
+        /* -- Should already be returned via the query_location
         tool("query_connected_locations",
-            "Get all locations connected to a given location for navigation and exploration.",
+            "Get all locations connected to a given location.",
             json!({
                 "type": "object",
                 "properties": {
-                    "location_id": { "type": "string", "description": "Location ID to query connections for" }
+                    "location_id": { "type": "string" }
                 },
                 "required": ["location_id"]
             })
         ),
+        */
         tool("query_player_state",
-            "Get the full current player state: HP, AC, XP, level, gold, location, inventory summary, active companions, and current time.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            "Get full current player state: HP, AC, XP, level, subclass, currency, location, inventory, abilities, weapon masteries, maneuvers, and superiority dice.",
+            json!({ "type": "object", "properties": {} })
         ),
+        /*  -- TIme of day is being passed via the prompt, removing for now
         tool("query_time",
             "Get the current time of day, day number, and season.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            json!({ "type": "object", "properties": {} })
         ),
+        */
     ]
 }
+
+// ─── World Write ──────────────────────────────────────────────────────────────
 
 fn world_write_tools() -> Vec<Value> {
     vec![
@@ -151,54 +153,40 @@ fn world_write_tools() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "name": { "type": "string" },
-                    "location_type": {
-                        "type": "string",
-                        "enum": ["city", "town", "village", "dungeon", "wilderness", "building", "tavern", "shop", "ruins", "cave", "road", "area"],
-                        "description": "Type of location"
-                    },
-                    "description": { "type": "string", "description": "Vivid description of the location" },
-                    "notes": { "type": "string", "description": "DM notes, secrets, or context" },
-                    "connected_to": { "type": "string", "description": "Optional ID of a location to connect this to" },
-                    "travel_notes": { "type": "string", "description": "Travel description between the connected locations" }
+                    "location_type": { "type": "string", "enum": ["city","town","village","dungeon","wilderness","building","room","area"] },
+                    "description": { "type": "string" },
+                    "connected_to": { "type": "string", "description": "ID of location to connect to" },
+                    "travel_notes": { "type": "string" },
+                    "notes": { "type": "string" }
                 },
                 "required": ["name", "location_type", "description"]
             })
         ),
         tool("create_npc",
-            "Create and persist a new NPC in the world.",
+            "Create and persist a new NPC. ALWAYS call this before introducing any named NPC in the narrative.",
             json!({
                 "type": "object",
                 "properties": {
                     "name": { "type": "string" },
                     "race": { "type": "string" },
                     "occupation": { "type": "string" },
-                    "description": { "type": "string", "description": "Physical appearance and demeanor" },
-                    "personality": { "type": "string", "description": "Personality traits, motivations, secrets" },
-                    "disposition": {
-                        "type": "string",
-                        "enum": ["friendly", "neutral", "unfriendly", "hostile", "allied"]
-                    },
-                    "location_id": { "type": "string", "description": "ID of location where NPC currently is" }
+                    "description": { "type": "string" },
+                    "personality": { "type": "string" },
+                    "disposition": { "type": "string", "enum": ["friendly","neutral","unfriendly","hostile","allied"] },
+                    "location_id": { "type": "string" }
                 },
-                "required": ["name", "description", "disposition"]
+                "required": ["name", "description"]
             })
         ),
         tool("add_world_fact",
-            "Canonize a piece of lore permanently. Use for player-proposed facts, history, factions, quests, or rumors.",
+            "Canonize a piece of world lore, history, faction info, or quest detail.",
             json!({
                 "type": "object",
                 "properties": {
+                    "category": { "type": "string" },
                     "title": { "type": "string" },
                     "content": { "type": "string" },
-                    "category": {
-                        "type": "string",
-                        "enum": ["faction", "history", "quest", "rumor", "geography", "religion", "magic", "character"]
-                    },
-                    "tags": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Searchable tags"
-                    }
+                    "tags": { "type": "array", "items": { "type": "string" } }
                 },
                 "required": ["title", "content"]
             })
@@ -206,15 +194,17 @@ fn world_write_tools() -> Vec<Value> {
     ]
 }
 
+// ─── World Mutation ───────────────────────────────────────────────────────────
+
 fn world_mutation_tools() -> Vec<Value> {
     vec![
         tool("update_npc",
-            "Update an existing NPC — change disposition, location, alive status, or add notes.",
+            "Update an NPC's disposition, location, alive status, or notes.",
             json!({
                 "type": "object",
                 "properties": {
                     "npc_id": { "type": "string" },
-                    "disposition": { "type": "string", "enum": ["friendly", "neutral", "unfriendly", "hostile", "allied"] },
+                    "disposition": { "type": "string", "enum": ["friendly","neutral","unfriendly","hostile","allied"] },
                     "location_id": { "type": "string" },
                     "is_alive": { "type": "boolean" },
                     "notes": { "type": "string" }
@@ -223,72 +213,64 @@ fn world_mutation_tools() -> Vec<Value> {
             })
         ),
         tool("update_location",
-            "Update an existing location — change description, state, or add notes.",
+            "Update a location's description, state, or notes.",
             json!({
                 "type": "object",
                 "properties": {
                     "location_id": { "type": "string" },
                     "description": { "type": "string" },
-                    "state": { "type": "string", "description": "e.g. 'burned down', 'occupied', 'abandoned'" },
+                    "state": { "type": "string" },
                     "notes": { "type": "string" }
                 },
                 "required": ["location_id"]
             })
         ),
         tool("move_player",
-            "Update the player's current location.",
+            "Move the player to a location. Must call create_location first if it does not exist.",
             json!({
                 "type": "object",
                 "properties": {
-                    "location_id": { "type": "string", "description": "ID of the location the player is moving to" }
+                    "location_id": { "type": "string" }
                 },
                 "required": ["location_id"]
             })
         ),
-        tool("update_gold",
-            "Add or subtract gold from the player.",
+        tool("update_currency",
+            "Update player currency. Pass the amount of each denomination to add (positive) or subtract (negative). Never do math yourself — just pass the denominations as stated. The backend handles all conversion and rollup automatically.",
             json!({
                 "type": "object",
                 "properties": {
-                    "amount": { "type": "integer", "description": "Positive to add, negative to subtract" },
-                    "reason": { "type": "string", "description": "Narrative reason for the change" }
+                    "platinum": { "type": "integer", "description": "Platinum pieces to add or subtract" },
+                    "gold":     { "type": "integer", "description": "Gold pieces to add or subtract" },
+                    "silver":   { "type": "integer", "description": "Silver pieces to add or subtract" },
+                    "copper":   { "type": "integer", "description": "Copper pieces to add or subtract" },
+                    "reason":   { "type": "string",  "description": "Why currency is changing" }
                 },
-                "required": ["amount"]
+                "required": ["reason"]
             })
         ),
     ]
 }
 
+// ─── Items ────────────────────────────────────────────────────────────────────
+
 fn item_tools() -> Vec<Value> {
     vec![
         tool("create_item",
-            "Create a new item in the world. Specify effects for magical items.",
+            "Create a new item. Specify weapon_type for weapons so mastery can apply.",
             json!({
                 "type": "object",
                 "properties": {
                     "name": { "type": "string" },
                     "description": { "type": "string" },
-                    "item_type": { "type": "string", "enum": ["weapon", "armor", "shield", "consumable", "wondrous", "quest"] },
-                    "owner_type": { "type": "string", "enum": ["player", "npc", "location"] },
-                    "owner_id": { "type": "string" },
-                    "quantity": { "type": "integer", "default": 1 },
-                    "damage_die": { "type": "string", "description": "e.g. '1d8', '2d6' for weapons" },
-                    "damage_type": { "type": "string", "description": "e.g. 'slashing', 'piercing', 'fire'" },
-                    "base_ac": { "type": "integer", "description": "Base AC for armor" },
-                    "armor_type": { "type": "string", "enum": ["light", "medium", "heavy"] },
-                    "rarity": { "type": "string", "enum": ["common", "uncommon", "rare", "very_rare", "legendary"] },
-                    "effects": {
-                        "type": "array",
-                        "description": "Mechanical effects of magical items",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "effect_type": { "type": "string", "enum": ["ac_bonus", "attack_bonus", "damage_bonus", "advantage_on", "resistance_to"] },
-                                "value": { "type": "integer" },
-                                "target": { "type": "string", "description": "e.g. 'stealth', 'fire', 'all_saves'" }
-                            }
-                        }
-                    },
+                    "item_type": { "type": "string", "enum": ["weapon","armor","shield","consumable","wondrous","quest"] },
+                    "damage_die": { "type": "string" },
+                    "damage_type": { "type": "string" },
+                    "weapon_range": { "type": "string", "enum": ["melee","ranged"] },
+                    "weapon_type": { "type": "string", "description": "Specific weapon name e.g. 'longsword', 'greataxe'" },
+                    "base_ac": { "type": "integer" },
+                    "armor_type": { "type": "string", "enum": ["light","medium","heavy"] },
+                    "rarity": { "type": "string", "enum": ["common","uncommon","rare","very_rare","legendary"] },
                     "notes": { "type": "string" }
                 },
                 "required": ["name", "description", "item_type"]
@@ -316,21 +298,18 @@ fn item_tools() -> Vec<Value> {
             })
         ),
         tool("equip_item",
-            "Move an item to an equipment slot. Recalculates AC automatically.",
+            "Move an item to an equipment slot.",
             json!({
                 "type": "object",
                 "properties": {
                     "item_id": { "type": "string" },
-                    "slot": {
-                        "type": "string",
-                        "enum": ["main_hand", "off_hand", "armor", "shield", "cloak", "ring_1", "ring_2", "boots", "helmet", "amulet"]
-                    }
+                    "slot": { "type": "string", "enum": ["main_hand","off_hand","armor","shield","cloak","ring_1","ring_2","boots","helmet","amulet"] }
                 },
                 "required": ["item_id", "slot"]
             })
         ),
         tool("unequip_item",
-            "Move an equipped item back to inventory. Recalculates AC.",
+            "Move an equipped item back to inventory.",
             json!({
                 "type": "object",
                 "properties": {
@@ -340,7 +319,7 @@ fn item_tools() -> Vec<Value> {
             })
         ),
         tool("use_item",
-            "Consume a consumable item and trigger its mechanical effect.",
+            "Consume a consumable item and apply its mechanical effect.",
             json!({
                 "type": "object",
                 "properties": {
@@ -350,78 +329,104 @@ fn item_tools() -> Vec<Value> {
             })
         ),
         tool("query_items",
-            "Get the player's full inventory and equipped items with all effects.",
+            "Get the player's full inventory and equipped items.",
+            json!({ "type": "object", "properties": {} })
+        ),
+    ]
+}
+
+// ─── Shopping ─────────────────────────────────────────────────────────────────
+
+fn open_shop_tool() -> Value {
+    tool("open_shop",
+        "Open a shop interface for the player. Call this when the player wants to browse and buy items from a merchant. Populate with items appropriate to the shop type and location. Prices must follow D&D 5e PHB values — common goods cost copper or silver, weapons and armor cost gold. NEVER open a shop without items.",
+        json!({
+            "type": "object",
+            "properties": {
+                "shop_name": { "type": "string", "description": "Name of the shop e.g. 'Thornwall Armory', 'The Wandering Cauldron'" },
+                "shop_type": {
+                    "type": "string",
+                    "enum": ["general", "blacksmith", "alchemist", "magic", "fletcher", "tailor", "jeweler", "inn", "black_market"]
+                },
+                "merchant_npc_id": { "type": "string", "description": "ID of the merchant NPC if one exists" },
+                "items": {
+                    "type": "array",
+                    "description": "Items available for purchase. Include 6-15 items appropriate to the shop type.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "description": { "type": "string" },
+                            "item_type": { "type": "string", "enum": ["weapon", "armor", "shield", "consumable", "wondrous", "quest"] },
+                            "price_pp": { "type": "integer", "default": 0 },
+                            "price_gp": { "type": "integer", "default": 0 },
+                            "price_sp": { "type": "integer", "default": 0 },
+                            "price_cp": { "type": "integer", "default": 0 },
+                            "quantity": { "type": "integer", "default": 1 },
+                            "damage_die": { "type": "string" },
+                            "damage_type": { "type": "string" },
+                            "weapon_range": { "type": "string", "enum": ["melee", "ranged"] },
+                            "weapon_type": { "type": "string" },
+                            "base_ac": { "type": "integer" },
+                            "armor_type": { "type": "string", "enum": ["light", "medium", "heavy", "shield"] },
+                            "rarity": { "type": "string", "enum": ["common", "uncommon", "rare", "very_rare", "legendary"] },
+                            "notes": { "type": "string" }
+                        },
+                        "required": ["name", "description", "item_type", "quantity"]
+                    }
+                }
+            },
+            "required": ["shop_name", "shop_type", "items"]
+        })
+    )
+}
+
+// ─── Mechanical ───────────────────────────────────────────────────────────────
+// apply_damage removed — all damage is resolved by the combat UI directly.
+// apply_healing kept for narrative healing outside combat (potions, NPC healers, etc.)
+
+fn mechanical_tools() -> Vec<Value> {
+    vec![
+        request_roll_tool(),
+        tool("apply_healing",
+            "Heal the player from a non-combat source — potion, NPC healing, environmental effect. Cannot exceed max HP.",
             json!({
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "amount": { "type": "integer" },
+                    "source": { "type": "string" }
+                },
+                "required": ["amount"]
             })
         ),
     ]
 }
 
-fn mechanical_tools() -> Vec<Value> {
-    vec![
-        tool("request_roll",
-            "Ask the player to roll dice. The frontend will animate the roll and automatically return the result.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "die": { "type": "string", "enum": ["d4", "d6", "d8", "d10", "d12", "d20"] },
-                    "skill": { "type": "string", "description": "e.g. 'Stealth', 'Perception', 'Constitution saving throw'" },
-                    "dc": { "type": "integer", "description": "Difficulty class for the check" },
-                    "reason": { "type": "string", "description": "Brief narrative reason for the roll" }
-                },
-                "required": ["die", "skill", "dc", "reason"]
-            })
-        ),
-        tool("apply_damage",
-            "Apply damage to the player. Handles temp HP first, then current HP.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "amount": { "type": "integer" },
-                    "damage_type": { "type": "string", "description": "e.g. 'slashing', 'fire', 'psychic'" },
-                    "source": { "type": "string", "description": "What dealt the damage" }
-                },
-                "required": ["amount", "source"]
-            })
-        ),
-        tool("apply_healing",
-            "Heal the player. Cannot exceed max HP.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "amount": { "type": "integer" },
-                    "source": { "type": "string", "description": "Source of healing" }
-                },
-                "required": ["amount", "source"]
-            })
-        ),
-    ]
-}
+// ─── Companions ───────────────────────────────────────────────────────────────
 
 fn companion_query_tools() -> Vec<Value> {
     vec![
         tool("query_companions",
-            "Get all active companions with current stats, HP, and location.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            "Get all active companions.",
+            json!({ "type": "object", "properties": {} })
         ),
         tool("create_companion",
-            "Create and persist a new companion.",
+            "Create a new companion.",
             json!({
                 "type": "object",
                 "properties": {
                     "name": { "type": "string" },
-                    "companion_type": { "type": "string", "enum": ["ally", "familiar", "animal", "hireling", "summon"] },
+                    "companion_type": { "type": "string", "enum": ["ally","familiar","animal","hireling","summon"] },
                     "description": { "type": "string" },
                     "personality": { "type": "string" },
-                    "disposition": { "type": "string", "enum": ["friendly", "neutral", "unfriendly", "hostile", "allied"] },
+                    "disposition": { "type": "string", "enum": ["friendly","neutral","allied"] },
+                    "current_hp": { "type": "integer" },
                     "max_hp": { "type": "integer" },
                     "armor_class": { "type": "integer" },
-                    "location_id": { "type": "string" },
+                    "attack_bonus": { "type": "integer" },
+                    "damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
+                    "damage_bonus": { "type": "integer" },
+                    "damage_type": { "type": "string" },
                     "notes": { "type": "string" }
                 },
                 "required": ["name", "companion_type", "description"]
@@ -442,7 +447,7 @@ fn companion_query_tools() -> Vec<Value> {
             })
         ),
         tool("move_companion",
-            "Move a companion to a different location, independently of the player.",
+            "Move a companion to a different location.",
             json!({
                 "type": "object",
                 "properties": {
@@ -455,53 +460,31 @@ fn companion_query_tools() -> Vec<Value> {
     ]
 }
 
-fn companion_combat_tools() -> Vec<Value> {
-    let mut tools = companion_query_tools();
-    tools.push(tool("apply_companion_damage",
-        "Apply damage to a companion.",
-        json!({
-            "type": "object",
-            "properties": {
-                "companion_id": { "type": "string" },
-                "amount": { "type": "integer" },
-                "source": { "type": "string" }
-            },
-            "required": ["companion_id", "amount", "source"]
-        })
-    ));
-    tools.push(tool("apply_companion_healing",
-        "Heal a companion.",
-        json!({
-            "type": "object",
-            "properties": {
-                "companion_id": { "type": "string" },
-                "amount": { "type": "integer" }
-            },
-            "required": ["companion_id", "amount"]
-        })
-    ));
-    tools.push(tool("use_companion_ability",
-        "Use a companion's ability, spending one use.",
-        json!({
-            "type": "object",
-            "properties": {
-                "companion_id": { "type": "string" },
-                "ability_id": { "type": "string" }
-            },
-            "required": ["companion_id", "ability_id"]
-        })
-    ));
-    tools
+// ─── Progression ──────────────────────────────────────────────────────────────
+
+fn progression_tools() -> Vec<Value> {
+    vec![
+        tool("award_experience",
+            "Award XP to the player after meaningful combat or roleplay milestones.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "amount": { "type": "integer" },
+                    "reason": { "type": "string" }
+                },
+                "required": ["amount", "reason"]
+            })
+        ),
+    ]
 }
+
+// ─── Abilities ────────────────────────────────────────────────────────────────
 
 fn ability_tools() -> Vec<Value> {
     vec![
         tool("query_abilities",
-            "Get all current ability pools for the player — name, current uses, max uses, refresh type.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            "Get all current ability pools for the player.",
+            json!({ "type": "object", "properties": {} })
         ),
         tool("use_ability",
             "Spend one or more uses of a player ability.",
@@ -515,11 +498,11 @@ fn ability_tools() -> Vec<Value> {
             })
         ),
         tool("rest",
-            "Take a rest. Short rest refreshes short_rest abilities; long rest refreshes all abilities, advances to next morning.",
+            "Take a short or long rest. Long rest restores all HP, resets death saves, and refreshes all abilities.",
             json!({
                 "type": "object",
                 "properties": {
-                    "rest_type": { "type": "string", "enum": ["short", "long"] }
+                    "rest_type": { "type": "string", "enum": ["short","long"] }
                 },
                 "required": ["rest_type"]
             })
@@ -527,80 +510,25 @@ fn ability_tools() -> Vec<Value> {
     ]
 }
 
-fn progression_tools() -> Vec<Value> {
-    vec![
-        tool("award_experience",
-            "Award XP to the player for combat, roleplay, or objectives. Returns new total and whether level threshold was crossed.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "amount": { "type": "integer" },
-                    "reason": { "type": "string", "description": "What earned the XP" }
-                },
-                "required": ["amount", "reason"]
-            })
-        ),
-        tool("level_up",
-            "Level up the player. Increases level, HP, proficiency bonus. Returns what changed and whether ASI is available.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
-        ),
-        tool("apply_asi",
-            "Apply an Ability Score Improvement. Either raise two stats by 1 each, or one stat by 2.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "stat1": { "type": "string", "enum": ["str", "dex", "con", "int", "wis", "cha"] },
-                    "stat2": { "type": "string", "enum": ["str", "dex", "con", "int", "wis", "cha"], "description": "Optional second stat (different from stat1)" }
-                },
-                "required": ["stat1"]
-            })
-        ),
-    ]
-}
-
-fn death_tools() -> Vec<Value> {
-    vec![
-        tool("roll_death_save",
-            "Record a death saving throw result. 3 successes = stable, 3 failures = dead.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "success": { "type": "boolean", "description": "true if the roll was 10 or higher" },
-                    "natural_20": { "type": "boolean", "description": "true if the roll was a natural 20 (regain 1 HP)" }
-                },
-                "required": ["success"]
-            })
-        ),
-        tool("stabilize_player",
-            "Stabilize the player (healing spell, Spare the Dying, healer's kit). Resets death saves.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "healing_amount": { "type": "integer", "default": 1, "description": "HP restored (default 1 for stabilization)" }
-                }
-            })
-        ),
-    ]
-}
+// ─── Time ─────────────────────────────────────────────────────────────────────
 
 fn time_tools() -> Vec<Value> {
     vec![
         tool("advance_time",
-            "Advance time for travel or downtime. Steps move through: dawn, morning, midday, afternoon, dusk, evening, night, deep_night.",
+            "Advance time. Use steps=1 for short rest, steps=8 for long rest, steps=2-4 for travel.",
             json!({
                 "type": "object",
                 "properties": {
-                    "steps": { "type": "integer", "description": "Number of time-of-day steps to advance (8 steps = 1 full day)" },
-                    "reason": { "type": "string", "description": "Narrative reason, e.g. 'travel to Velmoor Crossing'" }
+                    "steps": { "type": "integer" },
+                    "reason": { "type": "string" }
                 },
                 "required": ["steps", "reason"]
             })
         ),
     ]
 }
+
+// ─── Events ───────────────────────────────────────────────────────────────────
 
 fn event_tools() -> Vec<Value> {
     vec![
@@ -610,9 +538,9 @@ fn event_tools() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "name": { "type": "string" },
-                    "location_type": { "type": "string", "description": "Location type this applies to, or omit for global" },
-                    "trigger_type": { "type": "string", "enum": ["travel", "rest", "time", "location_enter", "manual"] },
-                    "trigger_chance": { "type": "integer", "description": "Percent chance per trigger (1-100)", "default": 30 }
+                    "location_type": { "type": "string" },
+                    "trigger_type": { "type": "string", "enum": ["travel","rest","time","location_enter","manual"] },
+                    "trigger_chance": { "type": "integer", "default": 30 }
                 },
                 "required": ["name", "trigger_type"]
             })
@@ -623,21 +551,18 @@ fn event_tools() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "table_id": { "type": "string" },
-                    "weight": { "type": "integer", "default": 10, "description": "Relative probability weight" },
-                    "event_type": { "type": "string", "enum": ["encounter", "environmental", "world", "discovery", "personal"] },
+                    "event_type": { "type": "string", "enum": ["encounter","environmental","world","discovery","personal"] },
                     "title": { "type": "string" },
-                    "description": { "type": "string", "description": "Context injected into DM prompt when this event triggers" },
+                    "description": { "type": "string" },
+                    "weight": { "type": "integer", "default": 10 },
                     "is_repeatable": { "type": "boolean", "default": true }
                 },
                 "required": ["table_id", "event_type", "title", "description"]
             })
         ),
         tool("query_event_tables",
-            "Get all event tables and their entries for this campaign.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            "List all event tables for this campaign.",
+            json!({ "type": "object", "properties": {} })
         ),
         tool("trigger_event",
             "Manually trigger a specific event entry.",
@@ -652,21 +577,20 @@ fn event_tools() -> Vec<Value> {
     ]
 }
 
+// ─── Session ──────────────────────────────────────────────────────────────────
+
 fn session_tools() -> Vec<Value> {
     vec![
         tool("get_session_summaries",
-            "Retrieve compressed summaries of past sessions for context.",
-            json!({
-                "type": "object",
-                "properties": {}
-            })
+            "Get summaries of past sessions for continuity.",
+            json!({ "type": "object", "properties": {} })
         ),
         tool("add_session_note",
-            "Bookmark an important story moment mid-session for the end-of-session summary.",
+            "Save an important note about this session.",
             json!({
                 "type": "object",
                 "properties": {
-                    "note": { "type": "string", "description": "The story moment to bookmark" }
+                    "note": { "type": "string" }
                 },
                 "required": ["note"]
             })
@@ -674,7 +598,116 @@ fn session_tools() -> Vec<Value> {
     ]
 }
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
+// ─── Combat ───────────────────────────────────────────────────────────────────
+
+fn start_combat_tool() -> Value {
+    tool("start_combat",
+        "Initiate a combat encounter. Call this the instant any hostile encounter begins, before writing any narrative. Include ALL enemies and any NPC allies who would logically join the fight. Registered companions are added automatically.",
+        json!({
+            "type": "object",
+            "properties": {
+                "enemies": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "enemy_name": { "type": "string" },
+                            "enemy_description": { "type": "string" },
+                            "enemy_type": { 
+                                "type": "string", 
+                                "enum": ["humanoid_basic", "humanoid_ranged", "humanoid_magic", "beast"] ,
+                                "desciription":  "Determines combat behavior. humanoid_basic/beast = melee only. humanoid_ranged = ranged attacks. humanoid_magic = casts spells from spell_list."
+                            },
+                            "enemy_hp": { "type": "integer" },
+                            "enemy_ac": { "type": "integer" },
+                            "enemy_damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
+                            "enemy_damage_bonus": { "type": "integer" },
+                            "enemy_damage_type": { "type": "string" },
+                            "enemy_attack_bonus": { "type": "integer" },
+                            "enemy_weapon_name": { "type": "string", "description": "Name of the weapon or natural attack e.g. 'rusty shortsword', 'claws', 'bone club'" },
+                            "spell_list": {
+                                "type": "array",
+                                "description": "Required for humanoid_magic type. Choose 2-4 spells from the available spell list.",
+                                "items": { 
+                                    "type": "string",
+                                    "enum": [
+                                        "fire_bolt", "ray_of_frost", "poison_spray", "magic_missile", 
+                                        "burning_hands", "chill_touch", "thunderwave"
+                                    ]
+                                }
+                            }
+                        },
+                        "required": ["enemy_name","enemy_hp","enemy_ac","enemy_damage_die","enemy_damage_type", "enemy_type"]
+                    }
+                },
+                "allies": {
+                    "type": "array",
+                    "description": "NPC allies who join the fight — town guards, bystanders, hired help etc. Do not include registered companions here.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "description": { "type": "string" },
+                            "hp": { "type": "integer" },
+                            "ac": { "type": "integer" },
+                            "attack_bonus": { "type": "integer" },
+                            "damage_die": { "type": "string", "enum": ["d4","d6","d8","d10","d12"] },
+                            "damage_bonus": { "type": "integer" },
+                            "damage_type": { "type": "string" },
+                            "weapon_name": { "type": "string" }
+                        },
+                        "required": ["name","hp","ac","damage_die","damage_type"]
+                    }
+                }
+            },
+            "required": ["enemies"]
+        })
+    )
+}
+
+// ─── Fighter Exploration ──────────────────────────────────────────────────────
+
+fn fighter_exploration_tools() -> Vec<Value> {
+    vec![
+        tool("change_weapon_mastery",
+            "Fighter: Swap one weapon mastery choice after a long rest.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "old_weapon": { "type": "string" },
+                    "new_weapon": { "type": "string" },
+                    "new_property": {
+                        "type": "string",
+                        "enum": ["cleave","graze","nick","push","sap","slow","topple","vex"]
+                    }
+                },
+                "required": ["old_weapon", "new_weapon", "new_property"]
+            })
+        ),
+        tool("query_weapon_masteries",
+            "Get the player's current weapon mastery selections.",
+            json!({ "type": "object", "properties": {} })
+        ),
+    ]
+}
+
+// ─── Shared ───────────────────────────────────────────────────────────────────
+
+pub fn request_roll_tool() -> Value {
+    tool("request_roll",
+        "Request a dice roll from the player for skill checks, saving throws, and ability checks.",
+        json!({
+            "type": "object",
+            "properties": {
+                "die": { "type": "string", "enum": ["d4","d6","d8","d10","d12","d20","d100"] },
+                "skill": { "type": "string", "description": "e.g. 'Perception', 'Stealth', 'Constitution saving throw'" },
+                "dc": { "type": "integer", "description": "Difficulty class" },
+                "reason": { "type": "string", "description": "Brief narrative reason for the roll" }
+            },
+            "required": ["die", "skill", "dc", "reason"]
+        })
+    )
+}
 
 fn tool(name: &str, description: &str, parameters: Value) -> Value {
     json!({

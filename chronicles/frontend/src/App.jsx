@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import './index.css'
 import * as api from './api/client.js'
 import TitleScreen from './components/TitleScreen.jsx'
@@ -6,11 +6,42 @@ import CharacterCreation from './components/CharacterCreation.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import GameScreen from './components/GameScreen.jsx'
 import DiceRollOverlay from './components/DiceRollOverlay.jsx'
+import LevelUpModal from './components/LevelUpModal.jsx'
+import CombatModal from './components/CombatModal.jsx'
+import ShopModal from './components/ShopModal.jsx'
+import InventoryModal from './components/InventoryModal.jsx'
+import AbilitiesModal from './components/AbilitiesModal.jsx'
+import SpellsModal from './components/SpellsModal'
+import NotesModal from './components/NotesModal.jsx'
+import {
+  isLevelUpAvailable,
+  getFighterFeatures, getBarbarianFeatures, getBardFeatures,
+  getClericFeatures, getDruidFeatures, getMonkFeatures,
+  getPaladinFeatures, getRangerFeatures, getRogueFeatures,
+  getSorcererFeatures, getWarlockFeatures, getWizardFeatures,
+  hitDieForClass, proficiencyForLevel,
+  FIGHTER_ASI_LEVELS, BARBARIAN_ASI_LEVELS, BARD_ASI_LEVELS,
+  CLERIC_ASI_LEVELS, DRUID_ASI_LEVELS, MONK_ASI_LEVELS,
+  PALADIN_ASI_LEVELS, RANGER_ASI_LEVELS, ROGUE_ASI_LEVELS,
+  SORCERER_ASI_LEVELS, WARLOCK_ASI_LEVELS, WIZARD_ASI_LEVELS,
+  barbarianRageUses, barbarianRageDamage, barbarianWeaponMastery,
+  bardInspirationDie, bardPreparedSpells, bardCantrips, bardSlotSummary,
+  clericChannelDivinityUses, clericCantrips, clericPreparedSpells, clericSlotSummary,
+  druidWildShapeUses, druidWildShapeCR, druidCantrips, druidPreparedSpells, druidSlotSummary,
+  monkFocusPoints, monkMartialArtsDie, monkUnarmoredMovement,
+  paladinLayOnHandsPool, paladinChannelDivinityUses, paladinPreparedSpells, paladinSlotSummary,
+  rangerFavoredEnemyUses, rangerPreparedSpells, rangerSlotSummary,
+  rogueSneakAttackDice, atSlotSummary, atPreparedSpells, atCantrips,
+  sorcererSorceryPoints, sorcererCantrips, sorcererPreparedSpells, sorcererSlotSummary,
+  warlockSlotLevel, warlockSlotCount, warlockPreparedSpells, warlockCantrips, warlockInvocations,
+  wizardCantrips, wizardPreparedSpells, wizardSlotSummary,
+} from './constants.js'
 
 const PHASE = {
   TITLE: 'title',
   CREATION: 'creation',
   LOADING: 'loading',
+  RESUMING: 'resuming',
   GAME: 'game',
 }
 
@@ -27,8 +58,65 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [gameState, setGameState] = useState('exploration')
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [pendingRoll, setPendingRoll] = useState(null)   // roll request from DM
+  const [pendingRoll, setPendingRoll] = useState(null)
   const [error, setError] = useState(null)
+  const [levelUpAvailable, setLevelUpAvailable] = useState(false)
+  const [levelUpResult, setLevelUpResult] = useState(null)
+  const [showLevelUp, setShowLevelUp] = useState(false)
+  const [knownManeuvers, setKnownManeuvers] = useState([])
+  const [showCombat, setShowCombat] = useState(false)
+  const [combatInitiativeBonus, setCombatInitiativeBonus] = useState(0)
+  const [showShop, setShowShop] = useState(false)
+  const [showInventory, setShowInventory] = useState(false)
+  const [showAbilities, setShowAbilities] = useState(false)
+  const [showSpells, setShowSpells] = useState(false)
+  const [showNotes, setShowNotes] = useState(false)
+  const [knownSpells, setKnownSpells] = useState([])
+
+
+  // ── Resume campaign ─────────────────────────────────────────────────────────
+
+  const handleResume = async (campaignId) => {
+    setPhase(PHASE.RESUMING)
+    setError(null)
+    try {
+      const campState = await api.getCampaignState(campaignId)
+      if (!campState.campaign || !campState.player) throw new Error('Campaign not found')
+      setCampaign(campState.campaign)
+      setPlayer(campState.player)
+      setCampaignTime(campState.time || null)
+
+      let sess = campState.session
+      if (!sess) {
+        const newSess = await api.startSession(campaignId)
+        sess = newSess.session
+      }
+      setSession(sess)
+
+      const playerState = await api.getPlayerState(campaignId)
+      if (playerState.abilities) setAbilities(playerState.abilities)
+      if (playerState.items) setItems(playerState.items)
+      if (playerState.companions) setCompanions(playerState.companions)
+      if (playerState.known_maneuvers) setKnownManeuvers(playerState.known_maneuvers)
+      if (playerState.known_spells) setKnownSpells(playerState.known_spells)
+
+      if (sess?.id) {
+        const msgData = await api.getSessionMessages(campaignId, sess.id)
+        if (msgData.messages && msgData.messages.length > 0) {
+          const restored = msgData.messages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map((m, i) => ({ role: m.role === 'user' ? 'player' : 'dm', content: m.content, tools_used: [], id: i }))
+          setMessages(restored)
+        }
+      }
+
+      setLevelUpAvailable(isLevelUpAvailable(campState.player))
+      setPhase(PHASE.GAME)
+    } catch (e) {
+      setError('Could not resume that campaign.')
+      setPhase(PHASE.TITLE)
+    }
+  }
 
   // ── Campaign creation ───────────────────────────────────────────────────────
 
@@ -41,18 +129,12 @@ export default function App() {
       setPlayer(result.player)
       setSession(result.session)
       setPhase(PHASE.GAME)
-
-      // Fetch initial player state
       await refreshPlayerState(result.campaign.id)
-
-      // Start the adventure with an opening message
+      setLoading(true)
       await sendToBackend(
-        result.campaign.id,
-        result.session.id,
-        `Begin the adventure. Open with a vivid, atmospheric scene that places me immediately in a specific moment.`,
-        'exploration',
-        null,
-        result.player
+        result.campaign.id, result.session.id,
+        'Begin the adventure. Open with a vivid, atmospheric scene that places me immediately in a specific moment.',
+        'exploration', null, result.player
       )
     } catch (e) {
       setError(e.message)
@@ -65,13 +147,205 @@ export default function App() {
   const refreshPlayerState = async (campaignId) => {
     try {
       const state = await api.getPlayerState(campaignId || campaign?.id)
-      if (state.player) setPlayer(state.player)
+      if (state.player) {
+        setPlayer(state.player)
+        setLevelUpAvailable(isLevelUpAvailable(state.player))
+      }
       if (state.abilities) setAbilities(state.abilities)
       if (state.items) setItems(state.items)
       if (state.companions) setCompanions(state.companions)
       if (state.time) setCampaignTime(state.time)
+      if (state.known_maneuvers) setKnownManeuvers(state.known_maneuvers)
+      if (state.known_spells) setKnownSpells(state.known_spells)
     } catch (e) {
       console.error('Failed to refresh player state:', e)
+    }
+  }
+
+  // ── Level up flow ───────────────────────────────────────────────────────────
+
+  const handleLevelUpClick = () => {
+    const preview = buildLevelUpPreview(player)
+    setLevelUpResult(preview)
+    setShowLevelUp(true)
+  }
+
+  const buildLevelUpPreview = (p) => {
+    const newLevel = p.level + 1
+    const conMod = Math.floor((p.con - 10) / 2)
+    const chaMod = Math.floor((p.cha - 10) / 2)
+    const hitDie = hitDieForClass(p.class)
+    const hpGained = Math.floor(hitDie / 2) + 1 + conMod
+    const newMaxHp = p.max_hp + hpGained
+    const newProf = proficiencyForLevel(newLevel)
+
+    const isFighter = p.class === 'Fighter'
+    const isBarbarian = p.class === 'Barbarian'
+    const isBard = p.class === 'Bard'
+    const isCleric = p.class === 'Cleric'
+    const isDruid = p.class === 'Druid'
+    const isMonk = p.class === 'Monk'
+    const isPaladin = p.class === 'Paladin'
+    const isRanger = p.class === 'Ranger'
+    const isRogue = p.class === 'Rogue'
+    const isSorcerer = p.class === 'Sorcerer'
+    const isWarlock = p.class === 'Warlock'
+    const isWizard = p.class === 'Wizard'
+
+    // ── Fighter ──────────────────────────────────────────────────────────────
+    const secondWindUses = isFighter ? (newLevel >= 10 ? 4 : newLevel >= 4 ? 3 : 2) : 2
+    const actionSurgeUses = isFighter ? (newLevel >= 17 ? 2 : newLevel >= 2 ? 1 : 0) : 0
+    const indomitableMax = isFighter ? (newLevel >= 17 ? 3 : newLevel >= 13 ? 2 : newLevel >= 9 ? 1 : 0) : 0
+    const weaponMasteryCount = isFighter
+      ? (newLevel >= 16 ? 6 : newLevel >= 4 ? 4 : 3)
+      : isBarbarian ? barbarianWeaponMastery(newLevel) : 0
+    const extraAttacks = isFighter
+      ? (newLevel >= 20 ? 4 : newLevel >= 11 ? 3 : newLevel >= 5 ? 2 : 1)
+      : isBarbarian ? (newLevel >= 5 ? 2 : 1)
+        : (isBard && p.subclass === 'College of Valor' && newLevel >= 6) ? 2
+          : (isMonk && newLevel >= 5) ? 2
+            : (isPaladin && newLevel >= 5) ? 2
+              : (isRanger && newLevel >= 5) ? 2
+                : 1
+
+    const rageUses = isBarbarian ? barbarianRageUses(newLevel) : 0
+    const rageDamage = isBarbarian ? barbarianRageDamage(newLevel) : 0
+    const bardicDie = isBard ? bardInspirationDie(newLevel) : 0
+    const bardicInspirationUses = isBard ? Math.max(1, chaMod) : 0
+    const bardPrepared = isBard ? bardPreparedSpells(newLevel) : 0
+    const bardKnownCantrips = isBard ? bardCantrips(newLevel) : 0
+    const bardSlots = isBard ? bardSlotSummary(newLevel) : ''
+    const channelDivinityUses = isCleric ? clericChannelDivinityUses(newLevel) : 0
+    const clericKnownCantrips = isCleric ? clericCantrips(newLevel) : 0
+    const clericPrepared = isCleric ? clericPreparedSpells(newLevel) : 0
+    const clericSlots = isCleric ? clericSlotSummary(newLevel) : ''
+    const wildShapeUses = isDruid ? druidWildShapeUses(newLevel) : 0
+    const wildShapeCR = isDruid ? druidWildShapeCR(newLevel) : ''
+    const druidKnownCantrips = isDruid ? druidCantrips(newLevel) : 0
+    const druidPrepared = isDruid ? druidPreparedSpells(newLevel) : 0
+    const druidSlots = isDruid ? druidSlotSummary(newLevel) : ''
+    const focusPoints = isMonk ? monkFocusPoints(newLevel) : 0
+    const martialArtsDie = isMonk ? monkMartialArtsDie(newLevel) : 0
+    const unarmoredMovement = isMonk ? monkUnarmoredMovement(newLevel) : 0
+    const layOnHandsPool = isPaladin ? paladinLayOnHandsPool(newLevel) : 0
+    const paladinCdUses = isPaladin ? paladinChannelDivinityUses(newLevel) : 0
+    const paladinPrepared = isPaladin ? paladinPreparedSpells(newLevel) : 0
+    const paladinSlots = isPaladin ? paladinSlotSummary(newLevel) : ''
+    const favoredEnemyUses = isRanger ? rangerFavoredEnemyUses(newLevel) : 0
+    const rangerPrepared = isRanger ? rangerPreparedSpells(newLevel) : 0
+    const rangerSlots = isRanger ? rangerSlotSummary(newLevel) : ''
+    const sneakAttackDice = isRogue ? rogueSneakAttackDice(newLevel) : 0
+    const rogueAtSlots = isRogue && p.subclass === 'Arcane Trickster' ? atSlotSummary(newLevel) : ''
+    const rogueAtPrepared = isRogue && p.subclass === 'Arcane Trickster' ? atPreparedSpells(newLevel) : 0
+    const rogueAtCantrips = isRogue && p.subclass === 'Arcane Trickster' ? atCantrips(newLevel) : 0
+    const sorceryPoints = isSorcerer ? sorcererSorceryPoints(newLevel) : 0
+    const sorcererKnownCantrips = isSorcerer ? sorcererCantrips(newLevel) : 0
+    const sorcererPrepared = isSorcerer ? sorcererPreparedSpells(newLevel) : 0
+    const sorcererSlots = isSorcerer ? sorcererSlotSummary(newLevel) : ''
+    const warlockSlotLvl = isWarlock ? warlockSlotLevel(newLevel) : 0
+    const warlockSlotCnt = isWarlock ? warlockSlotCount(newLevel) : 0
+    const warlockPrepared = isWarlock ? warlockPreparedSpells(newLevel) : 0
+    const warlockKnownCantrips = isWarlock ? warlockCantrips(newLevel) : 0
+    const warlockInvCount = isWarlock ? warlockInvocations(newLevel) : 0
+    const wizardKnownCantrips = isWizard ? wizardCantrips(newLevel) : 0
+    const wizardPrepared = isWizard ? wizardPreparedSpells(newLevel) : 0
+    const wizardSlots = isWizard ? wizardSlotSummary(newLevel) : ''
+
+    const asiAvailable = isFighter ? FIGHTER_ASI_LEVELS.includes(newLevel)
+      : isBarbarian ? BARBARIAN_ASI_LEVELS.includes(newLevel)
+        : isBard ? BARD_ASI_LEVELS.includes(newLevel)
+          : isCleric ? CLERIC_ASI_LEVELS.includes(newLevel)
+            : isDruid ? DRUID_ASI_LEVELS.includes(newLevel)
+              : isMonk ? MONK_ASI_LEVELS.includes(newLevel)
+                : isPaladin ? PALADIN_ASI_LEVELS.includes(newLevel)
+                  : isRanger ? RANGER_ASI_LEVELS.includes(newLevel)
+                    : isRogue ? ROGUE_ASI_LEVELS.includes(newLevel)
+                      : isSorcerer ? SORCERER_ASI_LEVELS.includes(newLevel)
+                        : isWarlock ? WARLOCK_ASI_LEVELS.includes(newLevel)
+                          : isWizard ? WIZARD_ASI_LEVELS.includes(newLevel)
+                            : [4, 8, 12, 16, 19].includes(newLevel)
+
+    const subclassChoiceRequired = newLevel === 3 && !p.subclass
+
+    const newFeatures = isFighter ? getFighterFeatures(p, newLevel)
+      : isBarbarian ? getBarbarianFeatures(p, newLevel)
+        : isBard ? getBardFeatures(p, newLevel)
+          : isCleric ? getClericFeatures(p, newLevel)
+            : isDruid ? getDruidFeatures(p, newLevel)
+              : isMonk ? getMonkFeatures(p, newLevel)
+                : isPaladin ? getPaladinFeatures(p, newLevel)
+                  : isRanger ? getRangerFeatures(p, newLevel)
+                    : isRogue ? getRogueFeatures(p, newLevel)
+                      : isSorcerer ? getSorcererFeatures(p, newLevel)
+                        : isWarlock ? getWarlockFeatures(p, newLevel)
+                          : isWizard ? getWizardFeatures(p, newLevel)
+                            : []
+
+    return {
+      new_level: newLevel, hp_gained: hpGained, new_max_hp: newMaxHp,
+      new_proficiency_bonus: newProf,
+      asi_available: asiAvailable,
+      subclass_choice_required: subclassChoiceRequired,
+      new_features: newFeatures,
+      second_wind_uses: secondWindUses, weapon_mastery_count: weaponMasteryCount,
+      extra_attacks: extraAttacks, action_surge_uses: actionSurgeUses, indomitable_max: indomitableMax,
+      rage_uses: rageUses, rage_damage: rageDamage,
+      bardic_die: bardicDie, bardic_inspiration_uses: bardicInspirationUses,
+      bard_prepared_spells: bardPrepared, bard_cantrips: bardKnownCantrips, bard_slot_summary: bardSlots,
+      channel_divinity_uses: channelDivinityUses, cleric_cantrips: clericKnownCantrips,
+      cleric_prepared_spells: clericPrepared, cleric_slot_summary: clericSlots,
+      wild_shape_uses: wildShapeUses, wild_shape_cr: wildShapeCR,
+      druid_cantrips: druidKnownCantrips, druid_prepared_spells: druidPrepared, druid_slot_summary: druidSlots,
+      focus_points: focusPoints, martial_arts_die: martialArtsDie, unarmored_movement: unarmoredMovement,
+      lay_on_hands_pool: layOnHandsPool, paladin_channel_divinity: paladinCdUses,
+      paladin_prepared_spells: paladinPrepared, paladin_slot_summary: paladinSlots,
+      favored_enemy_uses: favoredEnemyUses, ranger_prepared_spells: rangerPrepared, ranger_slot_summary: rangerSlots,
+      sneak_attack_dice: sneakAttackDice, at_slot_summary: rogueAtSlots,
+      at_prepared_spells: rogueAtPrepared, at_cantrips: rogueAtCantrips,
+      sorcery_points: sorceryPoints, sorcerer_cantrips: sorcererKnownCantrips,
+      sorcerer_prepared_spells: sorcererPrepared, sorcerer_slot_summary: sorcererSlots,
+      warlock_slot_level: warlockSlotLvl, warlock_slot_count: warlockSlotCnt,
+      warlock_prepared_spells: warlockPrepared, warlock_cantrips: warlockKnownCantrips,
+      warlock_invocations: warlockInvCount, wizard_cantrips: wizardKnownCantrips,
+      wizard_prepared_spells: wizardPrepared, wizard_slot_summary: wizardSlots,
+    }
+  }
+
+  const handleLevelUpComplete = async (choices) => {
+    setShowLevelUp(false)
+    setLevelUpAvailable(false)
+    try {
+      const result = await api.levelUp(campaign.id, choices)
+      if (result.player) {
+        setPlayer(result.player)
+        setLevelUpAvailable(isLevelUpAvailable(result.player))
+      }
+      if (result.abilities) setAbilities(result.abilities)
+      if (result.items) setItems(result.items)
+      if (result.companions) setCompanions(result.companions)
+      if (result.known_maneuvers) setKnownManeuvers(result.known_maneuvers)
+      if (result.time) setCampaignTime(result.time)
+      for (const spellId of choices.ek_cantrips || []) {
+        await api.learnSpell(campaign.id, spellId, 'cantrip')
+      }
+      for (const spellId of choices.ek_prepared || []) {
+        await api.learnSpell(campaign.id, spellId, 'prepared')
+      }
+      if (choices.ek_cantrips || choices.ek_prepared) {
+        await api.seedEkSlots(campaign.id)
+      }
+
+      await refreshPlayerState(campaign.id)
+
+      setMessages(m => [...m, {
+        role: 'dm',
+        content: `You have reached level ${result.player?.level}. Your capabilities grow — the path ahead demands ever greater strength.`,
+        tools_used: [],
+        id: Date.now()
+      }])
+    } catch (e) {
+      console.error('Level up failed:', e)
+      console.error('Error details:', e.message, e.stack)
     }
   }
 
@@ -79,45 +353,45 @@ export default function App() {
 
   const handleSend = async (content) => {
     if (loading || !campaign || !session) return
-
     setMessages(m => [...m, { role: 'player', content, id: Date.now() }])
     setLoading(true)
-
     await sendToBackend(campaign.id, session.id, content, gameState, null, player)
   }
 
-  const sendToBackend = async (campaignId, sessionId, content, gs, rollResult, currentPlayer) => {
+  const sendToBackend = async (campaignId, sessionId, content, gs, rollResult) => {
     try {
-      const result = await api.sendMessage({
-        campaignId,
-        sessionId,
-        content,
-        gameState: gs,
-        rollResult
-      })
+      const result = await api.sendMessage({ campaignId, sessionId, content, gameState: gs, rollResult })
 
       if (result.type === 'roll_request') {
-        // DM wants a dice roll — show the overlay
+        if (result.opening_narrative && result.opening_narrative.trim()) {
+          setMessages(m => [...m, { role: 'dm', content: result.opening_narrative, tools_used: [], id: Date.now() }])
+        }
         setPendingRoll(result.roll)
         setLoading(false)
         return
       }
 
       if (result.type === 'narrative') {
-        setMessages(m => [...m, {
-          role: 'dm',
-          content: result.content,
-          tools_used: result.tools_used || [],
-          id: Date.now()
-        }])
+        if (result.content && result.content.trim()) {
+          setMessages(m => [...m, { role: 'dm', content: result.content, tools_used: result.tools_used || [], id: Date.now() }])
+        }
 
-      // Setting new game state based on received narrative  
-      if (result.new_state) {
-        setGameState(result.new_state)
-      }
+        if (result.needs_initiative) {
+          const dexMod = Math.floor((player.dex - 10) / 2)
+          setCombatInitiativeBonus(dexMod)
+          setShowCombat(true)
+          setGameState('combat')
+        }
 
-        // Refresh player state after each DM response (HP, items, etc. may have changed)
+        if (result.needs_shop) {
+          setShowShop(true)
+          setGameState('shopping')
+        }
+
+        if (result.new_state && result.new_state !== '') setGameState(result.new_state)
         await refreshPlayerState(campaignId)
+
+        if (result.level_up_available) setLevelUpAvailable(true)
       }
     } catch (e) {
       setMessages(m => [...m, {
@@ -127,7 +401,6 @@ export default function App() {
         id: Date.now()
       }])
     }
-
     setLoading(false)
   }
 
@@ -135,99 +408,96 @@ export default function App() {
 
   const handleRollComplete = async (result) => {
     if (!pendingRoll) return
-
     const roll = pendingRoll
     setPendingRoll(null)
     setLoading(true)
-
-    // Add player message showing the roll
     const rollMsg = `[Rolled ${roll.skill}: ${roll.die} = ${result}${roll.dc ? ` vs DC ${roll.dc}` : ''}]`
     setMessages(m => [...m, { role: 'player', content: rollMsg, id: Date.now() }])
-
-    // Send roll result back to backend to continue the tool loop
-    await sendToBackend(
-      campaign.id,
-      session.id,
-      `I rolled for ${roll.skill}.`,
-      gameState,
-      {
-        die: roll.die,
-        result,
-        skill: roll.skill,
-        dc: roll.dc
-      },
-      player
-    )
+    await sendToBackend(campaign.id, session.id, `I rolled for ${roll.skill}.`, gameState, { die: roll.die, result, skill: roll.skill, dc: roll.dc })
   }
 
   // ── Session management ──────────────────────────────────────────────────────
 
   const handleEndSession = async () => {
     if (!campaign || !session) return
-    try {
-      await api.endSession(campaign.id, session.id)
-    } catch (e) {
-      console.error('Failed to end session:', e)
-    }
+    try { await api.endSession(campaign.id, session.id) }
+    catch (e) { console.error('Failed to end session:', e) }
   }
 
   const handleNewAdventure = async () => {
     await handleEndSession()
-    setCampaign(null)
-    setSession(null)
-    setPlayer(null)
-    setAbilities([])
-    setItems([])
-    setCompanions([])
-    setCampaignTime(null)
-    setMessages([])
-    setPendingRoll(null)
-    setGameState('exploration')
+    setCampaign(null); setSession(null); setPlayer(null)
+    setAbilities([]); setItems([]); setCompanions([])
+    setCampaignTime(null); setMessages([]); setPendingRoll(null)
+    setGameState('exploration'); setLevelUpAvailable(false)
+    setLevelUpResult(null); setShowLevelUp(false)
     setPhase(PHASE.TITLE)
+  }
+
+  // ── Combat Handler ──────────────────────────────────────────────────────────
+
+  const handleCombatEnd = async (outcome, combatLog) => {
+    setShowCombat(false)
+    setGameState('exploration')
+
+    const logSummary = combatLog.map(e => e.text).join('\n')
+    if (outcome === 'victory' || outcome === 'fled') {
+      setLoading(true)
+      await sendToBackend(
+        campaign.id, session.id,
+        `[COMBAT RESOLVED — ${outcome.toUpperCase()}]\n\nCombat log:\n${logSummary}\n\nNarrate this combat cinematically in 2-3 paragraphs using the weapon names and actions from the log. Do not invent details not in the log. Do not address the player directly or give instructions.\n\nAfter narrating, call award_experience with an appropriate XP amount for the difficulty of this encounter. Then set state to exploration with [STATE:exploration].`,
+        'exploration', null
+      )
+    }
+    await refreshPlayerState(campaign.id)
+  }
+
+  // ── Shop Handler ───────────────────────────────────────────────────────────
+
+  const handleShopClose = async (purchased, sold) => {
+    setShowShop(false)
+    setGameState('exploration')
+    const parts = []
+    if (purchased) parts.push(`purchased: ${purchased}`)
+    if (sold) parts.push(`sold: ${sold}`)
+    const summary = parts.length > 0 ? parts.join(' / ') : 'browsed but bought nothing'
+    setLoading(true)
+    await sendToBackend(
+      campaign.id, session.id,
+      `[SHOP CLOSED — ${summary}]\n\nBriefly narrate the player leaving the shop in one sentence. Then continue the story. [STATE:exploration]`,
+      'exploration', null
+    )
+    await refreshPlayerState(campaign.id)
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  if (phase === PHASE.TITLE) {
-    return <TitleScreen onStart={() => setPhase(PHASE.CREATION)} />
-  }
 
-  if (phase === PHASE.CREATION) {
-    return (
-      <>
-        {error && (
-          <div style={{
-            position: 'fixed', top: '1rem', left: '50%', transform: 'translateX(-50%)',
-            background: '#9b2535', color: '#fff', padding: '.75rem 1.5rem',
-            borderRadius: '3px', fontFamily: 'Cinzel, serif', fontSize: '.8rem',
-            zIndex: 200, letterSpacing: '.1em'
-          }}>
-            {error}
-          </div>
-        )}
-        <CharacterCreation onComplete={handleCharacterComplete} />
-      </>
-    )
-  }
+  if (phase === PHASE.TITLE) return (
+    <TitleScreen onStart={() => setPhase(PHASE.CREATION)} onResume={handleResume} />
+  )
 
-  if (phase === PHASE.LOADING) {
-    return (
-      <div style={{
-        minHeight: '100vh', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        background: '#0b0c12', color: '#e8c46a',
-        fontFamily: 'Cinzel, serif', letterSpacing: '.15em', fontSize: '.9rem'
-      }}>
-        <div style={{ marginBottom: '1.5rem', fontSize: '2rem' }}>⚔</div>
-        <div>Weaving your world…</div>
-        <div style={{ marginTop: '.5rem', fontSize: '.72rem', color: '#6e7492' }}>
-          Calling upon the ancient magics
+  if (phase === PHASE.CREATION) return (
+    <>
+      {error && (
+        <div style={{ position: 'fixed', top: '1rem', left: '50%', transform: 'translateX(-50%)', background: '#9b2535', color: '#fff', padding: '.75rem 1.5rem', borderRadius: '3px', fontFamily: 'Cinzel, serif', fontSize: '.8rem', zIndex: 200, letterSpacing: '.1em' }}>
+          {error}
         </div>
-      </div>
-    )
-  }
+      )}
+      <CharacterCreation onComplete={handleCharacterComplete} />
+    </>
+  )
 
-  // GAME phase
+  if (phase === PHASE.LOADING || phase === PHASE.RESUMING) return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0b0c12', color: '#e8c46a', fontFamily: 'Cinzel, serif', letterSpacing: '.15em', fontSize: '.9rem' }}>
+      <div style={{ marginBottom: '1.5rem', fontSize: '2rem' }}>⚔</div>
+      <div>{phase === PHASE.RESUMING ? 'Resuming your adventure…' : 'Weaving your world…'}</div>
+      <div style={{ marginTop: '.5rem', fontSize: '.72rem', color: '#6e7492' }}>
+        {phase === PHASE.RESUMING ? 'Restoring your campaign' : 'Calling upon the ancient magics'}
+      </div>
+    </div>
+  )
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar
@@ -238,6 +508,13 @@ export default function App() {
         campaignTime={campaignTime}
         isOpen={sidebarOpen}
         onNewAdventure={handleNewAdventure}
+        levelUpAvailable={levelUpAvailable}
+        onLevelUp={handleLevelUpClick}
+        onInventory={() => setShowInventory(true)}
+        onAbilities={() => setShowAbilities(true)}
+        onSpells={() => setShowSpells(true)}
+        onNotes={() => setShowNotes(true)}
+        knownSpells={knownSpells}
       />
 
       <GameScreen
@@ -252,11 +529,76 @@ export default function App() {
       />
 
       {pendingRoll && (
-        <DiceRollOverlay
-          rollRequest={pendingRoll}
-          onComplete={handleRollComplete}
+        <DiceRollOverlay rollRequest={pendingRoll} onComplete={handleRollComplete} />
+      )}
+
+      {showLevelUp && levelUpResult && (
+        <LevelUpModal
+          campaignId={campaign.id}
+          player={{ ...player, known_maneuvers: knownManeuvers }}
+          levelUpResult={levelUpResult}
+          onComplete={handleLevelUpComplete}
+          onClose={() => setShowLevelUp(false)}
         />
       )}
+
+      {showCombat && (
+        <CombatModal
+          campaignId={campaign.id}
+          player={player}
+          abilities={abilities}
+          initiativeBonus={combatInitiativeBonus}
+          hasAdvantage={false}
+          onCombatEnd={handleCombatEnd}
+          onPlayerUpdate={() => refreshPlayerState(campaign.id)}
+          initialKnownSpells={knownSpells}
+        />
+      )}
+
+      {showShop && (
+        <ShopModal
+          campaignId={campaign.id}
+          player={player}
+          items={items}
+          onShopClose={handleShopClose}
+          onPlayerUpdate={() => refreshPlayerState(campaign.id)}
+        />
+      )}
+
+      {showInventory && (
+        <InventoryModal
+          campaignId={campaign.id}
+          player={player}
+          items={items}
+          onClose={() => setShowInventory(false)}
+          onUpdate={() => refreshPlayerState(campaign.id)}
+        />
+      )}
+
+      {showAbilities && (
+        <AbilitiesModal
+          player={player}
+          abilities={abilities}
+          onClose={() => setShowAbilities(false)}
+        />
+      )}
+
+      {showSpells && (
+        <SpellsModal
+          campaignId={campaign.id}
+          player={player}
+          onClose={() => setShowSpells(false)}
+          onCastInCombat={showCombat ? () => { } : null}
+        />
+      )}
+
+      {showNotes && (
+        <NotesModal
+          campaignId={campaign.id}
+          onClose={() => setShowNotes(false)}
+        />
+      )}
+
     </div>
   )
 }
